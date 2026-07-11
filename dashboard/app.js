@@ -167,8 +167,9 @@ async function reloadEvents() {
       const iv = Number(ev.max_intensity || 0);
       const i = iv.toFixed(1);
       const scale = ev.scale || intensityScale(iv);
+      const dur = ev.last_us ? ((Number(ev.last_us) - Number(ev.onset_us)) / 1e6).toFixed(0) + 's' : '—';
       tr.innerHTML = `<td>${t}</td><td><span class="badge">${scale}</span></td>`
-        + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td>`
+        + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
       tr.onclick = () => { location.hash = 'event/' + ev.event_id; };
       tbody.appendChild(tr);

@@ -58,17 +58,15 @@ def _process(key: str):
 
 def _confirm(device_id: int, det: detect_core.Detection):
     """持続的な揺れ = クラウド確定報。波形保存 + DynamoDB + 通知。"""
-    eid = events.event_id(device_id, det.onset_us)
-    existing = events.get_event(eid)
-    already_confirmed = bool(existing and existing.get("cloud_confirmed"))
-
+    # 先にセッションへ記録して確定した event_id を得る（マージ後のidを使う）。
+    eid, newly_confirmed = events.record_cloud_detection(
+        device_id, det.onset_us, det.max_intensity, det.peak_gal)
     prefix = f"{s3util.EVENTS_PREFIX}/{eid}/"
     _copy_event_waveforms(eid, det.onset_us)
     _put_meta(eid, device_id, det.onset_us, det.max_intensity, det.peak_gal, det.a0)
-    events.record_cloud_detection(device_id, det.onset_us, det.max_intensity,
-                                  det.peak_gal, prefix)
+    events.set_waveform_prefix(eid, prefix)
 
-    if not already_confirmed:
+    if newly_confirmed:
         scale = intensity_scale(det.max_intensity)
         notify.from_env().notify(
             f"地震を検知（確定報） 震度{scale}",

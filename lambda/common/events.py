@@ -1,4 +1,10 @@
-"""イベントの DynamoDB 管理。デバイス速報とクラウド確定報を同一イベントに突合する。"""
+"""イベントの DynamoDB 管理。
+
+デバイス速報とクラウド確定報を同一イベントに突合し、さらに**セッション方式**で
+連続する揺れを1イベントにマージする。新しい onset が直近イベントの活動から
+MERGE_GAP_US 以内なら、新規作成せずそのイベントを延長する（物理的な onset 時刻で
+判定するので、後から走る detect も同じセッションに合流する）。
+"""
 
 from __future__ import annotations
 
@@ -7,9 +13,10 @@ from decimal import Decimal
 
 import boto3
 
-# 揺れの発生時刻をこの粒度[us]でバケット化し event_id にする。
-# 同じ揺れのデバイス速報とクラウド確定報が同じ event_id に落ちて突合される。
+# 新規セッションの event_id を作る際の時刻粒度[us]（読みやすさのため）。
 BUCKET_US = 30_000_000  # 30秒
+# 直近イベントの活動終端から onset がこの時間[us]以内なら同一セッションに延長する。
+MERGE_GAP_US = 60_000_000  # 60秒
 
 _table_cache = None
 
@@ -22,37 +29,45 @@ def _table():
 
 
 def event_id(device_id: int, onset_us: int) -> str:
-    bucket = onset_us // BUCKET_US
-    return f"{device_id:04d}-{bucket:d}"
+    """新規セッションの event_id（デバイス-30秒バケット）。"""
+    return f"{device_id:04d}-{onset_us // BUCKET_US:d}"
 
 
-def record_device_prompt(device_id, onset_us, intensity, peak_gal):
-    """デバイス速報を記録。(event_id, is_new) を返す。"""
-    eid = event_id(device_id, onset_us)
-    return eid, _upsert(eid, device_id, onset_us, intensity, peak_gal, device_prompt=True)
+def _latest_event(device_id: int) -> dict | None:
+    """このデバイスの最新イベント（last_us が最大のもの）。単一デバイス想定の簡易 scan。"""
+    items = [i for i in _table().scan(Limit=1000).get("Items", [])
+             if int(i.get("device_id", -1)) == device_id]
+    if not items:
+        return None
+    return max(items, key=lambda x: int(x.get("last_us", x.get("onset_us", 0))))
 
 
-def record_cloud_detection(device_id, onset_us, intensity, peak_gal, waveform_prefix):
-    """クラウド確定報を記録。(event_id, is_new) を返す。"""
-    eid = event_id(device_id, onset_us)
-    return eid, _upsert(eid, device_id, onset_us, intensity, peak_gal,
-                        cloud_confirmed=True, waveform_prefix=waveform_prefix)
+def _assign(device_id: int, onset_us: int) -> str:
+    """onset を既存セッションに合流させるか、新規セッションの id を返す。"""
+    latest = _latest_event(device_id)
+    if latest:
+        o = int(latest.get("onset_us", 0))
+        last = int(latest.get("last_us", o))
+        if o - MERGE_GAP_US <= onset_us <= last + MERGE_GAP_US:
+            return latest["event_id"]  # 同一セッションに延長
+    return event_id(device_id, onset_us)  # 新規セッション
 
 
-def _upsert(eid, device_id, onset_us, intensity, peak_gal,
-            device_prompt=False, cloud_confirmed=False, waveform_prefix=None) -> bool:
-    """イベントを作成/更新（get→merge→put）。震度・ピークは最大値を保持。新規なら True。
+def _record(device_id, onset_us, intensity, peak_gal,
+            device_prompt=False, cloud_confirmed=False, waveform_prefix=None):
+    """イベントを作成/延長（get→merge→put）。(event_id, 直前のitem or None) を返す。
 
-    単一デバイス・30秒バケット運用では並行更新はまず起きないため、
-    条件付き更新でなく素直な read-modify-write にしている。
+    単一デバイス・低頻度運用では並行更新はまず起きないため、条件付き更新でなく
+    素直な read-modify-write にしている。
     """
+    eid = _assign(device_id, onset_us)
     tbl = _table()
-    existing = tbl.get_item(Key={"event_id": eid}).get("Item")
-    is_new = existing is None
+    prev = tbl.get_item(Key={"event_id": eid}).get("Item")
 
-    item = existing or {
+    item = prev or {
         "event_id": eid,
-        "onset_us": onset_us,
+        "onset_us": Decimal(str(onset_us)),
+        "last_us": Decimal(str(onset_us)),
         "device_id": device_id,
         "max_intensity": Decimal("0"),
         "peak_gal": Decimal("0"),
@@ -60,6 +75,9 @@ def _upsert(eid, device_id, onset_us, intensity, peak_gal,
         "cloud_confirmed": False,
     }
     item["device_id"] = device_id
+    # onset はセッションの最初、last_us は最新の活動時刻
+    item["onset_us"] = min(Decimal(str(onset_us)), Decimal(str(item.get("onset_us", onset_us))))
+    item["last_us"] = max(Decimal(str(onset_us)), Decimal(str(item.get("last_us", onset_us))))
     item["max_intensity"] = max(Decimal(str(intensity)), Decimal(str(item.get("max_intensity", 0))))
     item["peak_gal"] = max(Decimal(str(peak_gal)), Decimal(str(item.get("peak_gal", 0))))
     if device_prompt:
@@ -68,10 +86,23 @@ def _upsert(eid, device_id, onset_us, intensity, peak_gal,
         item["cloud_confirmed"] = True
     if waveform_prefix is not None:
         item["waveform_prefix"] = waveform_prefix
-    item.setdefault("onset_us", onset_us)
 
     tbl.put_item(Item=item)
-    return is_new
+    return eid, prev
+
+
+def record_device_prompt(device_id, onset_us, intensity, peak_gal):
+    """デバイス速報を記録。(event_id, is_new_session) を返す。"""
+    eid, prev = _record(device_id, onset_us, intensity, peak_gal, device_prompt=True)
+    return eid, prev is None
+
+
+def record_cloud_detection(device_id, onset_us, intensity, peak_gal, waveform_prefix=None):
+    """クラウド確定報を記録。(event_id, newly_confirmed) を返す。"""
+    eid, prev = _record(device_id, onset_us, intensity, peak_gal,
+                        cloud_confirmed=True, waveform_prefix=waveform_prefix)
+    newly_confirmed = not (prev and prev.get("cloud_confirmed"))
+    return eid, newly_confirmed
 
 
 def get_event(eid: str) -> dict | None:
