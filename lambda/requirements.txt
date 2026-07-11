@@ -1,0 +1,3 @@
+# Lambda ランタイムに boto3 は同梱されるので numpy のみ同梱すればよい。
+# 計測震度は FFT版(jismo, numpyのみ)を使うため scipy は不要。
+numpy>=1.24

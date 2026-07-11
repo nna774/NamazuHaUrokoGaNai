@@ -1,0 +1,124 @@
+"""api Lambda: ダッシュボード向けの読み取りAPI（認証なし・CORS許可）。
+
+Lambda Function URL (payload v2.0)。
+- GET /recent?minutes=5&device=1  直近n分の波形（大きい範囲はmin/maxエンベロープに間引き）
+- GET /events                     イベント一覧
+- GET /event?id=<event_id>        イベントのメタ + 波形
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+
+import boto3
+import numpy as np
+
+from common import events, s3util, store, wire
+
+s3 = boto3.client("s3")
+BUCKET = os.environ["NAMZ_BUCKET"]
+
+MAX_POINTS = 3000
+CORS = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, OPTIONS",
+    "content-type": "application/json",
+}
+
+
+def _json(code: int, obj) -> dict:
+    return {"statusCode": code, "headers": CORS, "body": json.dumps(obj, default=_default)}
+
+
+def _default(o):
+    from decimal import Decimal
+    if isinstance(o, Decimal):
+        return float(o)
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, (np.floating,)):
+        return float(o)
+    raise TypeError(type(o))
+
+
+def handler(event, context):
+    method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    if method == "OPTIONS":
+        return {"statusCode": 204, "headers": CORS, "body": ""}
+    path = event.get("rawPath", "/").rstrip("/")
+    q = event.get("queryStringParameters") or {}
+    try:
+        if path.endswith("/recent"):
+            return _recent(q)
+        if path.endswith("/events"):
+            return _events()
+        if path.endswith("/event"):
+            return _event(q)
+        return _json(404, {"error": "not found"})
+    except Exception as e:  # noqa: BLE001
+        print(f"api error: {e!r}")
+        return _json(500, {"error": str(e)})
+
+
+def _recent(q):
+    minutes = float(q.get("minutes", "5"))
+    end_us = int(time.time() * 1e6)
+    gal, win_start, fs = store.load_window(s3, BUCKET, end_us, minutes * 60)
+    return _json(200, _waveform_payload(gal, win_start, fs))
+
+
+def _events():
+    return _json(200, {"events": events.recent_events(50)})
+
+
+def _event(q):
+    eid = q.get("id")
+    if not eid:
+        return _json(400, {"error": "missing id"})
+    # メタ
+    try:
+        obj = s3.get_object(Bucket=BUCKET, Key=s3util.event_meta_key(eid))
+        meta = json.loads(obj["Body"].read())
+    except s3.exceptions.NoSuchKey:
+        return _json(404, {"error": "event not found"})
+    # 波形（events/<id>/*.bin を連結）
+    parts, win_start, fs = [], None, 100.0
+    resp = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"{s3util.EVENTS_PREFIX}/{eid}/")
+    keys = sorted(it["Key"] for it in resp.get("Contents", []) if it["Key"].endswith(".bin"))
+    for key in keys:
+        b = wire.parse(s3.get_object(Bucket=BUCKET, Key=key)["Body"].read())
+        if win_start is None:
+            win_start = b.meta.batch_start_us
+        fs = b.meta.sample_rate_hz
+        parts.append(b.gal)
+    gal = np.concatenate(parts, axis=0) if parts else np.empty((0, 3))
+    payload = _waveform_payload(gal, win_start or meta.get("onset_us", 0), fs)
+    return _json(200, {"meta": meta, "waveform": payload})
+
+
+def _waveform_payload(gal: np.ndarray, start_us: int, fs: float) -> dict:
+    n = gal.shape[0]
+    if n == 0:
+        return {"mode": "raw", "fs": fs, "start_us": start_us, "n": 0,
+                "x": [], "y": [], "z": []}
+    if n <= MAX_POINTS:
+        return {
+            "mode": "raw", "fs": fs, "start_us": int(start_us), "n": n,
+            "x": _round(gal[:, 0]), "y": _round(gal[:, 1]), "z": _round(gal[:, 2]),
+        }
+    # min/max エンベロープに間引き
+    bucket = int(np.ceil(n / MAX_POINTS))
+    m = (n // bucket) * bucket
+    g = gal[:m].reshape(-1, bucket, 3)
+    out = {"mode": "envelope", "fs": fs, "start_us": int(start_us),
+           "n": g.shape[0], "bucket": bucket}
+    for i, ax in enumerate("xyz"):
+        out[f"{ax}_min"] = _round(g[:, :, i].min(axis=1))
+        out[f"{ax}_max"] = _round(g[:, :, i].max(axis=1))
+    return out
+
+
+def _round(arr: np.ndarray) -> list:
+    return [round(float(v), 4) for v in arr]
