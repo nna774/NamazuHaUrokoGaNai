@@ -1,0 +1,41 @@
+# PlatformIO
+firmware/.pio/
+firmware/.pioenvs/
+firmware/.piolibdeps/
+firmware/.vscode/
+firmware/**/secrets.h
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+!terraform/*.tfvars.example
+terraform/.terraform.lock.hcl
+terraform/builds/
+
+# Lambda build artifacts
+lambda/**/build/
+lambda/**/*.zip
+
+# Node / dashboard
+dashboard/node_modules/
+dashboard/dist/
+
+# Captured data / scratch
+*.csv
+!tools/**/sample_*.csv
+data/
+*.bin
+!firmware/**/*.bin.example
+
+# OS
+.DS_Store
