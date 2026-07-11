@@ -16,6 +16,7 @@ import boto3
 import numpy as np
 
 from common import events, s3util, store, wire
+from jismo.rounding import intensity_scale
 
 s3 = boto3.client("s3")
 BUCKET = os.environ["NAMZ_BUCKET"]
@@ -75,12 +76,27 @@ def _event(q):
     eid = q.get("id")
     if not eid:
         return _json(400, {"error": "missing id"})
-    # メタ
+    # meta.json があれば波形付き（クラウド確定済イベント）。
     try:
         obj = s3.get_object(Bucket=BUCKET, Key=s3util.event_meta_key(eid))
         meta = json.loads(obj["Body"].read())
     except s3.exceptions.NoSuchKey:
-        return _json(404, {"error": "event not found"})
+        # 速報のみのイベントは波形コピーが無い。DynamoDBの情報だけ返す。
+        item = events.get_event(eid)
+        if item is None:
+            return _json(404, {"error": "event not found"})
+        intensity = float(item.get("max_intensity", 0))
+        meta = {
+            "event_id": eid,
+            "onset_us": int(item.get("onset_us", 0)),
+            "max_intensity": intensity,
+            "scale": intensity_scale(intensity),
+            "peak_gal": float(item.get("peak_gal", 0)),
+            "device_prompt": bool(item.get("device_prompt")),
+            "cloud_confirmed": bool(item.get("cloud_confirmed")),
+            "note": "速報のみ（波形の永久保存なし）。raw/が残っていればライブ表示で遡れる。",
+        }
+        return _json(200, {"meta": meta, "waveform": _waveform_payload(np.empty((0, 3)), meta["onset_us"], 100.0)})
     # 波形（events/<id>/*.bin を連結）
     parts, win_start, fs = [], None, 100.0
     resp = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"{s3util.EVENTS_PREFIX}/{eid}/")

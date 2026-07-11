@@ -19,8 +19,22 @@ async function apiGet(path) {
   return res.json();
 }
 
+// 計測震度 → 気象庁の震度階級（jismo/rounding.py と一致）
+function intensityScale(i) {
+  if (i < 0.5) return '0';
+  if (i < 1.5) return '1';
+  if (i < 2.5) return '2';
+  if (i < 3.5) return '3';
+  if (i < 4.5) return '4';
+  if (i < 5.0) return '5弱';
+  if (i < 5.5) return '5強';
+  if (i < 6.0) return '6弱';
+  if (i < 6.5) return '6強';
+  return '7';
+}
+
 // --- Canvas 波形描画 ---
-const COLORS = { x: '#c0392b', y: '#27ae60', z: '#2980b9' };
+const COLORS = { x: '#e74c3c', y: '#2ecc71', z: '#3498db' };
 
 function fitCanvas(cv) {
   const dpr = window.devicePixelRatio || 1;
@@ -82,14 +96,14 @@ function drawWaveform(cv, wf) {
 
   for (const a of axes) {
     ctx.strokeStyle = COLORS[a];
-    ctx.lineWidth = 1;
     if (wf.mode === 'raw') {
+      ctx.lineWidth = 1.6;
       ctx.beginPath();
       series[a].v.forEach((v, i) => { const x = X(i), y = Y(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.stroke();
     } else {
-      // エンベロープ: min/max を塗る
-      ctx.globalAlpha = 0.5;
+      // エンベロープ: min/max を塗り、輪郭線も引いて見やすくする
+      ctx.globalAlpha = 0.65;
       ctx.beginPath();
       series[a].max.forEach((v, i) => { const x = X(i), y = Y(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       for (let i = n - 1; i >= 0; i--) { ctx.lineTo(X(i), Y(series[a].min[i])); }
@@ -99,6 +113,13 @@ function drawWaveform(cv, wf) {
       ctx.globalAlpha = 1;
     }
   }
+
+  // 軸の凡例
+  ctx.font = '12px system-ui';
+  axes.forEach((a, i) => {
+    ctx.fillStyle = COLORS[a];
+    ctx.fillText(a.toUpperCase(), w - pad - 60 + i * 20, pad + 12);
+  });
 
   // 時刻ラベル
   if (wf.start_us) {
@@ -143,8 +164,9 @@ async function reloadEvents() {
       const tr = document.createElement('tr');
       tr.dataset.id = ev.event_id;
       const t = new Date(Number(ev.onset_us) / 1000).toLocaleString('ja-JP');
-      const i = Number(ev.max_intensity || 0).toFixed(1);
-      const scale = ev.scale || '';
+      const iv = Number(ev.max_intensity || 0);
+      const i = iv.toFixed(1);
+      const scale = ev.scale || intensityScale(iv);
       tr.innerHTML = `<td>${t}</td><td><span class="badge">${scale}</span></td>`
         + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
