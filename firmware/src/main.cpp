@@ -84,6 +84,10 @@ static void samplingTask(void*) {
                   (int)raw.x, (int)raw.y, (int)raw.z);
     continue;
 #else
+    // NTP同期前はタイムスタンプが無効(1970年)になるのでサンプルを捨てる。
+    // 起動直後の数秒ぶんを失うだけで、24/365運用では無視できる。
+    if (!timesync::isSynced()) continue;
+
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
       cur = new Batch(kBatchSamples);
