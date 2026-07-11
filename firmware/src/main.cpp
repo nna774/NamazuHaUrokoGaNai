@@ -183,9 +183,13 @@ void setup() {
     Serial.println("[sensor] IIS3DHHC ready");
   }
 
-  // watchdog: 10秒
+  // watchdog: 10秒。WDT APIは ESP-IDF のメジャーバージョンで異なる。
+#if ESP_IDF_VERSION_MAJOR >= 5
   esp_task_wdt_config_t wdt = {.timeout_ms = 10000, .idle_core_mask = 0, .trigger_panic = true};
   esp_task_wdt_reconfigure(&wdt);
+#else
+  esp_task_wdt_init(10, true);  // 旧API: timeout[秒], panic
+#endif
 
 #ifndef NAMZ_SENSOR_TEST
   gBatchQueue = xQueueCreate(4, sizeof(Batch*));

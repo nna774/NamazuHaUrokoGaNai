@@ -7,6 +7,7 @@
 //   - SPI モード3 (CPOL=1, CPHA=1)、最大 ~10MHz
 //   - 読み出しは MSB=1 でアドレス、IF_ADD_INC で連続読み
 
+#include <Arduino.h>
 #include <SPI.h>
 
 #include "AccelSensor.h"
