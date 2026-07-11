@@ -29,6 +29,7 @@ lambda/**/*.zip
 # Node / dashboard
 dashboard/node_modules/
 dashboard/dist/
+dashboard/config.js
 
 # Captured data / scratch
 *.csv
