@@ -78,6 +78,15 @@ def get_event(eid: str) -> dict | None:
     return _table().get_item(Key={"event_id": eid}).get("Item")
 
 
+def set_waveform_prefix(eid: str, prefix: str) -> None:
+    """波形を events/ へ保存したことを記録（フラグは変えない）。"""
+    _table().update_item(
+        Key={"event_id": eid},
+        UpdateExpression="SET waveform_prefix = :wp",
+        ExpressionAttributeValues={":wp": prefix},
+    )
+
+
 def recent_events(limit: int = 50) -> list[dict]:
     """最近のイベントを新しい順で返す（単一デバイス想定の簡易 scan）。"""
     items = _table().scan(Limit=1000).get("Items", [])

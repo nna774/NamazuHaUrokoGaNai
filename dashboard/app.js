@@ -170,7 +170,7 @@ async function reloadEvents() {
       tr.innerHTML = `<td>${t}</td><td><span class="badge">${scale}</span></td>`
         + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
-      tr.onclick = () => showEvent(ev.event_id);
+      tr.onclick = () => { location.hash = 'event/' + ev.event_id; };
       tbody.appendChild(tr);
     }
     status.textContent = data.events.length + ' 件';
@@ -194,20 +194,37 @@ async function showEvent(id) {
   }
 }
 
-// --- タブ・初期化 ---
-function initTabs() {
-  const tabs = { live: document.getElementById('tab-live'), events: document.getElementById('tab-events') };
-  function activate(name) {
-    for (const k in tabs) {
-      tabs[k].classList.toggle('active', k === name);
-      document.getElementById(k).classList.toggle('active', k === name);
-    }
-    if (name === 'live') { refreshLive(); scheduleLive(); }
-    else if (name === 'events') reloadEvents();
+// --- ハッシュルーティング ---
+// #live（既定） / #events / #event/<id> を location.hash に持たせ、
+// リロードや共有URLで状態が復元されるようにする。
+function showView(name) {
+  const tabs = { live: 'tab-live', events: 'tab-events' };
+  for (const k in tabs) {
+    document.getElementById(tabs[k]).classList.toggle('active', k === name);
+    document.getElementById(k).classList.toggle('active', k === name);
   }
-  tabs.live.onclick = () => activate('live');
-  tabs.events.onclick = () => activate('events');
+  if (name !== 'live' && liveTimer) { clearInterval(liveTimer); liveTimer = null; }
 }
+
+function route() {
+  const h = location.hash.replace(/^#/, '');
+  if (h.startsWith('event/')) {
+    showView('events');
+    reloadEvents();
+    showEvent(decodeURIComponent(h.slice('event/'.length)));
+  } else if (h === 'events') {
+    showView('events');
+    reloadEvents();
+    document.getElementById('event-title').style.display = 'none';
+    document.getElementById('event-canvas').style.display = 'none';
+  } else {
+    showView('live');
+    refreshLive();
+    scheduleLive();
+  }
+}
+
+window.addEventListener('hashchange', route);
 
 window.addEventListener('load', () => {
   const apiInput = document.getElementById('api');
@@ -216,7 +233,7 @@ window.addEventListener('load', () => {
   document.getElementById('minutes').onchange = refreshLive;
   document.getElementById('autorefresh').onchange = scheduleLive;
   document.getElementById('reload-events').onclick = reloadEvents;
-  initTabs();
-  refreshLive();
-  scheduleLive();
+  document.getElementById('tab-live').onclick = () => { location.hash = 'live'; };
+  document.getElementById('tab-events').onclick = () => { location.hash = 'events'; };
+  route();
 });

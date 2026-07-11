@@ -47,22 +47,24 @@ def _process(key: str):
     end_us = b.meta.batch_start_us + batch_len_us
 
     gal, win_start, fs = store.load_window(s3, BUCKET, end_us, WINDOW_SECONDS)
-    if gal.shape[0] == 0:
-        return
+    if gal.shape[0] > 0:
+        det = detect_core.analyze(gal, fs, win_start, THRESHOLD, HOLD_SECONDS)
+        if det is not None:
+            _confirm(b.meta.device_id, det)
 
-    det = detect_core.analyze(gal, fs, win_start, THRESHOLD, HOLD_SECONDS)
-    if det is None:
-        return
+    # 確定検知の有無に関わらず、速報イベントの波形も永久保存する。
+    _preserve_prompt_waveforms(b.meta.batch_start_us)
 
-    device_id = b.meta.device_id
+
+def _confirm(device_id: int, det: detect_core.Detection):
+    """持続的な揺れ = クラウド確定報。波形保存 + DynamoDB + 通知。"""
     eid = events.event_id(device_id, det.onset_us)
     existing = events.get_event(eid)
     already_confirmed = bool(existing and existing.get("cloud_confirmed"))
 
     prefix = f"{s3util.EVENTS_PREFIX}/{eid}/"
     _copy_event_waveforms(eid, det.onset_us)
-    _write_event_meta(eid, device_id, det)
-
+    _put_meta(eid, device_id, det.onset_us, det.max_intensity, det.peak_gal, det.a0)
     events.record_cloud_detection(device_id, det.onset_us, det.max_intensity,
                                   det.peak_gal, prefix)
 
@@ -71,15 +73,38 @@ def _process(key: str):
         notify.from_env().notify(
             f"地震を検知（確定報） 震度{scale}",
             f"クラウド解析で計測震度 *{det.max_intensity:.1f}*（震度{scale}）を確定。",
-            {"ピーク加速度": f"{det.peak_gal:.2f} gal",
-             "波形": prefix, "event": eid},
+            {"ピーク加速度": f"{det.peak_gal:.2f} gal", "波形": prefix, "event": eid},
         )
 
 
-def _copy_event_waveforms(eid: str, onset_us: int):
-    """onset 周辺の raw バッチを events/<id>/ へコピー（永久保存）。"""
+def _preserve_prompt_waveforms(now_start_us: int):
+    """デバイス速報で拾われたイベントの波形も events/ へ永久保存する。
+
+    後続(POST_SECONDS)ぶんのバッチが出揃った頃に一度だけコピーする。
+    確定検知(cloud_confirmed)とは独立で、フラグは変えない。
+    """
+    for item in events.recent_events(200):
+        if not item.get("device_prompt") or item.get("waveform_prefix"):
+            continue
+        onset = int(item.get("onset_us", 0))
+        if now_start_us < onset + int(POST_SECONDS * 1e6):
+            continue  # まだ後続バッチが揃っていない
+        if onset < now_start_us - 600_000_000:
+            continue  # 古すぎ(raw期限切れの恐れ) → 諦める
+        eid = item["event_id"]
+        device_id = int(item.get("device_id", 0))
+        if _copy_event_waveforms(eid, onset) == 0:
+            continue
+        _put_meta(eid, device_id, onset,
+                  float(item.get("max_intensity", 0)), float(item.get("peak_gal", 0)))
+        events.set_waveform_prefix(eid, f"{s3util.EVENTS_PREFIX}/{eid}/")
+
+
+def _copy_event_waveforms(eid: str, onset_us: int) -> int:
+    """onset 周辺の raw バッチを events/<id>/ へコピー（永久保存）。コピー数を返す。"""
     start_us = int(onset_us - PRE_SECONDS * 1e6)
     end_us = int(onset_us + POST_SECONDS * 1e6)
+    copied = 0
     for key in store.list_raw_keys_in_range(s3, BUCKET, start_us, end_us):
         # ファイル名末尾の startus で範囲判定
         try:
@@ -90,18 +115,22 @@ def _copy_event_waveforms(eid: str, onset_us: int):
             continue
         dst = s3util.event_batch_key(eid, b_start)
         s3.copy_object(Bucket=BUCKET, CopySource={"Bucket": BUCKET, "Key": key}, Key=dst)
+        copied += 1
+    return copied
 
 
-def _write_event_meta(eid: str, device_id: int, det: detect_core.Detection):
+def _put_meta(eid: str, device_id: int, onset_us: int,
+              max_intensity: float, peak_gal: float, a0: float | None = None):
     meta = {
         "event_id": eid,
         "device_id": device_id,
-        "onset_us": det.onset_us,
-        "max_intensity": det.max_intensity,
-        "scale": intensity_scale(det.max_intensity),
-        "peak_gal": det.peak_gal,
-        "a0_gal": det.a0,
+        "onset_us": onset_us,
+        "max_intensity": max_intensity,
+        "scale": intensity_scale(max_intensity),
+        "peak_gal": peak_gal,
     }
+    if a0 is not None:
+        meta["a0_gal"] = a0
     s3.put_object(Bucket=BUCKET, Key=s3util.event_meta_key(eid),
                   Body=json.dumps(meta, ensure_ascii=False).encode(),
                   ContentType="application/json")
