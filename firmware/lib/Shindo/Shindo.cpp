@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstring>
 
-Shindo::Shindo() : compPos_(0), compCount_(0), lastComposite_(0.0f) {
+Shindo::Shindo() : compPos_(0), compCount_(0), seen_(0), lastComposite_(0.0f) {
   std::memset(hist_, 0, sizeof(hist_));
   std::memset(histPos_, 0, sizeof(histPos_));
   std::memset(composite_, 0, sizeof(composite_));
@@ -31,9 +31,13 @@ float Shindo::push(float galX, float galY, float galZ) {
   float fz = firStep(2, galZ);
   float comp = std::sqrt(fx * fx + fy * fy + fz * fz);
 
-  composite_[compPos_] = comp;
-  if (++compPos_ >= kWindowSamples) compPos_ = 0;
-  if (compCount_ < kWindowSamples) ++compCount_;
+  // ウォームアップ中はフィルタ過渡なので移動窓に入れない。
+  ++seen_;
+  if (seen_ > kWarmupSamples) {
+    composite_[compPos_] = comp;
+    if (++compPos_ >= kWindowSamples) compPos_ = 0;
+    if (compCount_ < kWindowSamples) ++compCount_;
+  }
 
   lastComposite_ = comp;
   return comp;

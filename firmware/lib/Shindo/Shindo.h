@@ -26,7 +26,13 @@ class Shindo {
   // 直近のフィルタ後合成加速度ピーク[gal]（クールダウン管理などに）。
   float lastComposite() const { return lastComposite_; }
 
+  // 起動直後のフィルタ過渡が抜けたか（抜けるまで震度は0を返す）。
+  bool warmedUp() const { return seen_ > kWarmupSamples; }
+
  private:
+  // 段差応答は numtaps サンプルで通過しきる。それ+1秒ぶんを捨てる。
+  static constexpr int kWarmupSamples = kJmaFirNumTaps + kSampleRateHz;
+
   float firStep(int axis, float sample);
 
   // 各軸のFIR履歴（循環バッファ）
@@ -38,5 +44,6 @@ class Shindo {
   int compPos_;
   int compCount_;
 
+  long seen_;  // 投入サンプル総数（ウォームアップ判定用）
   float lastComposite_;
 };

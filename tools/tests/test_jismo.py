@@ -85,3 +85,25 @@ def test_fir_taps_finite():
     taps = design_fir(100.0)
     assert np.all(np.isfinite(taps))
     assert taps.size == DEFAULT_NUMTAPS
+
+
+def test_fir_dc_gain_is_zero():
+    # H(0)=sum(taps) が0でないと重力DCが漏れてストリーミング震度が跳ねる（実機で発覚）
+    taps = design_fir(100.0)
+    assert abs(taps.sum()) < 1e-9
+
+
+def test_realtime_rejects_gravity_dc():
+    # z軸に重力(約1g=980gal)を乗せた静置ノイズ。リアルタイム震度は有感(0.5)未満のはず。
+    rng = np.random.default_rng(0)
+    n = 8000
+    z = 980.0 + rng.standard_normal(n) * 0.2
+    x = rng.standard_normal(n) * 0.2
+    y = rng.standard_normal(n) * 0.2
+    rt = RealtimeIntensity(100.0)
+    max_i = 0.0
+    for i in range(n):
+        rt.push(x[i], y[i], z[i])
+        if i % 25 == 0:
+            max_i = max(max_i, rt.current_intensity())
+    assert max_i < 0.5, max_i

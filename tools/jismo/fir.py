@@ -30,6 +30,11 @@ def design_fir(fs: float, numtaps: int = DEFAULT_NUMTAPS) -> np.ndarray:
     # firwin2 は freq[0]=0, freq[-1]=nyq を要求。DC/nyq のgainは実質0。
     gain[0] = 0.0
     taps = firwin2(numtaps, grid, gain, fs=fs)
+    # DCゲインを厳密に0にする。firwin2 は 0.5Hz手前の急峻な立ち上がりを
+    # 有限tapで解像しきれず、H(0)=sum(taps) が僅かに残る。これを消さないと
+    # 重力(約1g=980gal)のDCが残留ゲインぶん漏れてストリーミング震度が跳ねる。
+    # 平均を引くのは通過域の応答をほぼ変えずにDC成分だけ除く標準的な手法。
+    taps = taps - taps.mean()
     return taps
 
 

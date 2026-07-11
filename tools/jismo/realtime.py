@@ -31,6 +31,11 @@ class RealtimeIntensity:
         self._buf = {ax: deque([0.0] * numtaps, maxlen=numtaps) for ax in "xyz"}
         # フィルタ後合成加速度の移動窓リングバッファ
         self._composite = deque(maxlen=self._win)
+        # ウォームアップ: フィルタ履歴がゼロ埋めの状態から実信号(重力DC等)が
+        # 入ると巨大な過渡応答が出る。この間の出力は合成リングに入れない。
+        # 段差応答は numtaps サンプルで通過しきるので、それ+1秒を捨てる。
+        self._warmup = numtaps + int(round(fs))
+        self._seen = 0
 
     def push(self, ax: float, ay: float, az: float) -> float:
         """1サンプル入れ、フィルタ後の合成加速度[gal]を返す。"""
@@ -41,8 +46,13 @@ class RealtimeIntensity:
             # FIR: taps を最新→過去の順に内積（taps は対称なので順序不問だが素直に）
             filt[name] = float(np.dot(self.taps[::-1], b))
         comp = (filt["x"] ** 2 + filt["y"] ** 2 + filt["z"] ** 2) ** 0.5
-        self._composite.append(comp)
+        self._seen += 1
+        if self._seen > self._warmup:
+            self._composite.append(comp)
         return comp
+
+    def warmed_up(self) -> bool:
+        return self._seen > self._warmup
 
     def ready(self) -> bool:
         """震度を出せるだけのデータ（0.3秒ぶん）が溜まったか。"""
