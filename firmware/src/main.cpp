@@ -172,7 +172,7 @@ static void uploaderTask(void*) {
 #endif
 
 void setup() {
-  Serial.begin(921600);
+  Serial.begin(kSerialBaud);
   delay(200);
   Serial.println("\n[boot] NamazuHaUrokoGaNai");
 

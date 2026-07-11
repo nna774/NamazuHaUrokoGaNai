@@ -3,6 +3,10 @@
 
 #include <cstdint>
 
+// --- シリアル ---
+// クローンボードのUSB-シリアル変換は921600だと化けるため115200にする。
+static constexpr uint32_t kSerialBaud = 115200;
+
 // --- サンプリング ---
 static constexpr uint32_t kSampleRateHz = 100;
 static constexpr uint32_t kSamplePeriodUs = 1000000UL / kSampleRateHz;  // 10ms

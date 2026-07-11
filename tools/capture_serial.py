@@ -27,7 +27,7 @@ MG_TO_GAL = 0.980665
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--port", required=True)
-    p.add_argument("--baud", type=int, default=921600)
+    p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--seconds", type=float, default=60.0)
     p.add_argument("--scale", type=float, default=IIS3DHHC_MG_PER_LSB,
                    help="mg/LSB。生LSB入力をgalへ換算する係数")
