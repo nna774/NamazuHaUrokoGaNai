@@ -195,8 +195,8 @@ async function showEvent(id) {
 }
 
 // --- ハッシュルーティング ---
-// #live（既定） / #events / #event/<id> を location.hash に持たせ、
-// リロードや共有URLで状態が復元されるようにする。
+// #live?m=<分>&auto=<0|1> / #events / #event/<id> を location.hash に持たせ、
+// リロードや共有URLで状態(タブ・表示範囲・自動更新)が復元されるようにする。
 function showView(name) {
   const tabs = { live: 'tab-live', events: 'tab-events' };
   for (const k in tabs) {
@@ -206,18 +206,38 @@ function showView(name) {
   if (name !== 'live' && liveTimer) { clearInterval(liveTimer); liveTimer = null; }
 }
 
+function parseHash() {
+  const raw = location.hash.replace(/^#/, '');
+  const [path, query] = raw.split('?');
+  const params = {};
+  if (query) for (const kv of query.split('&')) { const [k, v] = kv.split('='); params[k] = v; }
+  return { path, params };
+}
+
+// 現在のlive操作状態を表すハッシュ
+function liveHash() {
+  const m = document.getElementById('minutes').value;
+  const auto = document.getElementById('autorefresh').checked ? 1 : 0;
+  return `live?m=${m}&auto=${auto}`;
+}
+
 function route() {
-  const h = location.hash.replace(/^#/, '');
-  if (h.startsWith('event/')) {
+  const { path, params } = parseHash();
+  if (path.startsWith('event/')) {
     showView('events');
     reloadEvents();
-    showEvent(decodeURIComponent(h.slice('event/'.length)));
-  } else if (h === 'events') {
+    showEvent(decodeURIComponent(path.slice('event/'.length)));
+  } else if (path === 'events') {
     showView('events');
     reloadEvents();
     document.getElementById('event-title').style.display = 'none';
     document.getElementById('event-canvas').style.display = 'none';
   } else {
+    // live（既定）。URLの表示範囲・自動更新を操作子へ反映してから描画。
+    if (params.m) document.getElementById('minutes').value = params.m;
+    if (params.auto !== undefined) {
+      document.getElementById('autorefresh').checked = params.auto === '1';
+    }
     showView('live');
     refreshLive();
     scheduleLive();
@@ -230,10 +250,11 @@ window.addEventListener('load', () => {
   const apiInput = document.getElementById('api');
   apiInput.value = apiBase();
   document.getElementById('save-api').onclick = () => { setApi(apiInput.value); refreshLive(); };
-  document.getElementById('minutes').onchange = refreshLive;
-  document.getElementById('autorefresh').onchange = scheduleLive;
+  // 操作したらURLへ反映（hashchange→route が実際の描画を行う）
+  document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
+  document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
   document.getElementById('reload-events').onclick = reloadEvents;
-  document.getElementById('tab-live').onclick = () => { location.hash = 'live'; };
+  document.getElementById('tab-live').onclick = () => { location.hash = liveHash(); };
   document.getElementById('tab-events').onclick = () => { location.hash = 'events'; };
   route();
 });
