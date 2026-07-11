@@ -46,18 +46,22 @@ python ../tools/capture_serial.py --port /dev/tty.usbserial-XXXX --seconds 60 > 
 python ../tools/backtest.py cap.csv
 ```
 
-## 配線 (VSPI 既定)
+## 配線
+
+TTGO T-Display 系ボード（ESP32 + 内蔵ST7789 TFT）向けの割り当て。
+既定の 18/19/23/5 は基板上のTFTが使っておりヘッダに出ていないため使えない。
 
 | 信号 | ESP32 | IIS3DHHC |
 |------|-------|----------|
-| SCK  | GPIO18 | SPC |
-| MISO | GPIO19 | SDO |
-| MOSI | GPIO23 | SDI |
-| CS   | GPIO5  | CS |
+| SCK  | GPIO25 | SPC |
+| MISO | GPIO27 | SDO |
+| MOSI | GPIO26 | SDI |
+| CS   | GPIO33 | CS |
 | VDD  | 3V3    | VDD |
 | GND  | GND    | GND |
 
-ピンは `src/config.h` で変更可。
+ピンは `src/config.h` で変更可。無印 WROOM-32 DevKit なら 18/19/23/5 に戻してよい。
+（36/37/38/39 は入力専用なので SCK/MOSI/CS には使えない点に注意）
 
 ## 注意
 

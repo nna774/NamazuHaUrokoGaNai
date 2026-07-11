@@ -24,11 +24,15 @@ static constexpr float kAlertHoldSeconds = 2.0f;
 // 同一イベントの再通知を抑制するクールダウン。
 static constexpr float kAlertCooldownSeconds = 30.0f;
 
-// --- SPI ピン（ESP32 既定 VSPI）---
-static constexpr int kPinSck = 18;
-static constexpr int kPinMiso = 19;
-static constexpr int kPinMosi = 23;
-static constexpr int kPinCsIis3dhhc = 5;
+// --- SPI ピン ---
+// TTGO T-Display 系ボード向け。既定の 18/19/23/5 は基板上の TFT(ST7789) が
+// 内部で使っておりピンヘッダに出ていないため、出力可能な空きピンへ割り当てる。
+// (36/37/38/39 は入力専用なので SCK/MOSI/CS には使えない)
+// 無印 WROOM-32 DevKit を使う場合は 18/19/23/5 に戻してよい。
+static constexpr int kPinSck = 25;
+static constexpr int kPinMiso = 27;
+static constexpr int kPinMosi = 26;
+static constexpr int kPinCsIis3dhhc = 33;
 static constexpr uint32_t kSpiClockHz = 8000000;  // 8MHz
 
 // --- センサ種別（ワイヤフォーマットと一致させる）---
