@@ -43,21 +43,31 @@ function drawWaveform(cv, wf) {
     return;
   }
 
-  // 全軸の値域
+  // 全軸の値域。各軸の平均(=重力DC等)を引いて0中心で描く。
+  // そうしないと z の重力(約983gal)に縦軸が引っ張られ、揺れ(±数gal)が潰れる。
+  const mean = arr => arr.reduce((s, v) => s + v, 0) / (arr.length || 1);
   let lo = Infinity, hi = -Infinity;
   const axes = ['x', 'y', 'z'];
   const series = {};
   for (const a of axes) {
     if (wf.mode === 'raw') {
-      series[a] = { v: wf[a] };
-      for (const v of wf[a]) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      const dc = mean(wf[a]);
+      const v = wf[a].map(x => x - dc);
+      series[a] = { v };
+      for (const x of v) { if (x < lo) lo = x; if (x > hi) hi = x; }
     } else {
-      series[a] = { min: wf[a + '_min'], max: wf[a + '_max'] };
-      for (const v of wf[a + '_min']) if (v < lo) lo = v;
-      for (const v of wf[a + '_max']) if (v > hi) hi = v;
+      const dc = mean(wf[a + '_max'].concat(wf[a + '_min']));
+      const mn = wf[a + '_min'].map(x => x - dc);
+      const mx = wf[a + '_max'].map(x => x - dc);
+      series[a] = { min: mn, max: mx };
+      for (const x of mn) if (x < lo) lo = x;
+      for (const x of mx) if (x > hi) hi = x;
     }
   }
   if (lo === hi) { lo -= 1; hi += 1; }
+  // 上下に少し余白
+  const margin = (hi - lo) * 0.1 || 1;
+  lo -= margin; hi += margin;
   const yr = hi - lo;
   const n = wf.n;
   const X = i => pad + (n <= 1 ? 0 : (i / (n - 1)) * plotW);
