@@ -89,8 +89,8 @@ def _preserve_prompt_waveforms(now_start_us: int):
         onset = int(item.get("onset_us", 0))
         if now_start_us < onset + int(POST_SECONDS * 1e6):
             continue  # まだ後続バッチが揃っていない
-        if onset < now_start_us - 600_000_000:
-            continue  # 古すぎ(raw期限切れの恐れ) → 諦める
+        if onset < now_start_us - 3_600_000_000:
+            continue  # 1時間より古い未保存の速報は諦める(通常は数十秒で保存される)
         eid = item["event_id"]
         device_id = int(item.get("device_id", 0))
         if _copy_event_waveforms(eid, onset) == 0:
