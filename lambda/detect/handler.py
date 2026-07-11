@@ -71,7 +71,7 @@ def _confirm(device_id: int, det: detect_core.Detection):
         notify.from_env().notify(
             f"地震を検知（確定報） 震度{scale}",
             f"クラウド解析で計測震度 *{det.max_intensity:.1f}*（震度{scale}）を確定。",
-            {"ピーク加速度": f"{det.peak_gal:.2f} gal", "波形": prefix, "event": eid},
+            {"ピーク加速度": f"{det.peak_gal:.2f} gal", "イベント": notify.event_field(eid)},
         )
 
 

@@ -61,11 +61,11 @@ def _handle_alert(raw: bytes):
     intensity = float(msg["realtime_intensity"])
     peak = float(msg["peak_gal"])
 
-    _, is_new = events.record_device_prompt(device_id, onset_us, intensity, peak)
+    eid, is_new = events.record_device_prompt(device_id, onset_us, intensity, peak)
     if is_new:
         notify.from_env().notify(
             "地震かも（デバイス速報）",
             f"デバイスがリアルタイム計測震度 *{intensity:.1f}* を検知しました。",
-            {"ピーク加速度": f"{peak:.2f} gal", "device": str(device_id)},
+            {"ピーク加速度": f"{peak:.2f} gal", "イベント": notify.event_field(eid)},
         )
     return _resp(200, "alert ok")
