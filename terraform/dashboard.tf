@@ -1,6 +1,9 @@
 # ダッシュボード配信: 非公開S3 + CloudFront(OAC)。認証なしで誰でも閲覧可。
 resource "aws_s3_bucket" "dashboard" {
   bucket = local.dash_bucket
+  # 静的ファイルだけなので destroy 時に中身ごと消せるようにする（作り直しが多い）。
+  # データ用バケット(s3.tf)には付けない: 地震データを誤って一括削除しないため。
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_public_access_block" "dashboard" {

@@ -22,9 +22,12 @@ build_one() {
   cp "$LAMBDA/$fn/handler.py" "$stage/handler.py"
   cp -r "$LAMBDA/common" "$stage/common"
   cp -r "$JISMO" "$stage/jismo"
-  # numpy を同梱（Lambda実行環境向け manylinux）
+  # numpy を同梱（Lambda実行環境=Python3.12/x86_64 向け manylinux wheel を明示指定。
+  # ローカルのpythonが3.12以外でも正しい版を掴むよう --python-version等を渡す）
   "$PY" -m pip install --quiet \
-    --platform manylinux2014_x86_64 --only-binary=:all: \
+    --platform manylinux2014_x86_64 \
+    --implementation cp --python-version 3.12 --abi cp312 \
+    --only-binary=:all: \
     --target "$stage" numpy >/dev/null
   # __pycache__ 除去
   find "$stage" -name '__pycache__' -type d -prune -exec rm -rf {} +
