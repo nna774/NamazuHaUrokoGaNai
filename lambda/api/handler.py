@@ -21,15 +21,13 @@ s3 = boto3.client("s3")
 BUCKET = os.environ["NAMZ_BUCKET"]
 
 MAX_POINTS = 3000
-CORS = {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, OPTIONS",
-    "content-type": "application/json",
-}
+# CORSヘッダは Function URL の cors 設定に任せる（ここで access-control-* を
+# 返すと Function URL のぶんと二重になり、ブラウザが弾く）。ここは content-type のみ。
+HEADERS = {"content-type": "application/json"}
 
 
 def _json(code: int, obj) -> dict:
-    return {"statusCode": code, "headers": CORS, "body": json.dumps(obj, default=_default)}
+    return {"statusCode": code, "headers": HEADERS, "body": json.dumps(obj, default=_default)}
 
 
 def _default(o):
@@ -46,7 +44,7 @@ def _default(o):
 def handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     if method == "OPTIONS":
-        return {"statusCode": 204, "headers": CORS, "body": ""}
+        return {"statusCode": 204, "headers": {}, "body": ""}
     path = event.get("rawPath", "/").rstrip("/")
     q = event.get("queryStringParameters") or {}
     try:
