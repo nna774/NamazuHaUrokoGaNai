@@ -54,17 +54,32 @@ static void samplingTask(void*) {
   float holdSeconds = 0.0f;
   float cooldown = 0.0f;
 
+  // オーバーサンプリング用アキュムレータ
+  int32_t accX = 0, accY = 0, accZ = 0;
+  int oversampleCount = 0;
+
   for (;;) {
-    // タイマー通知待ち（1サンプル）
+    // タイマー通知待ち（読み周期 = 出力周期/kOversample）
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     esp_task_wdt_reset();
 
-    AccelSample raw;
-    if (!gSensor.read(raw)) continue;
+    AccelSample rd;
+    if (!gSensor.read(rd)) continue;
+    accX += rd.x;
+    accY += rd.y;
+    accZ += rd.z;
+    if (++oversampleCount < (int)kOversample) continue;  // まだ蓄積中
+
+    // kOversample 個たまった → 平均して1サンプル(100Hz)を出力
+    AccelSample raw{accX / (int32_t)kOversample,
+                    accY / (int32_t)kOversample,
+                    accZ / (int32_t)kOversample};
+    accX = accY = accZ = 0;
+    oversampleCount = 0;
     uint64_t ts = timesync::nowUs();
 
 #ifdef NAMZ_SENSOR_TEST
-    // Phase1: 生LSBをそのまま出す
+    // Phase1: 平均後の100Hzサンプル(LSB)を出す
     Serial.printf("%llu,%d,%d,%d\n", (unsigned long long)ts,
                   (int)raw.x, (int)raw.y, (int)raw.z);
     continue;
@@ -203,12 +218,12 @@ void setup() {
   // 測定タスクは Core1 に高優先度で固定
   xTaskCreatePinnedToCore(samplingTask, "sampling", 8192, nullptr, 10, &gSamplingTask, 1);
 
-  // 100Hz タイマー
+  // 読み取りタイマー（1kHz = 出力100Hz × オーバーサンプル10）
   const esp_timer_create_args_t targs = {
       .callback = &onSampleTimer, .arg = nullptr,
       .dispatch_method = ESP_TIMER_TASK, .name = "sample", .skip_unhandled_events = true};
   esp_timer_create(&targs, &gSampleTimer);
-  esp_timer_start_periodic(gSampleTimer, kSamplePeriodUs);
+  esp_timer_start_periodic(gSampleTimer, kReadPeriodUs);
 }
 
 void loop() {

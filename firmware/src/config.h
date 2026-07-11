@@ -9,7 +9,13 @@ static constexpr uint32_t kSerialBaud = 115200;
 
 // --- サンプリング ---
 static constexpr uint32_t kSampleRateHz = 100;
-static constexpr uint32_t kSamplePeriodUs = 1000000UL / kSampleRateHz;  // 10ms
+static constexpr uint32_t kSamplePeriodUs = 1000000UL / kSampleRateHz;  // 出力周期 10ms
+
+// --- オーバーサンプリング ---
+// センサを出力レートの kOversample 倍(=1kHz)で読み、平均して100Hzに間引く。
+// 50Hz超のエイリアシングを抑え、白色ノイズを約√kOversample 倍下げる。
+static constexpr uint32_t kOversample = 10;
+static constexpr uint32_t kReadPeriodUs = kSamplePeriodUs / kOversample;  // 読み周期 1ms
 
 // --- バッチ ---
 static constexpr uint32_t kBatchSeconds = 30;
