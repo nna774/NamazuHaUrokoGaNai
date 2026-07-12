@@ -148,7 +148,7 @@ async function refreshLive() {
 function scheduleLive() {
   if (liveTimer) clearInterval(liveTimer);
   if (document.getElementById('autorefresh').checked) {
-    liveTimer = setInterval(refreshLive, 4000);
+    liveTimer = setInterval(refreshLive, 15000);  // 15秒間隔（S3コスト抑制）
   }
 }
 
