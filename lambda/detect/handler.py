@@ -85,10 +85,11 @@ def _confirm(device_id: int, det: detect_core.Detection):
 
 
 def _preserve_prompt_waveforms(now_start_us: int):
-    """デバイス速報で拾われたイベントの波形も events/ へ永久保存する。
+    """デバイス速報で拾われたイベントの波形を events/ へ永久保存し、評価済みにする。
 
-    後続(POST_SECONDS)ぶんのバッチが出揃った頃に一度だけコピーする。
-    確定検知(cloud_confirmed)とは独立で、フラグは変えない。
+    後続(POST_SECONDS)ぶんのバッチが出揃った頃に一度だけ処理する。この時点で
+    確定(cloud_confirmed)していなければ「速報は来たが地震でなかった」= 評価済み未確定
+    なので checked=true を立てる（一覧の既定では隠れる）。
     """
     for item in events.recent_events(200):
         if not item.get("device_prompt") or item.get("waveform_prefix"):
@@ -105,6 +106,7 @@ def _preserve_prompt_waveforms(now_start_us: int):
         _put_meta(eid, device_id, onset,
                   float(item.get("max_intensity", 0)), float(item.get("peak_gal", 0)))
         events.set_waveform_prefix(eid, f"{s3util.EVENTS_PREFIX}/{eid}/")
+        events.set_field(eid, "checked", True)  # detect評価済み（未確定なら既定で隠す）
 
 
 def _copy_event_waveforms(eid: str, onset_us: int) -> int:

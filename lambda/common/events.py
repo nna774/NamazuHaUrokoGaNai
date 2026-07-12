@@ -164,13 +164,19 @@ def _scan_all() -> list[dict]:
     return out
 
 
-def list_page(page: int = 0, size: int = 20) -> tuple[list[dict], int]:
-    """新しい順に並べた page ページ目(0始まり)の size 件と、総件数を返す。
+def list_page(page: int = 0, size: int = 20, show_all: bool = False) -> tuple[list[dict], int]:
+    """新しい順に並べた page ページ目(0始まり)の size 件と、（フィルタ後の）総件数を返す。
+
+    show_all=False（既定）では「確定済み or 未評価(pending)」だけ出し、detectが評価して
+    確定しなかったイベント（速報は来たが地震でなかった = checked かつ未確定）を隠す。
 
     件数が数千規模までは全件 scan+ソートで十分。それ以上に育ったら
     時刻レンジGSIでの本格ページングに移行する。
     """
     items = _scan_all()
+    if not show_all:
+        items = [it for it in items
+                 if it.get("cloud_confirmed") or not it.get("checked")]
     items.sort(key=lambda x: int(x.get("onset_us", 0)), reverse=True)
     start = max(0, page) * size
     return items[start:start + size], len(items)

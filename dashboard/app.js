@@ -158,9 +158,10 @@ async function reloadEvents(pageNum = 1) {
   const status = document.getElementById('events-status');
   const tbody = document.querySelector('#events-table tbody');
   const page0 = Math.max(0, pageNum - 1);
+  const all = document.getElementById('events-all').checked ? '&all=1' : '';
   try {
     status.textContent = '取得中…';
-    const data = await apiGet(`/events?page=${page0}&size=${EVENTS_PAGE_SIZE}`);
+    const data = await apiGet(`/events?page=${page0}&size=${EVENTS_PAGE_SIZE}${all}`);
     tbody.innerHTML = '';
     for (const ev of data.events) {
       const tr = document.createElement('tr');
@@ -173,6 +174,8 @@ async function reloadEvents(pageNum = 1) {
       tr.innerHTML = `<td>${t}</td><td><span class="badge">${scale}</span></td>`
         + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
+      // 非該当（評価済みだが未確定）は薄く表示して区別する
+      if (ev.checked && !ev.cloud_confirmed) tr.style.opacity = '0.45';
       tr.onclick = () => { location.hash = 'event/' + ev.event_id; };
       tbody.appendChild(tr);
     }
@@ -271,6 +274,7 @@ window.addEventListener('load', () => {
   document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
   document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
   document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
+  document.getElementById('events-all').onchange = () => reloadEvents(1);  // フィルタ切替で1ページ目から
   document.getElementById('event-back').onclick = () => { location.hash = 'events'; };
   document.getElementById('tab-live').onclick = () => { location.hash = liveHash(); };
   document.getElementById('tab-events').onclick = () => { location.hash = 'events'; };

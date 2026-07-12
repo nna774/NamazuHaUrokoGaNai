@@ -71,7 +71,8 @@ def _recent(q):
 def _events(q):
     page = max(0, int(q.get("page", "0")))
     size = min(100, max(1, int(q.get("size", "20"))))
-    items, total = events.list_page(page, size)
+    show_all = q.get("all") in ("1", "true")
+    items, total = events.list_page(page, size, show_all=show_all)
     # 一覧・詳細で同じ値を出すため、震度は effective_intensity に統一する。
     for it in items:
         eff = events.effective_intensity(it)
