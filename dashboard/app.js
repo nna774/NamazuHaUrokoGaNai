@@ -195,15 +195,41 @@ async function reloadEvents(pageNum = 1) {
   }
 }
 
+function eventStateLabel(m) {
+  if (m.cloud_confirmed) return '確定';
+  if (m.checked) return '非該当（評価済み・未確定）';
+  return '速報のみ（評価待ち）';
+}
+
+function renderEventInfo(m) {
+  const tbody = document.getElementById('event-info');
+  const rows = [];
+  const onset = Number(m.onset_us || 0);
+  const last = Number(m.last_us || onset);
+  const dur = onset ? Math.max(0, (last - onset) / 1e6) : 0;
+  if (onset) rows.push(['発生時刻', new Date(onset / 1000).toLocaleString('ja-JP')]);
+  rows.push(['継続時間', `${dur.toFixed(0)} 秒`]);
+  rows.push(['計測震度', Number(m.max_intensity || 0).toFixed(1)]);
+  rows.push(['震度', m.scale || intensityScale(Number(m.max_intensity || 0))]);
+  rows.push(['ピーク加速度', `${Number(m.peak_gal || 0).toFixed(2)} gal`]);
+  if (m.a0_gal != null) rows.push(['基準加速度 a0', `${Number(m.a0_gal).toFixed(2)} gal`]);
+  rows.push(['状態', eventStateLabel(m)]);
+  rows.push(['検知経路', `${m.device_prompt ? '速報✓ ' : ''}${m.cloud_confirmed ? '確定✓' : ''}`.trim() || '—']);
+  rows.push(['イベントID', m.event_id || '']);
+  tbody.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+
 async function showEvent(id) {
   const title = document.getElementById('event-title');
   const cv = document.getElementById('event-canvas');
   title.textContent = '読み込み中… ' + id;
+  document.getElementById('event-info').innerHTML = '';
   try {
     const data = await apiGet('/event?id=' + encodeURIComponent(id));
     const m = data.meta || {};
-    title.textContent = `イベント ${id} — 震度${m.scale || ''}（計測震度 ${Number(m.max_intensity || 0).toFixed(1)}）`;
+    title.textContent = `震度${m.scale || ''}（計測震度 ${Number(m.max_intensity || 0).toFixed(1)}）`;
     drawWaveform(cv, data.waveform);
+    renderEventInfo(m);
   } catch (e) {
     title.textContent = 'エラー: ' + e.message;
   }

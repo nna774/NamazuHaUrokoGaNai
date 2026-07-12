@@ -25,6 +25,8 @@
     .tabs button.active { background: var(--accent); color: #fff; }
     section { display: none; }
     section.active { display: block; }
+    #event-info { max-width: 480px; margin-top: 14px; }
+    #event-info td:first-child { color: #888; width: 42%; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -83,6 +85,7 @@
         <div class="row"><button id="event-back">← 一覧に戻る</button></div>
         <h3 id="event-title"></h3>
         <canvas id="event-canvas"></canvas>
+        <table id="event-info"></table>
       </div>
     </section>
   </main>
