@@ -52,7 +52,7 @@ def handler(event, context):
         if path.endswith("/recent"):
             return _recent(q)
         if path.endswith("/events"):
-            return _events()
+            return _events(q)
         if path.endswith("/event"):
             return _event(q)
         return _json(404, {"error": "not found"})
@@ -68,8 +68,11 @@ def _recent(q):
     return _json(200, _waveform_payload(gal, win_start, fs))
 
 
-def _events():
-    return _json(200, {"events": events.recent_events(50)})
+def _events(q):
+    page = max(0, int(q.get("page", "0")))
+    size = min(100, max(1, int(q.get("size", "20"))))
+    items, total = events.list_page(page, size)
+    return _json(200, {"events": items, "page": page, "size": size, "total": total})
 
 
 def _event(q):

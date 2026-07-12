@@ -69,6 +69,11 @@
           <thead><tr><th>発生時刻</th><th>震度</th><th>計測震度</th><th>ピーク[gal]</th><th>継続</th><th>速報</th><th>確定</th></tr></thead>
           <tbody></tbody>
         </table>
+        <div class="row" id="events-pager">
+          <button id="ev-prev">← 前へ</button>
+          <span id="ev-pageinfo" class="muted"></span>
+          <button id="ev-next">次へ →</button>
+        </div>
       </div>
       <!-- 詳細モード（グラフを上に。一覧とは排他表示なのでガタつかない） -->
       <div id="event-detail" style="display:none">

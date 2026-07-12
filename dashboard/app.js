@@ -153,12 +153,14 @@ function scheduleLive() {
 }
 
 // --- イベント ---
-async function reloadEvents() {
+const EVENTS_PAGE_SIZE = 20;
+async function reloadEvents(pageNum = 1) {
   const status = document.getElementById('events-status');
   const tbody = document.querySelector('#events-table tbody');
+  const page0 = Math.max(0, pageNum - 1);
   try {
     status.textContent = '取得中…';
-    const data = await apiGet('/events');
+    const data = await apiGet(`/events?page=${page0}&size=${EVENTS_PAGE_SIZE}`);
     tbody.innerHTML = '';
     for (const ev of data.events) {
       const tr = document.createElement('tr');
@@ -174,7 +176,17 @@ async function reloadEvents() {
       tr.onclick = () => { location.hash = 'event/' + ev.event_id; };
       tbody.appendChild(tr);
     }
-    status.textContent = data.events.length + ' 件';
+    // ページャ
+    const total = data.total || 0;
+    const pages = Math.max(1, Math.ceil(total / EVENTS_PAGE_SIZE));
+    document.getElementById('ev-pageinfo').textContent = `${pageNum} / ${pages} ページ（全${total}件）`;
+    const prev = document.getElementById('ev-prev');
+    const next = document.getElementById('ev-next');
+    prev.disabled = pageNum <= 1;
+    next.disabled = pageNum >= pages;
+    prev.onclick = () => { location.hash = `events?p=${pageNum - 1}`; };
+    next.onclick = () => { location.hash = `events?p=${pageNum + 1}`; };
+    status.textContent = `${total} 件`;
   } catch (e) {
     status.textContent = 'エラー: ' + e.message;
   }
@@ -236,7 +248,7 @@ function route() {
   } else if (path === 'events') {
     showView('events');
     showEventsMode(false);
-    reloadEvents();
+    reloadEvents(params.p ? parseInt(params.p, 10) : 1);
   } else {
     // live（既定）。URLの表示範囲・自動更新を操作子へ反映してから描画。
     if (params.m) document.getElementById('minutes').value = params.m;
@@ -258,7 +270,7 @@ window.addEventListener('load', () => {
   // 操作したらURLへ反映（hashchange→route が実際の描画を行う）
   document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
   document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
-  document.getElementById('reload-events').onclick = reloadEvents;
+  document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
   document.getElementById('event-back').onclick = () => { location.hash = 'events'; };
   document.getElementById('tab-live').onclick = () => { location.hash = liveHash(); };
   document.getElementById('tab-events').onclick = () => { location.hash = 'events'; };

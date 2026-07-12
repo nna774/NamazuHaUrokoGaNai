@@ -123,3 +123,29 @@ def recent_events(limit: int = 50) -> list[dict]:
     items = _table().scan(Limit=1000).get("Items", [])
     items.sort(key=lambda x: int(x.get("onset_us", 0)), reverse=True)
     return items[:limit]
+
+
+def _scan_all() -> list[dict]:
+    """テーブル全件を scan（ページネーション込み）。"""
+    out: list[dict] = []
+    kwargs: dict = {}
+    while True:
+        resp = _table().scan(**kwargs)
+        out.extend(resp.get("Items", []))
+        lek = resp.get("LastEvaluatedKey")
+        if not lek:
+            break
+        kwargs["ExclusiveStartKey"] = lek
+    return out
+
+
+def list_page(page: int = 0, size: int = 20) -> tuple[list[dict], int]:
+    """新しい順に並べた page ページ目(0始まり)の size 件と、総件数を返す。
+
+    件数が数千規模までは全件 scan+ソートで十分。それ以上に育ったら
+    時刻レンジGSIでの本格ページングに移行する。
+    """
+    items = _scan_all()
+    items.sort(key=lambda x: int(x.get("onset_us", 0)), reverse=True)
+    start = max(0, page) * size
+    return items[start:start + size], len(items)
