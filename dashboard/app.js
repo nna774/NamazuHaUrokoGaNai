@@ -183,7 +183,6 @@ async function reloadEvents() {
 async function showEvent(id) {
   const title = document.getElementById('event-title');
   const cv = document.getElementById('event-canvas');
-  title.style.display = 'block'; cv.style.display = 'block';
   title.textContent = '読み込み中… ' + id;
   try {
     const data = await apiGet('/event?id=' + encodeURIComponent(id));
@@ -222,17 +221,22 @@ function liveHash() {
   return `live?m=${m}&auto=${auto}`;
 }
 
+function showEventsMode(detail) {
+  // 一覧モードと詳細モードは排他表示（同時に出さないのでテーブルがガタつかない）
+  document.getElementById('events-list').style.display = detail ? 'none' : 'block';
+  document.getElementById('event-detail').style.display = detail ? 'block' : 'none';
+}
+
 function route() {
   const { path, params } = parseHash();
   if (path.startsWith('event/')) {
     showView('events');
-    reloadEvents();
+    showEventsMode(true);
     showEvent(decodeURIComponent(path.slice('event/'.length)));
   } else if (path === 'events') {
     showView('events');
+    showEventsMode(false);
     reloadEvents();
-    document.getElementById('event-title').style.display = 'none';
-    document.getElementById('event-canvas').style.display = 'none';
   } else {
     // live（既定）。URLの表示範囲・自動更新を操作子へ反映してから描画。
     if (params.m) document.getElementById('minutes').value = params.m;
@@ -255,6 +259,7 @@ window.addEventListener('load', () => {
   document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
   document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
   document.getElementById('reload-events').onclick = reloadEvents;
+  document.getElementById('event-back').onclick = () => { location.hash = 'events'; };
   document.getElementById('tab-live').onclick = () => { location.hash = liveHash(); };
   document.getElementById('tab-events').onclick = () => { location.hash = 'events'; };
   route();

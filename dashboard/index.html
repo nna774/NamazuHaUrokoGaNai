@@ -59,16 +59,23 @@
     </section>
 
     <section id="events">
-      <div class="row">
-        <button id="reload-events">再読み込み</button>
-        <span id="events-status" class="muted"></span>
+      <!-- 一覧モード -->
+      <div id="events-list">
+        <div class="row">
+          <button id="reload-events">再読み込み</button>
+          <span id="events-status" class="muted"></span>
+        </div>
+        <table id="events-table">
+          <thead><tr><th>発生時刻</th><th>震度</th><th>計測震度</th><th>ピーク[gal]</th><th>継続</th><th>速報</th><th>確定</th></tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
-      <table id="events-table">
-        <thead><tr><th>発生時刻</th><th>震度</th><th>計測震度</th><th>ピーク[gal]</th><th>継続</th><th>速報</th><th>確定</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <h3 id="event-title" style="display:none"></h3>
-      <canvas id="event-canvas" style="display:none"></canvas>
+      <!-- 詳細モード（グラフを上に。一覧とは排他表示なのでガタつかない） -->
+      <div id="event-detail" style="display:none">
+        <div class="row"><button id="event-back">← 一覧に戻る</button></div>
+        <h3 id="event-title"></h3>
+        <canvas id="event-canvas"></canvas>
+      </div>
     </section>
   </main>
 
