@@ -45,7 +45,7 @@ function fitCanvas(cv) {
   return { ctx, w, h };
 }
 
-function drawWaveform(cv, wf) {
+function drawWaveform(cv, wf, fixedRange) {
   const { ctx, w, h } = fitCanvas(cv);
   ctx.clearRect(0, 0, w, h);
   const pad = 28;
@@ -78,14 +78,23 @@ function drawWaveform(cv, wf) {
       for (const x of mx) if (x > hi) hi = x;
     }
   }
-  if (lo === hi) { lo -= 1; hi += 1; }
-  // 上下に少し余白
-  const margin = (hi - lo) * 0.1 || 1;
-  lo -= margin; hi += margin;
+  if (fixedRange > 0) {
+    // 固定レンジ（0中心対称）。安定した縦軸で「直線からの逸脱=異常」を読みやすくする。
+    // レンジ外はクリップして描く（エンベロープ表示では上下端に張り付く）。
+    lo = -fixedRange; hi = fixedRange;
+  } else {
+    if (lo === hi) { lo -= 1; hi += 1; }
+    // 上下に少し余白
+    const margin = (hi - lo) * 0.1 || 1;
+    lo -= margin; hi += margin;
+  }
   const yr = hi - lo;
   const n = wf.n;
   const X = i => pad + (n <= 1 ? 0 : (i / (n - 1)) * plotW);
-  const Y = v => pad + plotH - ((v - lo) / yr) * plotH;
+  const Y = v => {
+    const c = Math.max(lo, Math.min(hi, v));  // 固定レンジ外はクリップ
+    return pad + plotH - ((c - lo) / yr) * plotH;
+  };
 
   // 軸・0線
   ctx.strokeStyle = 'rgba(128,128,128,.35)';
@@ -134,10 +143,11 @@ let liveTimer = null;
 async function refreshLive() {
   const status = document.getElementById('live-status');
   const minutes = document.getElementById('minutes').value;
+  const yrange = Number(document.getElementById('yrange').value) || 0;
   try {
     status.textContent = '取得中…';
     const wf = await apiGet('/recent?minutes=' + minutes);
-    drawWaveform(document.getElementById('live-canvas'), wf);
+    drawWaveform(document.getElementById('live-canvas'), wf, yrange);
     status.textContent = '更新: ' + new Date().toLocaleTimeString('ja-JP')
       + (wf.mode === 'envelope' ? '（エンベロープ）' : '');
   } catch (e) {
@@ -259,7 +269,8 @@ function parseHash() {
 function liveHash() {
   const m = document.getElementById('minutes').value;
   const auto = document.getElementById('autorefresh').checked ? 1 : 0;
-  return `live?m=${m}&auto=${auto}`;
+  const r = document.getElementById('yrange').value;
+  return `live?m=${m}&auto=${auto}&r=${r}`;
 }
 
 function showEventsMode(detail) {
@@ -284,6 +295,7 @@ function route() {
     if (params.auto !== undefined) {
       document.getElementById('autorefresh').checked = params.auto === '1';
     }
+    if (params.r !== undefined) document.getElementById('yrange').value = params.r;
     showView('live');
     refreshLive();
     scheduleLive();
@@ -302,6 +314,7 @@ window.addEventListener('load', () => {
   // 操作したらURLへ反映（hashchange→route が実際の描画を行う）
   document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
   document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
+  document.getElementById('yrange').onchange = () => { location.hash = liveHash(); };
   document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
   document.getElementById('events-all').onchange = () => reloadEvents(1);  // フィルタ切替で1ページ目から
   document.getElementById('event-back').onclick = () => { location.hash = 'events'; };
