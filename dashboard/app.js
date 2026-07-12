@@ -130,11 +130,30 @@ function drawWaveform(cv, wf, fixedRange) {
     ctx.fillText(a.toUpperCase(), w - pad - 60 + i * 20, pad + 12);
   });
 
-  // 時刻ラベル
-  if (wf.start_us) {
-    const start = new Date(wf.start_us / 1000);
-    ctx.fillStyle = '#888';
-    ctx.fillText(start.toLocaleTimeString('ja-JP'), pad, h - 8);
+  // 横軸（時刻目盛り + 薄いグリッド線）
+  if (wf.start_us && n > 1) {
+    const stepUs = ((wf.mode === 'raw' ? 1 : wf.bucket) / wf.fs) * 1e6;
+    const startUs = wf.start_us;
+    const endUs = startUs + (n - 1) * stepUs;
+    const spanSec = (endUs - startUs) / 1e6;
+    const fmt = us => {
+      const d = new Date(us / 1000);
+      return spanSec >= 600
+        ? d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+        : d.toLocaleTimeString('ja-JP');
+    };
+    const nticks = Math.max(2, Math.min(6, Math.floor(plotW / 80)));
+    ctx.font = '11px system-ui';
+    for (let k = 0; k < nticks; k++) {
+      const f = k / (nticks - 1);
+      const x = pad + f * plotW;
+      ctx.strokeStyle = 'rgba(128,128,128,.18)';
+      ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, pad + plotH); ctx.stroke();
+      ctx.fillStyle = '#888';
+      ctx.textAlign = k === 0 ? 'left' : k === nticks - 1 ? 'right' : 'center';
+      ctx.fillText(fmt(startUs + f * (endUs - startUs)), x, h - 8);
+    }
+    ctx.textAlign = 'left';  // 既定に戻す
   }
 }
 
