@@ -14,6 +14,7 @@ import os
 import boto3
 
 from common import auth, events, notify, s3util, wire
+from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
 BUCKET = os.environ["NAMZ_BUCKET"]
@@ -64,12 +65,18 @@ def _handle_alert(raw: bytes):
     intensity = float(msg["realtime_intensity"])
     peak = float(msg["peak_gal"])
 
-    eid, is_new = events.record_device_prompt(device_id, onset_us, intensity, peak)
-    # イベントは常に記録するが、通知は閾値k以上かつセッション開始時のみ。
-    if is_new and intensity >= NOTIFY_PROMPT_MIN:
+    eid, _ = events.record_device_prompt(device_id, onset_us, intensity, peak)
+    # イベントは常に記録。通知はセッションの最大震度が「新しい上位クラス」に達し、
+    # かつ k 以上の時（弱→強のエスカレーションに追従）。
+    item = events.get_event(eid) or {}
+    mi = float(item.get("max_intensity", intensity))
+    ord_now = scale_ordinal(mi)
+    ord_prev = int(item.get("notified_prompt_ord", -1))
+    if mi >= NOTIFY_PROMPT_MIN and ord_now > ord_prev:
         notify.from_env().notify(
             "地震かも（デバイス速報）",
-            f"デバイスがリアルタイム計測震度 *{intensity:.1f}* を検知しました。",
+            f"デバイスがリアルタイム計測震度 *{mi:.1f}* を検知しました。",
             {"ピーク加速度": f"{peak:.2f} gal", "イベント": notify.event_field(eid)},
         )
+        events.set_field(eid, "notified_prompt_ord", ord_now)
     return _resp(200, "alert ok")

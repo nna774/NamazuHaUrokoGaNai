@@ -124,6 +124,16 @@ def get_event(eid: str) -> dict | None:
     return _table().get_item(Key={"event_id": eid}).get("Item")
 
 
+def set_field(eid: str, name: str, value) -> None:
+    """任意フィールドを1つ更新する（通知済みクラスの記録など）。"""
+    _table().update_item(
+        Key={"event_id": eid},
+        UpdateExpression="SET #n = :v",
+        ExpressionAttributeNames={"#n": name},
+        ExpressionAttributeValues={":v": value},
+    )
+
+
 def set_waveform_prefix(eid: str, prefix: str) -> None:
     """波形を events/ へ保存したことを記録（フラグは変えない）。"""
     _table().update_item(

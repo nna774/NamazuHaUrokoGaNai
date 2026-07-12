@@ -16,6 +16,30 @@ def jma_round(intensity: float) -> float:
     return math.floor(two * 10) / 10.0
 
 
+def scale_ordinal(intensity: float) -> int:
+    """震度階級の序数（0..9）。0,1,2,3,4,5弱,5強,6弱,6強,7 の順。
+    通知のエスカレーション判定（クラスが上がったか）に使う。"""
+    if intensity < 0.5:
+        return 0
+    if intensity < 1.5:
+        return 1
+    if intensity < 2.5:
+        return 2
+    if intensity < 3.5:
+        return 3
+    if intensity < 4.5:
+        return 4
+    if intensity < 5.0:
+        return 5
+    if intensity < 5.5:
+        return 6
+    if intensity < 6.0:
+        return 7
+    if intensity < 6.5:
+        return 8
+    return 9
+
+
 def intensity_scale(intensity: float) -> str:
     """計測震度から気象庁の震度階級を返す。"""
     i = intensity

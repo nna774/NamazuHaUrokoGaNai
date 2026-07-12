@@ -17,7 +17,7 @@ from urllib.parse import unquote_plus
 import boto3
 
 from common import detect_core, events, notify, s3util, store
-from jismo.rounding import intensity_scale
+from jismo.rounding import intensity_scale, scale_ordinal
 
 s3 = boto3.client("s3")
 BUCKET = os.environ["NAMZ_BUCKET"]
@@ -61,20 +61,27 @@ def _process(key: str):
 def _confirm(device_id: int, det: detect_core.Detection):
     """持続的な揺れ = クラウド確定報。波形保存 + DynamoDB + 通知。"""
     # 先にセッションへ記録して確定した event_id を得る（マージ後のidを使う）。
-    eid, newly_confirmed = events.record_cloud_detection(
+    eid, _ = events.record_cloud_detection(
         device_id, det.onset_us, det.max_intensity, det.peak_gal)
     prefix = f"{s3util.EVENTS_PREFIX}/{eid}/"
     _copy_event_waveforms(eid, det.onset_us)
     _put_meta(eid, device_id, det.onset_us, det.max_intensity, det.peak_gal, det.a0)
     events.set_waveform_prefix(eid, prefix)
 
-    if newly_confirmed and det.max_intensity >= NOTIFY_CONFIRM_MIN:
-        scale = intensity_scale(det.max_intensity)
+    # 通知はセッションの確定震度(FFT)が「新しい上位クラス」に達し、かつ l 以上の時。
+    # 弱く始まって強くなるイベントでも、クラスが上がるたびに追従通知する。
+    item = events.get_event(eid) or {}
+    ci = float(item.get("confirmed_intensity", det.max_intensity))
+    ord_now = scale_ordinal(ci)
+    ord_prev = int(item.get("notified_confirm_ord", -1))
+    if ci >= NOTIFY_CONFIRM_MIN and ord_now > ord_prev:
+        scale = intensity_scale(ci)
         notify.from_env().notify(
             f"地震を検知（確定報） 震度{scale}",
-            f"クラウド解析で計測震度 *{det.max_intensity:.1f}*（震度{scale}）を確定。",
+            f"クラウド解析で計測震度 *{ci:.1f}*（震度{scale}）を確定。",
             {"ピーク加速度": f"{det.peak_gal:.2f} gal", "イベント": notify.event_field(eid)},
         )
+        events.set_field(eid, "notified_confirm_ord", ord_now)
 
 
 def _preserve_prompt_waveforms(now_start_us: int):
