@@ -78,7 +78,7 @@ def _confirm(device_id: int, det: detect_core.Detection):
         scale = intensity_scale(ci)
         notify.from_env().notify(
             f"地震を検知（確定報） 震度{scale}",
-            f"クラウド解析で計測震度 *{ci:.1f}*（震度{scale}）を確定。",
+            f"クラウド解析で計測震度 *{ci:.1f}* （震度{scale}）を確定。",
             {"ピーク加速度": f"{det.peak_gal:.2f} gal", "イベント": notify.event_field(eid)},
         )
         events.set_field(eid, "notified_confirm_ord", ord_now)
