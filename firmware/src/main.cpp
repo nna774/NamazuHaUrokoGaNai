@@ -13,6 +13,7 @@
 #include <esp_timer.h>
 
 #include "Batch.h"
+#include "Display.h"
 #include "Iis3dhhc.h"
 #include "Shindo.h"
 #include "TimeSync.h"
@@ -22,6 +23,12 @@
 static SPIClass gSpi(VSPI);
 static Iis3dhhc gSensor(gSpi, kPinCsIis3dhhc, kSpiClockHz);
 static Shindo gShindo;
+static Display gDisplay;
+
+// 表示用の共有状態（測定タスクが書き、loopが読む）。
+static volatile float gDispIntensity = 0.0f;
+static volatile float gDispPeakGal = 0.0f;
+static volatile uint32_t gLastShakeMs = 0;  // 瞬時合成加速度がしきい値を超えた最終時刻
 
 #ifndef NAMZ_SENSOR_TEST
 static Uploader gUploader(kIngestUrl, kAlertUrl, kHmacSecret, kDeviceId,
@@ -117,7 +124,11 @@ static void samplingTask(void*) {
     float gx = lsbToGal(raw.x, gSensor.scaleMgPerLsb());
     float gy = lsbToGal(raw.y, gSensor.scaleMgPerLsb());
     float gz = lsbToGal(raw.z, gSensor.scaleMgPerLsb());
-    gShindo.push(gx, gy, gz);
+    float comp = gShindo.push(gx, gy, gz);
+
+    // 瞬時の揺れ判定と表示用ピーク（減衰エンベロープ）
+    if (comp >= kDispActiveGal) gLastShakeMs = millis();
+    gDispPeakGal = comp > gDispPeakGal ? comp : gDispPeakGal * 0.99f;
 
     const float dt = 1.0f / kSampleRateHz;
     if (cooldown > 0) cooldown -= dt;
@@ -125,6 +136,7 @@ static void samplingTask(void*) {
     if (++sinceIntensity >= kSampleRateHz / 4) {  // 0.25秒ごと
       sinceIntensity = 0;
       float intensity = gShindo.currentIntensity();
+      gDispIntensity = intensity;  // 表示用に共有
       if (intensity >= kAlertIntensity) {
         holdSeconds += 0.25f;
         if (holdSeconds >= kAlertHoldSeconds && cooldown <= 0) {
@@ -195,6 +207,9 @@ void setup() {
   delay(200);
   Serial.println("\n[boot] NamazuHaUrokoGaNai");
 
+  gDisplay.begin();
+  pinMode(kPinButtonFlip, INPUT_PULLUP);
+
   gSpi.begin(kPinSck, kPinMiso, kPinMosi, kPinCsIis3dhhc);
   if (!gSensor.begin()) {
     Serial.println("[sensor] IIS3DHHC not found! (WHO_AM_I mismatch)");
@@ -231,6 +246,49 @@ void setup() {
 }
 
 void loop() {
-  // 全処理はタスク側。loopは何もしない。
-  vTaskDelay(pdMS_TO_TICKS(1000));
+  // 測定/送信はタスク側。loopはボタンとTFT表示だけ担う。
+  static bool prevPressed = false;
+  static uint32_t sessStart = 0;
+  static bool active = false;
+  static int tick = 0;
+
+  // ボタン押下エッジで画面反転
+  bool pressed = digitalRead(kPinButtonFlip) == LOW;
+  if (pressed && !prevPressed) gDisplay.toggleFlip();
+  prevPressed = pressed;
+
+  // 継続ステートの算出（瞬時の揺れベース）
+  uint32_t now = millis();
+  uint32_t sinceShake = now - gLastShakeMs;  // 最後に瞬時しきい値を超えてからの経過[ms]
+  bool shakingNow = sinceShake < kShakeHangoverMs;
+  if (shakingNow && !active) { active = true; sessStart = now; }
+  if (active && sinceShake > kDispCloseSeconds * 1000UL) active = false;
+
+  String status;
+  uint16_t scol;
+  if (active && shakingNow) {
+    status = "ACTIVE " + String((now - sessStart) / 1000) + "s";
+    scol = TFT_RED;
+  } else if (active) {
+    uint32_t elapsed = sinceShake / 1000;
+    uint32_t left = elapsed >= kDispCloseSeconds ? 0 : kDispCloseSeconds - elapsed;
+    status = "closing " + String(left) + "s";
+    scol = TFT_ORANGE;
+  } else {
+    status = "idle";
+    scol = TFT_DARKGREY;
+  }
+
+  // 描画は約500msごと（ボタンは250msごとに見る）
+  if (++tick % 2 == 0) {
+#ifdef NAMZ_SENSOR_TEST
+    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, status, scol);
+#else
+    bool wifi = WiFi.status() == WL_CONNECTED;
+    String ip = wifi ? WiFi.localIP().toString() : String("");
+    gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, gUploader.spillCount(),
+                    status, scol);
+#endif
+  }
+  vTaskDelay(pdMS_TO_TICKS(250));
 }

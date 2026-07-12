@@ -45,6 +45,18 @@ static constexpr int kPinMosi = 26;
 static constexpr int kPinCsIis3dhhc = 33;
 static constexpr uint32_t kSpiClockHz = 8000000;  // 8MHz
 
+// --- ボタン（TTGO T-Display 左ボタン=GPIO0。押すと画面反転）---
+// GPIO0は起動時のストラップだが、起動後の押下ではブートローダに入らない。
+static constexpr int kPinButtonFlip = 0;
+
+// 表示の「継続」判定（デバイス表示用。クラウドのセッションマージとは別物）。
+// 60秒窓の計測震度は揺れ停止後もしばらく高いままなので、"今揺れているか"は
+// 瞬時のフィルタ後合成加速度[gal]で判定する。これがしきい値を超えた最終時刻から
+// kShakeHangoverMs 以内なら ACTIVE、超えて kDispCloseSeconds 経過で idle。
+static constexpr float kDispActiveGal = 1.0f;
+static constexpr uint32_t kShakeHangoverMs = 2000;
+static constexpr uint32_t kDispCloseSeconds = 30;
+
 // --- センサ種別（ワイヤフォーマットと一致させる）---
 enum SensorType : uint8_t {
   kSensorIis3dhhc = 0,
