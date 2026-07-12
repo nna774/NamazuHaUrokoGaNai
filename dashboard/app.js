@@ -148,17 +148,33 @@ async function refreshLive() {
     status.textContent = '取得中…';
     const wf = await apiGet('/recent?minutes=' + minutes);
     drawWaveform(document.getElementById('live-canvas'), wf, yrange);
+    // データ鮮度: バッチは完成後に送られるため、右端は常に30〜40秒ほど過去になる
+    let age = '';
+    if (wf && wf.n) {
+      const samples = wf.mode === 'envelope' ? wf.n * wf.bucket : wf.n;
+      const endUs = wf.start_us + (samples / wf.fs) * 1e6;
+      age = `・最新データ ${Math.max(0, Math.round(Date.now() / 1000 - endUs / 1e6))}秒前`;
+    }
     status.textContent = '更新: ' + new Date().toLocaleTimeString('ja-JP')
-      + (wf.mode === 'envelope' ? '（エンベロープ）' : '');
+      + (wf.mode === 'envelope' ? '（エンベロープ）' : '') + age;
   } catch (e) {
     status.textContent = 'エラー: ' + e.message;
   }
 }
 
+function refreshIntervalMs() {
+  // 窓が広いほど更新間隔を伸ばす。1回の更新コスト(S3 GET数)は窓幅に比例する上、
+  // 新データは30秒に1回しか来ないので、広い窓の高頻度更新は無駄が大きい。
+  const m = Number(document.getElementById('minutes').value) || 1;
+  if (m <= 3) return 15000;
+  if (m <= 10) return 30000;
+  return 60000;
+}
+
 function scheduleLive() {
   if (liveTimer) clearInterval(liveTimer);
   if (document.getElementById('autorefresh').checked) {
-    liveTimer = setInterval(refreshLive, 15000);  // 15秒間隔（S3コスト抑制）
+    liveTimer = setInterval(refreshLive, refreshIntervalMs());
   }
 }
 
