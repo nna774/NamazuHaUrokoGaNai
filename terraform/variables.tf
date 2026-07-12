@@ -41,3 +41,15 @@ variable "detect_window_seconds" {
   type    = number
   default = 120
 }
+
+variable "notify_prompt_min" {
+  type        = number
+  default     = 3.0
+  description = "デバイス速報を通知する最小計測震度(k)。確定報の閾値(l)より高くする。"
+}
+
+variable "notify_confirm_min" {
+  type        = number
+  default     = 1.5
+  description = "確定報を通知する最小計測震度(l)。k > l。"
+}

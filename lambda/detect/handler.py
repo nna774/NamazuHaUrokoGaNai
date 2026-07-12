@@ -25,6 +25,8 @@ BUCKET = os.environ["NAMZ_BUCKET"]
 WINDOW_SECONDS = float(os.environ.get("NAMZ_DETECT_WINDOW_S", "120"))
 THRESHOLD = float(os.environ.get("NAMZ_DETECT_THRESHOLD", "0.5"))
 HOLD_SECONDS = float(os.environ.get("NAMZ_DETECT_HOLD_S", "2.0"))
+# 確定報を Slack 通知する最小計測震度(l)。速報の閾値(k)より低くする想定。
+NOTIFY_CONFIRM_MIN = float(os.environ.get("NAMZ_NOTIFY_CONFIRM_MIN", "1.5"))
 # イベント波形として保存する範囲（onset を基準に前後）
 PRE_SECONDS = 30
 POST_SECONDS = 90
@@ -66,7 +68,7 @@ def _confirm(device_id: int, det: detect_core.Detection):
     _put_meta(eid, device_id, det.onset_us, det.max_intensity, det.peak_gal, det.a0)
     events.set_waveform_prefix(eid, prefix)
 
-    if newly_confirmed:
+    if newly_confirmed and det.max_intensity >= NOTIFY_CONFIRM_MIN:
         scale = intensity_scale(det.max_intensity)
         notify.from_env().notify(
             f"地震を検知（確定報） 震度{scale}",

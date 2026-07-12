@@ -18,6 +18,9 @@ from common import auth, events, notify, s3util, wire
 s3 = boto3.client("s3")
 BUCKET = os.environ["NAMZ_BUCKET"]
 
+# デバイス速報を Slack 通知する最小計測震度(k)。確定報の閾値(l)より高くする想定。
+NOTIFY_PROMPT_MIN = float(os.environ.get("NAMZ_NOTIFY_PROMPT_MIN", "3.0"))
+
 
 def _resp(code: int, msg: str):
     return {"statusCode": code, "headers": {"content-type": "text/plain"}, "body": msg}
@@ -62,7 +65,8 @@ def _handle_alert(raw: bytes):
     peak = float(msg["peak_gal"])
 
     eid, is_new = events.record_device_prompt(device_id, onset_us, intensity, peak)
-    if is_new:
+    # イベントは常に記録するが、通知は閾値k以上かつセッション開始時のみ。
+    if is_new and intensity >= NOTIFY_PROMPT_MIN:
         notify.from_env().notify(
             "地震かも（デバイス速報）",
             f"デバイスがリアルタイム計測震度 *{intensity:.1f}* を検知しました。",

@@ -9,3 +9,7 @@ detect_threshold      = 0.5
 detect_hold_seconds   = 2.0
 detect_window_seconds = 120
 raw_retention_days    = 90
+
+# 通知の閾値（イベント記録とは別。k > l を推奨）
+notify_prompt_min  = 3.0 # デバイス速報を通知する最小計測震度(k)
+notify_confirm_min = 1.5 # 確定報を通知する最小計測震度(l)

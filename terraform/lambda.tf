@@ -3,8 +3,10 @@
 locals {
   build_dir = "${path.module}/builds"
   common_env = merge(local.lambda_env, {
-    NAMZ_HMAC_SECRET       = var.hmac_secret
-    NAMZ_SLACK_WEBHOOK_URL = var.slack_webhook_url
+    NAMZ_HMAC_SECRET        = var.hmac_secret
+    NAMZ_SLACK_WEBHOOK_URL  = var.slack_webhook_url
+    NAMZ_NOTIFY_PROMPT_MIN  = tostring(var.notify_prompt_min)
+    NAMZ_NOTIFY_CONFIRM_MIN = tostring(var.notify_confirm_min)
   })
 }
 
