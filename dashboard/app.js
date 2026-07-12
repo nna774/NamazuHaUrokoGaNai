@@ -269,6 +269,9 @@ window.addEventListener('hashchange', route);
 window.addEventListener('load', () => {
   const apiInput = document.getElementById('api');
   apiInput.value = apiBase();
+  // config.js / localStorage / ?api= のいずれかでURLが決まっていれば設定欄は隠す。
+  // 未設定（自前ホスト等）の時だけ入力欄を出す。
+  if (!apiBase()) document.getElementById('api-settings').style.display = '';
   document.getElementById('save-api').onclick = () => { setApi(apiInput.value); refreshLive(); };
   // 操作したらURLへ反映（hashchange→route が実際の描画を行う）
   document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
