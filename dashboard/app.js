@@ -229,16 +229,25 @@ function renderEventInfo(m) {
   tbody.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 }
 
+let lastEventWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
+
+function drawEventWaveform() {
+  if (!lastEventWaveform) return;
+  const r = Number(document.getElementById('event-yrange').value) || 0;
+  drawWaveform(document.getElementById('event-canvas'), lastEventWaveform, r);
+}
+
 async function showEvent(id) {
   const title = document.getElementById('event-title');
-  const cv = document.getElementById('event-canvas');
   title.textContent = '読み込み中… ' + id;
   document.getElementById('event-info').innerHTML = '';
+  lastEventWaveform = null;
   try {
     const data = await apiGet('/event?id=' + encodeURIComponent(id));
     const m = data.meta || {};
     title.textContent = `震度${m.scale || ''}（計測震度 ${Number(m.max_intensity || 0).toFixed(1)}）`;
-    drawWaveform(cv, data.waveform);
+    lastEventWaveform = data.waveform;
+    drawEventWaveform();
     renderEventInfo(m);
   } catch (e) {
     title.textContent = 'エラー: ' + e.message;
@@ -315,6 +324,7 @@ window.addEventListener('load', () => {
   document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
   document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
   document.getElementById('yrange').onchange = () => { location.hash = liveHash(); };
+  document.getElementById('event-yrange').onchange = drawEventWaveform;
   document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
   document.getElementById('events-all').onchange = () => reloadEvents(1);  // フィルタ切替で1ページ目から
   document.getElementById('event-back').onclick = () => { location.hash = 'events'; };

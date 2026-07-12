@@ -91,7 +91,18 @@
       </div>
       <!-- 詳細モード（グラフを上に。一覧とは排他表示なのでガタつかない） -->
       <div id="event-detail" style="display:none">
-        <div class="row"><button id="event-back">← 一覧に戻る</button></div>
+        <div class="row">
+          <button id="event-back">← 一覧に戻る</button>
+          <label>縦軸:
+            <select id="event-yrange">
+              <option value="0" selected>自動</option>
+              <option value="20">±20 gal</option>
+              <option value="100">±100 gal</option>
+              <option value="500">±500 gal</option>
+              <option value="2000">±2000 gal</option>
+            </select>
+          </label>
+        </div>
         <h3 id="event-title"></h3>
         <canvas id="event-canvas"></canvas>
         <table id="event-info"></table>
