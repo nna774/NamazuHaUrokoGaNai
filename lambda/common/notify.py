@@ -20,10 +20,12 @@ class NullNotifier(Notifier):
 
 
 class SlackNotifier(Notifier):
-    """Slack Incoming Webhook。"""
+    """Slack Incoming Webhook。channel を指定すると payload に載せる
+    （レガシーwebhookでは送信先を上書きできる。アプリ版webhookでは無視される点に注意）。"""
 
-    def __init__(self, webhook_url: str):
+    def __init__(self, webhook_url: str, channel: str = ""):
         self.webhook_url = webhook_url
+        self.channel = channel
 
     def notify(self, title, text, fields=None):
         blocks = [
@@ -35,7 +37,10 @@ class SlackNotifier(Notifier):
                 "type": "section",
                 "fields": [{"type": "mrkdwn", "text": f"*{k}*\n{v}"} for k, v in fields.items()],
             })
-        payload = json.dumps({"text": title, "blocks": blocks}).encode()
+        body = {"text": title, "blocks": blocks}
+        if self.channel:
+            body["channel"] = self.channel
+        payload = json.dumps(body).encode()
         req = urllib.request.Request(
             self.webhook_url, data=payload, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=5).read()
@@ -53,5 +58,6 @@ def from_env() -> Notifier:
     kind = os.environ.get("NAMZ_NOTIFIER", "slack").lower()
     if kind == "slack":
         url = os.environ.get("NAMZ_SLACK_WEBHOOK_URL")
-        return SlackNotifier(url) if url else NullNotifier()
+        channel = os.environ.get("NAMZ_SLACK_CHANNEL", "")
+        return SlackNotifier(url, channel) if url else NullNotifier()
     return NullNotifier()

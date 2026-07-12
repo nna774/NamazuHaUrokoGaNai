@@ -27,6 +27,12 @@ variable "slack_webhook_url" {
   description = "Slack Incoming Webhook URL。空なら通知しない。"
 }
 
+variable "slack_channel" {
+  type        = string
+  default     = ""
+  description = "通知先チャンネル（例 #nona-kanshi）。レガシーwebhookでのみ上書き可。空ならwebhook既定先。"
+}
+
 variable "detect_threshold" {
   type    = number
   default = 0.5
