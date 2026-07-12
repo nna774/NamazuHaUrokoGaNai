@@ -53,8 +53,17 @@ def _assign(device_id: int, onset_us: int) -> str:
     return event_id(device_id, onset_us)  # 新規セッション
 
 
+def effective_intensity(item: dict) -> float:
+    """表示に使う計測震度。確定済みならFFTの confirmed_intensity、
+    未確定なら速報を含む max_intensity。一覧・詳細で同じ値を使うための単一ルール。"""
+    if item.get("cloud_confirmed") and item.get("confirmed_intensity") is not None:
+        return float(item["confirmed_intensity"])
+    return float(item.get("max_intensity", 0))
+
+
 def _record(device_id, onset_us, intensity, peak_gal,
-            device_prompt=False, cloud_confirmed=False, waveform_prefix=None):
+            device_prompt=False, cloud_confirmed=False, waveform_prefix=None,
+            confirmed_intensity=None):
     """イベントを作成/延長（get→merge→put）。(event_id, 直前のitem or None) を返す。
 
     単一デバイス・低頻度運用では並行更新はまず起きないため、条件付き更新でなく
@@ -86,6 +95,11 @@ def _record(device_id, onset_us, intensity, peak_gal,
         item["cloud_confirmed"] = True
     if waveform_prefix is not None:
         item["waveform_prefix"] = waveform_prefix
+    if confirmed_intensity is not None:
+        # クラウドFFTの権威値。セッション内の最大を保持。
+        item["confirmed_intensity"] = max(
+            Decimal(str(confirmed_intensity)),
+            Decimal(str(item.get("confirmed_intensity", 0))))
 
     tbl.put_item(Item=item)
     return eid, prev
@@ -98,9 +112,10 @@ def record_device_prompt(device_id, onset_us, intensity, peak_gal):
 
 
 def record_cloud_detection(device_id, onset_us, intensity, peak_gal, waveform_prefix=None):
-    """クラウド確定報を記録。(event_id, newly_confirmed) を返す。"""
+    """クラウド確定報を記録。(event_id, newly_confirmed) を返す。intensityはFFTの権威値。"""
     eid, prev = _record(device_id, onset_us, intensity, peak_gal,
-                        cloud_confirmed=True, waveform_prefix=waveform_prefix)
+                        cloud_confirmed=True, waveform_prefix=waveform_prefix,
+                        confirmed_intensity=intensity)
     newly_confirmed = not (prev and prev.get("cloud_confirmed"))
     return eid, newly_confirmed
 

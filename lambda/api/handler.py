@@ -72,6 +72,11 @@ def _events(q):
     page = max(0, int(q.get("page", "0")))
     size = min(100, max(1, int(q.get("size", "20"))))
     items, total = events.list_page(page, size)
+    # 一覧・詳細で同じ値を出すため、震度は effective_intensity に統一する。
+    for it in items:
+        eff = events.effective_intensity(it)
+        it["max_intensity"] = eff
+        it["scale"] = intensity_scale(eff)
     return _json(200, {"events": items, "page": page, "size": size, "total": total})
 
 
@@ -83,6 +88,12 @@ def _event(q):
     try:
         obj = s3.get_object(Bucket=BUCKET, Key=s3util.event_meta_key(eid))
         meta = json.loads(obj["Body"].read())
+        # 一覧と同じ effective_intensity に揃える（meta.jsonの値より優先）。
+        item = events.get_event(eid)
+        if item:
+            eff = events.effective_intensity(item)
+            meta["max_intensity"] = eff
+            meta["scale"] = intensity_scale(eff)
     except s3.exceptions.NoSuchKey:
         # 速報のみのイベントは波形コピーが無い。DynamoDBの情報だけ返す。
         item = events.get_event(eid)
