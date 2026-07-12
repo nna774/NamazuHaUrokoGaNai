@@ -9,7 +9,9 @@ Lambda Function URL (payload v2.0)。
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import time
 
 import boto3
@@ -22,6 +24,9 @@ s3 = boto3.client("s3")
 BUCKET = os.environ["NAMZ_BUCKET"]
 
 MAX_POINTS = 3000
+# /recent の分数上限。上限が無いと巨大値でS3 LIST/GETを大量発行して
+# ハング/課金する（認証なし公開のため要ガード）。UIの選択肢も30分まで。
+MAX_RECENT_MINUTES = 30.0
 # CORSヘッダは Function URL の cors 設定に任せる（ここで access-control-* を
 # 返すと Function URL のぶんと二重になり、ブラウザが弾く）。ここは content-type のみ。
 HEADERS = {"content-type": "application/json"}
@@ -62,15 +67,30 @@ def handler(event, context):
 
 
 def _recent(q):
-    minutes = float(q.get("minutes", "5"))
+    try:
+        minutes = float(q.get("minutes", "5"))
+    except (TypeError, ValueError):
+        minutes = 5.0
+    if not math.isfinite(minutes):
+        minutes = 5.0
+    minutes = max(0.1, min(minutes, MAX_RECENT_MINUTES))  # 巨大値によるS3スキャン暴走を防ぐ
     end_us = int(time.time() * 1e6)
     gal, win_start, fs = store.load_window(s3, BUCKET, end_us, minutes * 60)
     return _json(200, _waveform_payload(gal, win_start, fs))
 
 
+def _int_param(q, name, default, lo, hi):
+    """クエリの整数パラメータを安全にパースし [lo, hi] にクランプする。"""
+    try:
+        v = int(q.get(name, default))
+    except (TypeError, ValueError):
+        v = default
+    return max(lo, min(v, hi))
+
+
 def _events(q):
-    page = max(0, int(q.get("page", "0")))
-    size = min(100, max(1, int(q.get("size", "20"))))
+    page = _int_param(q, "page", 0, 0, 100000)
+    size = _int_param(q, "size", 20, 1, 100)
     show_all = q.get("all") in ("1", "true")
     items, total = events.list_page(page, size, show_all=show_all)
     # 一覧・詳細で同じ値を出すため、震度は effective_intensity に統一する。
@@ -82,9 +102,10 @@ def _events(q):
 
 
 def _event(q):
-    eid = q.get("id")
-    if not eid:
-        return _json(400, {"error": "missing id"})
+    eid = q.get("id", "")
+    # event_id は「デバイス4桁-バケット数値」形式のみ。S3キーに埋め込むため書式を強制する。
+    if not re.fullmatch(r"\d{4}-\d{1,16}", eid):
+        return _json(400, {"error": "bad id"})
     # meta.json があれば波形付き（クラウド確定済イベント）。
     try:
         obj = s3.get_object(Bucket=BUCKET, Key=s3util.event_meta_key(eid))
