@@ -42,15 +42,18 @@ def handler(event, context):
 
     try:
         if path.rstrip("/").endswith("alert"):
-            return _handle_alert(raw)
-        return _handle_batch(raw)
+            return _handle_alert(raw, device)
+        return _handle_batch(raw, device)
     except Exception as e:  # noqa: BLE001
         print(f"ingest error: {e!r}")
         return _resp(400, f"error: {e}")
 
 
-def _handle_batch(raw: bytes):
+def _handle_batch(raw: bytes, auth_device: str):
     b = wire.parse(raw)  # magic/長さ検証も兼ねる
+    # 認証に使った device と本文の device_id の一致を強制（別デバイスの騙り防止）
+    if str(b.meta.device_id) != auth_device:
+        return _resp(403, "device mismatch")
     key = s3util.raw_key(b.meta.device_id, b.meta.batch_start_us)
     # 測定開始時刻ベースのキーなので二重送信は同一キー上書き（冪等）
     s3.put_object(Bucket=BUCKET, Key=key, Body=raw,
@@ -58,9 +61,11 @@ def _handle_batch(raw: bytes):
     return _resp(200, f"stored {key}")
 
 
-def _handle_alert(raw: bytes):
+def _handle_alert(raw: bytes, auth_device: str):
     msg = json.loads(raw)
     device_id = int(msg["device_id"])
+    if str(device_id) != auth_device:
+        return _resp(403, "device mismatch")
     onset_us = int(msg["detected_at_us"])
     intensity = float(msg["realtime_intensity"])
     peak = float(msg["peak_gal"])
