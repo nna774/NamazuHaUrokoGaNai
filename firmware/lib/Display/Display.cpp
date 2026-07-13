@@ -88,13 +88,24 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
 
   // 震度階級（大きく中央）。severity は背景色が担うので文字は視認優先で fg。
   // font6 は '+' を持たない（5+/6+ が化ける）ため、'+/-' も持つ font4 を
-  // setTextSize(2) で拡大して使う。
+  // setTextSize(3) で拡大して使う。上段(〜y20)とステート(y110)の間の縦を
+  // なるべく使う。全幅パディングでこの帯を一度消す。
+  const int classY = 60;  // 中央基準のY
   tft_.setTextDatum(MC_DATUM);
   tft_.setTextColor(fg, bg);
   tft_.setTextPadding(w);
-  tft_.setTextSize(2);
-  tft_.drawString(scaleAscii(intensity), w / 2, 48, 4);
+  tft_.setTextSize(3);
+  const int classBottom = classY + tft_.fontHeight(4) / 2;  // 拡大後の高さで下端を算出
+  tft_.drawString(scaleAscii(intensity), w / 2, classY, 4);
   tft_.setTextSize(1);  // 以降の描画に影響しないよう戻す
+
+  // 精密な計測震度（右下に小さく添える）。階級の全幅パディングの後に描くので残る。
+  // 右寄せ・下寄せで階級の下端にそろえる。
+  snprintf(buf, sizeof(buf), "%.1f", intensity);
+  tft_.setTextDatum(BR_DATUM);
+  tft_.setTextColor(fg, bg);
+  tft_.setTextPadding(64);
+  tft_.drawString(buf, w - 6, classBottom, 4);
 
   // デバイスID（NAMAZUの下・左上）。中央の階級が全幅パディングでこの帯を
   // 消去するため、階級の後に描いて残す。左寄せなので中央とは重ならない。
@@ -104,14 +115,8 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
   tft_.setTextPadding(70);
   tft_.drawString(buf, 4, 24, 2);
 
-  // 精密な計測震度（小さく添える）。直前のIDが TL_DATUM なので中央基準に戻す。
-  snprintf(buf, sizeof(buf), "%.1f", intensity);
-  tft_.setTextDatum(MC_DATUM);
-  tft_.setTextColor(fg, bg);
-  tft_.setTextPadding(w);
-  tft_.drawString(buf, w / 2, 88, 4);
-
   // 継続ステート
+  tft_.setTextDatum(MC_DATUM);
   tft_.setTextColor(fg, bg);
   tft_.setTextPadding(w);
   tft_.drawString(status, w / 2, 110, 2);
