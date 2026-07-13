@@ -50,7 +50,9 @@ cd terraform && AWS_REGION=ap-northeast-1 terraform apply
 # ダッシュボード（app.js/index.html を触ったら）
 cd dashboard && aws s3 sync . "s3://$(cd ../terraform && terraform output -raw dashboard_bucket)/" \
   --exclude 'config.example.js' --exclude 'README.md'
-aws cloudfront create-invalidation --distribution-id <dashboard dist id> --paths '/app.js'
+aws cloudfront create-invalidation \
+  --distribution-id "$(cd ../terraform && terraform output -raw dashboard_distribution_id)" \
+  --paths '/app.js' '/index.html'
 ```
 
 `config.js` は本番APIのURL(`https://api.namazu.dark-kuins.net`)が入る。sync対象なので消すな。
