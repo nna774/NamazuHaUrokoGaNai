@@ -44,3 +44,8 @@ output "data_bucket" {
 output "dashboard_bucket" {
   value = aws_s3_bucket.dashboard.bucket
 }
+
+output "dashboard_distribution_id" {
+  description = "ダッシュボードのCloudFront Distribution ID。デプロイ後の create-invalidation に使う。"
+  value       = aws_cloudfront_distribution.dashboard.id
+}
