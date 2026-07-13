@@ -134,6 +134,15 @@ def set_field(eid: str, name: str, value) -> None:
     )
 
 
+def set_artificial(eid: str, value: bool = True) -> None:
+    """人工地震（テスト等で意図的/事故的に揺らしたもの）フラグを立てる/降ろす。
+
+    立てると一覧の既定では隠れ（全件表示でのみ出る）、詳細で「人工地震(テスト等)」
+    と表示される。確定/未確定は変えない（震度などの値はそのまま残す）。
+    """
+    set_field(eid, "artificial", bool(value))
+
+
 def set_waveform_prefix(eid: str, prefix: str) -> None:
     """波形を events/ へ保存したことを記録（フラグは変えない）。"""
     _table().update_item(
@@ -168,7 +177,8 @@ def list_page(page: int = 0, size: int = 20, show_all: bool = False) -> tuple[li
     """新しい順に並べた page ページ目(0始まり)の size 件と、（フィルタ後の）総件数を返す。
 
     show_all=False（既定）では「確定済み or 未評価(pending)」だけ出し、detectが評価して
-    確定しなかったイベント（速報は来たが地震でなかった = checked かつ未確定）を隠す。
+    確定しなかったイベント（速報は来たが地震でなかった = checked かつ未確定）と、
+    人工地震（artificial）としてフラグ付けしたものを隠す。
 
     件数が数千規模までは全件 scan+ソートで十分。それ以上に育ったら
     時刻レンジGSIでの本格ページングに移行する。
@@ -176,7 +186,8 @@ def list_page(page: int = 0, size: int = 20, show_all: bool = False) -> tuple[li
     items = _scan_all()
     if not show_all:
         items = [it for it in items
-                 if it.get("cloud_confirmed") or not it.get("checked")]
+                 if (it.get("cloud_confirmed") or not it.get("checked"))
+                 and not it.get("artificial")]
     items.sort(key=lambda x: int(x.get("onset_us", 0)), reverse=True)
     start = max(0, page) * size
     return items[start:start + size], len(items)

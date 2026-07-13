@@ -228,8 +228,8 @@ async function reloadEvents(pageNum = 1) {
       tr.innerHTML = `<td>${t}</td><td><span class="badge">${scale}</span></td>`
         + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
-      // 非該当（評価済みだが未確定）は薄く表示して区別する
-      if (ev.checked && !ev.cloud_confirmed) tr.style.opacity = '0.45';
+      // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）
+      if (ev.artificial || (ev.checked && !ev.cloud_confirmed)) tr.style.opacity = '0.45';
       tr.onclick = () => { location.hash = 'event/' + ev.event_id; };
       tbody.appendChild(tr);
     }
@@ -250,6 +250,7 @@ async function reloadEvents(pageNum = 1) {
 }
 
 function eventStateLabel(m) {
+  if (m.artificial) return '人工地震（テスト等）';
   if (m.cloud_confirmed) return '確定';
   if (m.checked) return '非該当（評価済み・未確定）';
   return '速報のみ（評価待ち）';

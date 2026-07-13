@@ -120,6 +120,7 @@ def _event(q):
             meta["device_prompt"] = bool(item.get("device_prompt"))
             meta["cloud_confirmed"] = bool(item.get("cloud_confirmed"))
             meta["checked"] = bool(item.get("checked"))
+            meta["artificial"] = bool(item.get("artificial"))
     except s3.exceptions.NoSuchKey:
         # 速報のみのイベントは波形コピーが無い。DynamoDBの情報だけ返す。
         item = events.get_event(eid)
@@ -136,6 +137,7 @@ def _event(q):
             "device_prompt": bool(item.get("device_prompt")),
             "cloud_confirmed": bool(item.get("cloud_confirmed")),
             "checked": bool(item.get("checked")),
+            "artificial": bool(item.get("artificial")),
             "note": "速報のみ（波形の永久保存なし）。raw/が残っていればライブ表示で遡れる。",
         }
         return _json(200, {"meta": meta, "waveform": _waveform_payload(np.empty((0, 3)), meta["onset_us"], 100.0)})
