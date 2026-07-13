@@ -33,6 +33,28 @@ function intensityScale(i) {
   return '7';
 }
 
+// 気象庁の震度階級カラー（HPColorGuide 2020年7月版）。[背景, 文字]。
+// 明色の低震度は濃い文字、濃色の高震度は白文字にして可読性を確保する。
+const SCALE_STYLE = {
+  '0':  ['#b0b0b0', '#333'],
+  '1':  ['#f2f2ff', '#333'],
+  '2':  ['#00aaff', '#333'],
+  '3':  ['#0041ff', '#fff'],
+  '4':  ['#fae696', '#333'],
+  '5弱': ['#ffe600', '#333'],
+  '5強': ['#ff9900', '#333'],
+  '6弱': ['#ff2800', '#fff'],
+  '6強': ['#a50021', '#fff'],
+  '7':  ['#b40068', '#fff'],
+};
+const ART_STYLE = ['#888', '#fff'];  // 人工地震はグレー
+
+// 震度バッジのHTML。階級で色分けし、人工地震はグレーにする。
+function scaleBadge(scale, artificial) {
+  const [bg, fg] = artificial ? ART_STYLE : (SCALE_STYLE[scale] || SCALE_STYLE['0']);
+  return `<span class="badge" style="background:${bg};color:${fg}">${scale}</span>`;
+}
+
 // --- Canvas 波形描画 ---
 const COLORS = { x: '#e74c3c', y: '#2ecc71', z: '#3498db' };
 
@@ -227,7 +249,11 @@ async function reloadEvents(pageNum = 1) {
       const i = iv.toFixed(1);
       const scale = ev.scale || intensityScale(iv);
       const dur = ev.last_us ? ((Number(ev.last_us) - Number(ev.onset_us)) / 1e6).toFixed(0) + 's' : '—';
-      tr.innerHTML = `<td>${t}</td><td><span class="badge">${scale}</span></td>`
+      // 震度バッジは階級で色分け（人工地震はグレー）。人工地震は種別を示すタグも震度セル内に
+      // 添える。列を足すとチェック有無でレイアウトが変わるため、既存セル内で完結させる。
+      // グレーは震度0とも紛らわしいので「人工」タグを併記して判別を確実にする（全件表示でのみ出る）。
+      const artTag = ev.artificial ? ' <span class="badge badge-art">人工地震</span>' : '';
+      tr.innerHTML = `<td>${t}</td><td>${scaleBadge(scale, ev.artificial)}${artTag}</td>`
         + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
       // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）
@@ -267,7 +293,7 @@ function renderEventInfo(m) {
   if (onset) rows.push(['発生時刻', new Date(onset / 1000).toLocaleString('ja-JP')]);
   rows.push(['継続時間', `${dur.toFixed(0)} 秒`]);
   rows.push(['計測震度', Number(m.max_intensity || 0).toFixed(1)]);
-  rows.push(['震度', m.scale || intensityScale(Number(m.max_intensity || 0))]);
+  rows.push(['震度', scaleBadge(m.scale || intensityScale(Number(m.max_intensity || 0)), m.artificial)]);
   rows.push(['ピーク加速度', `${Number(m.peak_gal || 0).toFixed(2)} gal`]);
   if (m.a0_gal != null) rows.push(['基準加速度 a0', `${Number(m.a0_gal).toFixed(2)} gal`]);
   rows.push(['状態', eventStateLabel(m)]);
