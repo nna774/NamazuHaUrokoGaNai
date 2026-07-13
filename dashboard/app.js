@@ -159,6 +159,14 @@ function drawWaveform(cv, wf, fixedRange) {
 
 // --- ライブ ---
 let liveTimer = null;
+let lastLiveWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
+
+function redrawLive() {
+  if (!lastLiveWaveform) return;
+  const yrange = Number(document.getElementById('yrange').value) || 0;
+  drawWaveform(document.getElementById('live-canvas'), lastLiveWaveform, yrange);
+}
+
 async function refreshLive() {
   const status = document.getElementById('live-status');
   const minutes = document.getElementById('minutes').value;
@@ -166,6 +174,7 @@ async function refreshLive() {
   try {
     status.textContent = '取得中…';
     const wf = await apiGet('/recent?minutes=' + minutes);
+    lastLiveWaveform = wf;
     drawWaveform(document.getElementById('live-canvas'), wf, yrange);
     // データ鮮度: バッチは完成後に送られるため、右端は常に30〜40秒ほど過去になる
     let age = '';
@@ -358,7 +367,12 @@ window.addEventListener('load', () => {
   // 操作したらURLへ反映（hashchange→route が実際の描画を行う）
   document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
   document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
-  document.getElementById('yrange').onchange = () => { location.hash = liveHash(); };
+  // 縦軸レンジは取得済みデータの描画変換にすぎないので再フェッチしない。
+  // URLは replaceState で更新して hashchange→route(=再取得) を発火させない。
+  document.getElementById('yrange').onchange = () => {
+    history.replaceState(null, '', '#' + liveHash());
+    if (lastLiveWaveform) redrawLive(); else refreshLive();
+  };
   document.getElementById('event-yrange').onchange = drawEventWaveform;
   document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
   document.getElementById('events-all').onchange = () => reloadEvents(1);  // フィルタ切替で1ページ目から
