@@ -50,6 +50,7 @@ detect Lambda はこれを共有する。ファームウェアの C++ 実装(`fi
 5. **運用強化** — OTA、欠測監視、生活振動チューニング
 
 詳細は [docs/design.md](docs/design.md) と [plan.md](plan.md) を参照。
+リポジトリの歩き方（各ドキュメントの索引・運用手順）は [CLAUDE.md](CLAUDE.md) にまとめてある。
 
 ## ライセンス
 
