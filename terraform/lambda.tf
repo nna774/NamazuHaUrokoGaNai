@@ -60,6 +60,43 @@ resource "aws_lambda_permission" "detect_from_s3" {
   source_arn    = aws_s3_bucket.data.arn
 }
 
+# --- watchdog（欠測監視: 定期起動して最終受信からの経過を見る） ---
+resource "aws_lambda_function" "watchdog" {
+  function_name    = "${local.name}-watchdog"
+  role             = aws_iam_role.lambda.arn
+  handler          = "handler.handler"
+  runtime          = "python3.12"
+  filename         = "${local.build_dir}/watchdog.zip"
+  source_code_hash = try(filebase64sha256("${local.build_dir}/watchdog.zip"), null)
+  timeout          = 30
+  memory_size      = 256
+
+  environment {
+    variables = merge(local.common_env, {
+      NAMZ_OFFLINE_RENOTIFY_S = tostring(var.offline_renotify_seconds)
+    })
+  }
+}
+
+resource "aws_cloudwatch_event_rule" "watchdog" {
+  name                = "${local.name}-watchdog"
+  description         = "欠測監視 watchdog を定期起動する"
+  schedule_expression = var.watchdog_schedule
+}
+
+resource "aws_cloudwatch_event_target" "watchdog" {
+  rule = aws_cloudwatch_event_rule.watchdog.name
+  arn  = aws_lambda_function.watchdog.arn
+}
+
+resource "aws_lambda_permission" "watchdog_from_events" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.watchdog.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.watchdog.arn
+}
+
 # --- api ---
 resource "aws_lambda_function" "api" {
   function_name    = "${local.name}-api"

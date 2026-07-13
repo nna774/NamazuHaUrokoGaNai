@@ -35,6 +35,6 @@ build_one() {
   echo "built $BUILD/$fn.zip"
 }
 
-for fn in ingest detect api; do
+for fn in ingest detect api watchdog; do
   build_one "$fn"
 done

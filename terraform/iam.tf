@@ -35,7 +35,7 @@ data "aws_iam_policy_document" "lambda" {
   }
 
   statement {
-    sid    = "Events"
+    sid    = "DynamoDB"
     effect = "Allow"
     actions = [
       "dynamodb:GetItem",
@@ -44,7 +44,10 @@ data "aws_iam_policy_document" "lambda" {
       "dynamodb:Scan",
       "dynamodb:Query",
     ]
-    resources = [aws_dynamodb_table.events.arn]
+    resources = [
+      aws_dynamodb_table.events.arn,
+      aws_dynamodb_table.devices.arn,
+    ]
   }
 }
 

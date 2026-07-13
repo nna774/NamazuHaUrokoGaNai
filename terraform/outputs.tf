@@ -41,6 +41,11 @@ output "data_bucket" {
   value = aws_s3_bucket.data.bucket
 }
 
+output "devices_table" {
+  description = "デバイス生存台帳の DynamoDB テーブル名。"
+  value       = aws_dynamodb_table.devices.name
+}
+
 output "dashboard_bucket" {
   value = aws_s3_bucket.dashboard.bucket
 }

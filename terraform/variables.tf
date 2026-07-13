@@ -71,3 +71,21 @@ variable "notify_confirm_min" {
   default     = 1.5
   description = "確定報を通知する最小計測震度(l)。k > l。"
 }
+
+variable "offline_after_seconds" {
+  type        = number
+  default     = 300
+  description = "最終受信からこの秒数を超えたら欠測とみなす。バッチは30秒間隔なので既定300秒＝約10バッチ落ち。"
+}
+
+variable "offline_renotify_seconds" {
+  type        = number
+  default     = 86400
+  description = "欠測が続いている間に通知を再送する間隔[秒]。既定1日。"
+}
+
+variable "watchdog_schedule" {
+  type        = string
+  default     = "rate(5 minutes)"
+  description = "欠測監視 watchdog の起動間隔（EventBridge schedule expression）。通知の遅れ ≒ 欠測しきい値 + この間隔。どの頻度でも無料枠に収まるので、遅さの許容度で決める。"
+}
