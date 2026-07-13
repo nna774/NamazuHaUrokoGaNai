@@ -329,17 +329,71 @@ async function showEvent(id) {
   }
 }
 
+// --- デバイス（欠測監視） ---
+let devicesTimer = null;
+
+// 経過秒を日本語の粗い相対表記に。watchdog._humanize と同じ粒度。
+function fmtAgo(sec) {
+  if (sec == null) return '—';
+  const s = Math.max(0, Math.round(sec));
+  if (s < 90) return `${s}秒`;
+  const m = Math.floor(s / 60);
+  if (m < 90) return `${m}分`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}時間`;
+  return `${Math.floor(h / 24)}日`;
+}
+
+async function refreshDevices() {
+  const status = document.getElementById('devices-status');
+  const tbody = document.querySelector('#devices-table tbody');
+  try {
+    status.textContent = '取得中…';
+    const data = await apiGet('/devices');
+    tbody.innerHTML = '';
+    for (const d of (data.devices || [])) {
+      const tr = document.createElement('tr');
+      const id = String(d.device_id).padStart(4, '0');
+      const st = d.online
+        ? '<span class="status-ok">● オンライン</span>'
+        : '<span class="status-ng">● 欠測</span>';
+      const last = d.last_ingest_at_us
+        ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
+        : '—';
+      tr.innerHTML = `<td>${id}</td><td>${st}</td><td>${last}</td>`
+        + `<td>${fmtAgo(d.lag_s)}遅れ</td><td>${d.batches_total ?? 0}</td>`;
+      tbody.appendChild(tr);
+    }
+    const n = (data.devices || []).length;
+    const off = (data.devices || []).filter(d => !d.online).length;
+    status.textContent = n
+      ? `${n} 台` + (off ? `・欠測 ${off} 台` : '・全台オンライン')
+      : 'まだ受信したデバイスがない';
+  } catch (e) {
+    status.textContent = 'エラー: ' + e.message;
+  }
+}
+
+function scheduleDevices() {
+  if (devicesTimer) { clearInterval(devicesTimer); devicesTimer = null; }
+  if (document.getElementById('devices-auto').checked) {
+    devicesTimer = setInterval(refreshDevices, 30000);
+  }
+}
+
 // --- ハッシュルーティング ---
 // #live?m=<分>&auto=<0|1>&r=<レンジ> / #events?p=<頁>&all=<0|1>
 // / #event/<id>?p=&all=&r= を location.hash に持たせ、リロードや共有URLで
 // 状態(タブ・表示範囲・自動更新・全件フィルタ・ページ)が復元されるようにする。
 function showView(name) {
-  const tabs = { live: 'tab-live', events: 'tab-events' };
+  const tabs = { live: 'tab-live', events: 'tab-events', devices: 'tab-devices' };
   for (const k in tabs) {
     document.getElementById(tabs[k]).classList.toggle('active', k === name);
     document.getElementById(k).classList.toggle('active', k === name);
   }
+  // タブを離れたら各自の自動更新タイマーを止める
   if (name !== 'live' && liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (name !== 'devices' && devicesTimer) { clearInterval(devicesTimer); devicesTimer = null; }
 }
 
 function parseHash() {
@@ -393,6 +447,10 @@ function route() {
     showEventsMode(false);
     document.getElementById('events-all').checked = params.all === '1';
     reloadEvents(params.p ? parseInt(params.p, 10) : 1);
+  } else if (path === 'devices') {
+    showView('devices');
+    refreshDevices();
+    scheduleDevices();
   } else {
     // live（既定）。URLの表示範囲・自動更新を操作子へ反映してから描画。
     if (params.m) document.getElementById('minutes').value = params.m;
@@ -434,7 +492,10 @@ window.addEventListener('load', () => {
   // フィルタ切替はURLへ反映（hashchange→route が1ページ目から再取得する）
   document.getElementById('events-all').onchange = () => { location.hash = eventsHash(1); };
   document.getElementById('event-back').onclick = () => { location.hash = eventsHash(eventsPageNum); };
+  document.getElementById('reload-devices').onclick = () => refreshDevices();
+  document.getElementById('devices-auto').onchange = () => scheduleDevices();
   document.getElementById('tab-live').onclick = () => { location.hash = liveHash(); };
   document.getElementById('tab-events').onclick = () => { location.hash = eventsHash(eventsPageNum); };
+  document.getElementById('tab-devices').onclick = () => { location.hash = 'devices'; };
   route();
 });

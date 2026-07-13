@@ -22,6 +22,8 @@
     tr[data-id]:hover { background: rgba(192,57,43,.08); }
     .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 12px; }
     .badge-art { background: transparent; color: #888; border: 1px solid #888; margin-left: 4px; }
+    .status-ok { color: #2e9b57; font-weight: 600; }
+    .status-ng { color: var(--accent); font-weight: 600; }
     .tabs { display: flex; gap: 8px; }
     .tabs button.active { background: var(--accent); color: #fff; }
     section { display: none; }
@@ -36,6 +38,7 @@
     <div class="tabs">
       <button id="tab-live" class="active">ライブ</button>
       <button id="tab-events">イベント</button>
+      <button id="tab-devices">デバイス</button>
     </div>
     <span style="flex:1"></span>
     <span id="api-settings" style="display:none">
@@ -108,6 +111,20 @@
         <canvas id="event-canvas"></canvas>
         <table id="event-info"></table>
       </div>
+    </section>
+
+    <section id="devices">
+      <div class="row">
+        <button id="reload-devices">再読み込み</button>
+        <label><input type="checkbox" id="devices-auto" checked> 自動更新</label>
+        <span id="devices-status" class="muted"></span>
+      </div>
+      <table id="devices-table">
+        <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted">状態は最終受信からの経過で判定（緑=オンライン / 赤=欠測）。
+        「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。</p>
     </section>
   </main>
 
