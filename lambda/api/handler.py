@@ -17,12 +17,14 @@ import time
 import boto3
 import numpy as np
 
-from common import events, s3util, store, wire
+from common import devices, events, s3util, store, wire
 from jismo.rounding import intensity_scale
 
 s3 = boto3.client("s3")
 BUCKET = os.environ["NAMZ_BUCKET"]
 
+# online/offline の境目。watchdog の欠測しきい値と揃える（同じ env を両者に渡す）。
+OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))
 MAX_POINTS = 3000
 # /recent の分数上限。上限が無いと巨大値でS3 LIST/GETを大量発行して
 # ハング/課金する（認証なし公開のため要ガード）。UIの選択肢も30分まで。
@@ -60,6 +62,11 @@ def handler(event, context):
             return _events(q)
         if path.endswith("/event"):
             return _event(q)
+        m = re.search(r"/devices/(\d{1,4})$", path)  # 個別デバイス（より具体的な方を先に）
+        if m:
+            return _device(int(m.group(1)))
+        if path.endswith("/devices"):
+            return _devices()
         return _json(404, {"error": "not found"})
     except Exception as e:  # noqa: BLE001
         print(f"api error: {e!r}")
@@ -154,6 +161,39 @@ def _event(q):
     gal = np.concatenate(parts, axis=0) if parts else np.empty((0, 3))
     payload = _waveform_payload(gal, win_start or meta.get("onset_us", 0), fs)
     return _json(200, {"meta": meta, "waveform": payload})
+
+
+def _device_view(item: dict, now_us: int) -> dict:
+    """デバイス台帳の1項目を、表示向けに整形する（経過秒・online 判定を付ける）。"""
+    last = int(item.get("last_ingest_at_us", 0))
+    age_us = (now_us - last) if last else None
+    last_batch = int(item.get("last_batch_start_us", 0))
+    return {
+        "device_id": int(item.get("device_id", 0)),
+        "last_ingest_at_us": last,
+        "last_batch_start_us": last_batch,
+        "batches_total": int(item.get("batches_total", 0)),
+        "last_batch_key": item.get("last_batch_key", ""),
+        # 生存は受信壁時計で、データ遅延は測定時刻で（バックフィル対策）。
+        "age_s": (age_us / 1e6) if age_us is not None else None,
+        "lag_s": ((now_us - last_batch) / 1e6) if last_batch else None,
+        "online": age_us is not None and age_us <= int(OFFLINE_AFTER_S * 1e6),
+    }
+
+
+def _devices():
+    now_us = int(time.time() * 1e6)
+    items = [_device_view(it, now_us) for it in devices.list_devices()]
+    return _json(200, {"devices": items, "offline_after_s": OFFLINE_AFTER_S})
+
+
+def _device(device_id: int):
+    now_us = int(time.time() * 1e6)
+    item = devices.get_device(device_id)
+    if item is None:
+        return _json(404, {"error": "device not found"})
+    return _json(200, {"device": _device_view(item, now_us),
+                       "offline_after_s": OFFLINE_AFTER_S})
 
 
 def _waveform_payload(gal: np.ndarray, start_us: int, fs: float) -> dict:

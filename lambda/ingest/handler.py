@@ -10,10 +10,11 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 
 import boto3
 
-from common import auth, events, notify, s3util, wire
+from common import auth, devices, events, notify, s3util, wire
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
@@ -58,6 +59,13 @@ def _handle_batch(raw: bytes, auth_device: str):
     # 測定開始時刻ベースのキーなので二重送信は同一キー上書き（冪等）
     s3.put_object(Bucket=BUCKET, Key=key, Body=raw,
                   ContentType="application/octet-stream")
+    # 生存台帳を更新（watchdog の欠測判定・/devices 表示の元）。ここは主経路ではないので、
+    # 失敗してもバッチ保存自体は成功扱いにする（デバイスに無駄な再送をさせない）。
+    try:
+        devices.record_batch(b.meta.device_id, b.meta.batch_start_us,
+                             int(time.time() * 1e6), last_batch_key=key)
+    except Exception as e:  # noqa: BLE001
+        print(f"devices.record_batch failed: {e!r}")
     return _resp(200, f"stored {key}")
 
 
