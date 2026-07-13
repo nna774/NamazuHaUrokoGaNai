@@ -8,6 +8,6 @@ locals {
   lambda_env = {
     NAMZ_BUCKET        = local.data_bucket
     NAMZ_EVENTS_TABLE  = aws_dynamodb_table.events.name
-    NAMZ_DASHBOARD_URL = "https://${aws_cloudfront_distribution.dashboard.domain_name}"
+    NAMZ_DASHBOARD_URL = local.custom_domain_enabled ? "https://${var.dashboard_domain}" : "https://${aws_cloudfront_distribution.dashboard.domain_name}"
   }
 }

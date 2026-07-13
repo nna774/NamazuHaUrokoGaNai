@@ -8,6 +8,18 @@ variable "project" {
   default = "namazu"
 }
 
+variable "dashboard_domain" {
+  type        = string
+  default     = "namazu.dark-kuins.net"
+  description = "ダッシュボードのカスタムドメイン。CloudFrontのaliasにする。空ならCloudFront既定ドメイン+既定証明書のまま。"
+}
+
+variable "api_domain" {
+  type        = string
+  default     = "api.namazu.dark-kuins.net"
+  description = "読み取りAPIのカスタムドメイン。Function URLを前段CloudFrontで包んでaliasにする。空ならFunction URLのまま。"
+}
+
 variable "raw_retention_days" {
   type        = number
   default     = 90

@@ -24,6 +24,7 @@ resource "aws_cloudfront_origin_access_control" "dashboard" {
 resource "aws_cloudfront_distribution" "dashboard" {
   enabled             = true
   default_root_object = "index.html"
+  aliases             = local.custom_domain_enabled ? [var.dashboard_domain] : []
 
   origin {
     domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
@@ -50,8 +51,20 @@ resource "aws_cloudfront_distribution" "dashboard" {
     }
   }
 
-  viewer_certificate {
-    cloudfront_default_certificate = true
+  # カスタムドメインありなら ACM(us-east-1)、なければ CloudFront 既定証明書。
+  dynamic "viewer_certificate" {
+    for_each = local.custom_domain_enabled ? [1] : []
+    content {
+      acm_certificate_arn      = local.cert_arn
+      ssl_support_method       = "sni-only"
+      minimum_protocol_version = "TLSv1.2_2021"
+    }
+  }
+  dynamic "viewer_certificate" {
+    for_each = local.custom_domain_enabled ? [] : [1]
+    content {
+      cloudfront_default_certificate = true
+    }
   }
 
   price_class = "PriceClass_200"
