@@ -1,15 +1,15 @@
 # terraform — AWSリソース
 
-S3(raw 90日/events 永久)・DynamoDB・Lambda×3(Function URL)・S3→detect通知・
-CloudFrontダッシュボード・IAM。
+S3(raw 90日/events 永久)・DynamoDB×2(events/devices)・Lambda×4・S3→detect通知・
+EventBridge→watchdog定期起動・CloudFrontダッシュボード・IAM。
 
 ## 構成
 
 | ファイル | 内容 |
 |----------|------|
 | `s3.tf` | データバケット。raw/ は lifecycle で90日expire、events/ は対象外で永久。raw/作成で detect起動 |
-| `dynamodb.tf` | イベントテーブル（PAY_PER_REQUEST） |
-| `lambda.tf` | ingest/detect/api。ingest・api に Function URL(認証NONE) |
+| `dynamodb.tf` | イベントテーブル＋デバイス生存台帳（PAY_PER_REQUEST） |
+| `lambda.tf` | ingest/detect/api/watchdog。ingest・api に Function URL(認証NONE)、watchdog は EventBridge 定期起動 |
 | `iam.tf` | Lambda実行ロール（S3/DynamoDB/logs） |
 | `dashboard.tf` | 非公開S3 + CloudFront(OAC)。認証なし配信 |
 
@@ -24,6 +24,14 @@ terraform apply
 
 出力される `ingest_url` を firmware の `secrets.h`（kIngestUrl、kAlertUrl=…/alert）へ、
 `api_url` を dashboard の設定へ、`dashboard_url` がブラウザで開くURL。
+
+### 認証情報・state・tfvars
+
+- **AWS認証情報**: このマシンに入っている `aws` CLI の設定（`~/.aws/` のプロファイル/
+  SSO等）をそのまま使う。`aws sts get-caller-identity` が通れば terraform も通る。
+  リージョンは `AWS_REGION=ap-northeast-1` を渡す。
+- **tfstate は S3 バックエンド**（`nana-terraform-state` / key `namazu.tfstate`、
+  `versions.tf`）。手元にローカルstateは持たない。
 
 ## カスタムドメイン(namazu.dark-kuins.net / api.namazu.dark-kuins.net)
 

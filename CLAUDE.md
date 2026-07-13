@@ -35,12 +35,24 @@
   - `checked` … detectが評価済み（未確定なら一覧の既定で隠れる=非該当）
   - `artificial` … 人工地震(テスト等)フラグ。立てると一覧の既定で隠れ、`all=1` でのみ薄く出る
   - 一覧の既定フィルタは「(確定 or 未評価) かつ 非artificial」。表示震度は `effective_intensity`。
+- **欠測監視**（データが来ないこと自体の検知。DynamoDB `namazu-devices`、
+  [lambda/common/devices.py](lambda/common/devices.py)）:
+  - 生存の主信号は `last_ingest_at_us`（ingestが**受信した壁時計時刻**）。firmwareは
+    WiFi断のあとバックフィルするので、測定時刻(`last_batch_start_us`)だけでは
+    「復旧直後の追いつき中」と「本当に沈黙」が区別できない。生存は受信壁時計で見る。
+  - `watchdog` Lambda(EventBridge定期起動)が最終受信からの経過を見て欠測をSlack通知。
+    落ちている間は `NAMZ_OFFLINE_RENOTIFY_S`(既定1日)ごとに再送、受信再開で復帰通知。
+    欠測状態(`offline_notified_at_us`)は watchdog だけが書き、ingestの受信系フィールドとは
+    互いに素なのでUpdateItemで分ければ競合しない。状態遷移は `devices.evaluate()` に集約。
 - **api Lambda(Function URL)は認証なし・読み取り専用**。書き込み(フラグ操作等)は手元から
-  DynamoDBを直接更新する `tools/flag_event.py` で行う。
+  DynamoDBを直接更新する `tools/flag_event.py` で行う。api は `/devices`・`/devices/<id>` で
+  デバイス生存も返す。
 
 ## デプロイ手順（AWS: リージョン ap-northeast-1 / project=namazu）
 
-terraform state はS3バックエンド(`nana-terraform-state`)。AWS認証情報とリージョンが要る。
+terraform state はS3バックエンド(`nana-terraform-state`)。AWS認証情報はこのマシンの
+`aws` CLI 設定をそのまま使う(`aws sts get-caller-identity` が通ればOK)。リージョンは
+`AWS_REGION=ap-northeast-1`。詳細は [terraform/README.md](terraform/README.md#認証情報statetfvars)。
 
 ```bash
 # Lambda（common/ を触ったら detect と api の両方に効く）

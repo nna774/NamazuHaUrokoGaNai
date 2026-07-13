@@ -16,6 +16,7 @@ Qiita記事「地震観測用加速度センサ5種の性能比較」
                             │ HTTPS (Lambda Function URL, HMAC認証)
                             v
 [ingest Lambda] ─→ S3 raw/YYYY/MM/DD/HH/*.bin  (90日でexpire)
+       │            └─→ DynamoDB devices（最終受信を記録＝生存台帳）
        │ (非同期起動)
        v
 [detect Lambda] ─ 直近数分を再計算・検証
@@ -23,7 +24,10 @@ Qiita記事「地震観測用加速度センサ5種の性能比較」
        ├─→ S3 events/<id>/ へ波形コピー（永久保存）
        └─→ Slack 通知（Notifier差し替え可能）
 
-[dashboard] S3+CloudFront 静的SPA ←→ [api Lambda]
+[watchdog Lambda] ← EventBridge 定期起動。devices の最終受信からの経過を見て
+       └─→ 欠測を Slack 通知（1日ごと再送・受信再開で復帰通知）
+
+[dashboard] S3+CloudFront 静的SPA ←→ [api Lambda]（波形・イベント・デバイス生存）
 ```
 
 ## ディレクトリ
