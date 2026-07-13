@@ -208,7 +208,9 @@ function scheduleLive() {
 
 // --- イベント ---
 const EVENTS_PAGE_SIZE = 20;
+let eventsPageNum = 1;  // 詳細→戻る/行クリック時に一覧の現在ページを引き継ぐ
 async function reloadEvents(pageNum = 1) {
+  eventsPageNum = pageNum;
   const status = document.getElementById('events-status');
   const tbody = document.querySelector('#events-table tbody');
   const page0 = Math.max(0, pageNum - 1);
@@ -230,7 +232,7 @@ async function reloadEvents(pageNum = 1) {
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
       // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）
       if (ev.artificial || (ev.checked && !ev.cloud_confirmed)) tr.style.opacity = '0.45';
-      tr.onclick = () => { location.hash = 'event/' + ev.event_id; };
+      tr.onclick = () => { location.hash = eventHash(ev.event_id); };
       tbody.appendChild(tr);
     }
     // ページャ
@@ -241,8 +243,8 @@ async function reloadEvents(pageNum = 1) {
     const next = document.getElementById('ev-next');
     prev.disabled = pageNum <= 1;
     next.disabled = pageNum >= pages;
-    prev.onclick = () => { location.hash = `events?p=${pageNum - 1}`; };
-    next.onclick = () => { location.hash = `events?p=${pageNum + 1}`; };
+    prev.onclick = () => { location.hash = eventsHash(pageNum - 1); };
+    next.onclick = () => { location.hash = eventsHash(pageNum + 1); };
     status.textContent = `${total} 件`;
   } catch (e) {
     status.textContent = 'エラー: ' + e.message;
@@ -275,6 +277,7 @@ function renderEventInfo(m) {
 }
 
 let lastEventWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
+let currentEventId = null;     // event-yrange 変更時に詳細ハッシュを組み直すため
 
 function drawEventWaveform() {
   if (!lastEventWaveform) return;
@@ -283,6 +286,7 @@ function drawEventWaveform() {
 }
 
 async function showEvent(id) {
+  currentEventId = id;
   const title = document.getElementById('event-title');
   title.textContent = '読み込み中… ' + id;
   document.getElementById('event-info').innerHTML = '';
@@ -300,8 +304,9 @@ async function showEvent(id) {
 }
 
 // --- ハッシュルーティング ---
-// #live?m=<分>&auto=<0|1> / #events / #event/<id> を location.hash に持たせ、
-// リロードや共有URLで状態(タブ・表示範囲・自動更新)が復元されるようにする。
+// #live?m=<分>&auto=<0|1>&r=<レンジ> / #events?p=<頁>&all=<0|1>
+// / #event/<id>?p=&all=&r= を location.hash に持たせ、リロードや共有URLで
+// 状態(タブ・表示範囲・自動更新・全件フィルタ・ページ)が復元されるようにする。
 function showView(name) {
   const tabs = { live: 'tab-live', events: 'tab-events' };
   for (const k in tabs) {
@@ -327,6 +332,20 @@ function liveHash() {
   return `live?m=${m}&auto=${auto}&r=${r}`;
 }
 
+// 現在のイベント一覧操作状態（ページ・全件フィルタ）を表すハッシュ
+function eventsHash(pageNum) {
+  const all = document.getElementById('events-all').checked ? 1 : 0;
+  return `events?p=${pageNum || 1}&all=${all}`;
+}
+
+// イベント詳細ハッシュ。戻り先の一覧状態(p/all)と詳細の縦軸レンジ(r)を持たせ、
+// リロード・共有URLでフィルタや表示範囲が復元されるようにする。
+function eventHash(id) {
+  const all = document.getElementById('events-all').checked ? 1 : 0;
+  const r = document.getElementById('event-yrange').value;
+  return `event/${encodeURIComponent(id)}?p=${eventsPageNum}&all=${all}&r=${r}`;
+}
+
 function showEventsMode(detail) {
   // 一覧モードと詳細モードは排他表示（同時に出さないのでテーブルがガタつかない）
   document.getElementById('events-list').style.display = detail ? 'none' : 'block';
@@ -338,10 +357,15 @@ function route() {
   if (path.startsWith('event/')) {
     showView('events');
     showEventsMode(true);
+    // 戻り先の一覧状態と詳細の縦軸レンジを操作子へ復元してから描画
+    document.getElementById('events-all').checked = params.all === '1';
+    if (params.p) eventsPageNum = parseInt(params.p, 10);
+    if (params.r !== undefined) document.getElementById('event-yrange').value = params.r;
     showEvent(decodeURIComponent(path.slice('event/'.length)));
   } else if (path === 'events') {
     showView('events');
     showEventsMode(false);
+    document.getElementById('events-all').checked = params.all === '1';
     reloadEvents(params.p ? parseInt(params.p, 10) : 1);
   } else {
     // live（既定）。URLの表示範囲・自動更新を操作子へ反映してから描画。
@@ -374,11 +398,17 @@ window.addEventListener('load', () => {
     history.replaceState(null, '', '#' + liveHash());
     if (lastLiveWaveform) redrawLive(); else refreshLive();
   };
-  document.getElementById('event-yrange').onchange = drawEventWaveform;
+  // 詳細の縦軸レンジは取得済みデータの再描画にすぎないので再フェッチしない。
+  // URLは replaceState で更新して hashchange→route(=再取得) を発火させない。
+  document.getElementById('event-yrange').onchange = () => {
+    if (currentEventId) history.replaceState(null, '', '#' + eventHash(currentEventId));
+    drawEventWaveform();
+  };
   document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
-  document.getElementById('events-all').onchange = () => reloadEvents(1);  // フィルタ切替で1ページ目から
-  document.getElementById('event-back').onclick = () => { location.hash = 'events'; };
+  // フィルタ切替はURLへ反映（hashchange→route が1ページ目から再取得する）
+  document.getElementById('events-all').onchange = () => { location.hash = eventsHash(1); };
+  document.getElementById('event-back').onclick = () => { location.hash = eventsHash(eventsPageNum); };
   document.getElementById('tab-live').onclick = () => { location.hash = liveHash(); };
-  document.getElementById('tab-events').onclick = () => { location.hash = 'events'; };
+  document.getElementById('tab-events').onclick = () => { location.hash = eventsHash(eventsPageNum); };
   route();
 });
