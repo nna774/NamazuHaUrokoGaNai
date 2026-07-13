@@ -264,30 +264,32 @@ void loop() {
   if (shakingNow && !active) { active = true; sessStart = now; }
   if (active && sinceShake > kDispCloseSeconds * 1000UL) active = false;
 
+  // 継続ステートを画面全体の背景色で表す（遠目でも判別できるように）。
+  // idle=暗い紺 / closing=橙 / active=赤。文字色はDisplay側で背景から自動選択。
   String status;
-  uint16_t scol;
+  uint16_t bg;
   if (active && shakingNow) {
     status = "ACTIVE " + String((now - sessStart) / 1000) + "s";
-    scol = TFT_RED;
+    bg = TFT_RED;
   } else if (active) {
     uint32_t elapsed = sinceShake / 1000;
     uint32_t left = elapsed >= kDispCloseSeconds ? 0 : kDispCloseSeconds - elapsed;
     status = "closing " + String(left) + "s";
-    scol = TFT_ORANGE;
+    bg = TFT_ORANGE;
   } else {
     status = "idle";
-    scol = TFT_DARKGREY;
+    bg = TFT_NAVY;
   }
 
   // 描画は約500msごと（ボタンは250msごとに見る）
   if (++tick % 2 == 0) {
 #ifdef NAMZ_SENSOR_TEST
-    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, status, scol);
+    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, status, bg);
 #else
     bool wifi = WiFi.status() == WL_CONNECTED;
     String ip = wifi ? WiFi.localIP().toString() : String("");
     gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, gUploader.spillCount(),
-                    status, scol);
+                    status, bg);
 #endif
   }
   vTaskDelay(pdMS_TO_TICKS(250));
