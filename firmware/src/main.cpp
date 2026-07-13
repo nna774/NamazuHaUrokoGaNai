@@ -11,6 +11,7 @@
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
+#include <time.h>
 
 #include "Batch.h"
 #include "Display.h"
@@ -207,7 +208,7 @@ void setup() {
   delay(200);
   Serial.println("\n[boot] NamazuHaUrokoGaNai");
 
-  gDisplay.begin();
+  gDisplay.begin(kDeviceId);
   pinMode(kPinButtonFlip, INPUT_PULLUP);
 
   gSpi.begin(kPinSck, kPinMiso, kPinMosi, kPinCsIis3dhhc);
@@ -283,13 +284,26 @@ void loop() {
 
   // 描画は約500msごと（ボタンは250msごとに見る）
   if (++tick % 2 == 0) {
+    // 日時（表示用にJST=UTC+9h。データ経路はUTCのまま触らない）。
+    String clock;
+    if (timesync::isSynced()) {
+      time_t t = (time_t)(timesync::nowUs() / 1000000ULL) + 9 * 3600;
+      struct tm tmv;
+      gmtime_r(&t, &tmv);
+      char cb[20];
+      snprintf(cb, sizeof(cb), "%02d/%02d %02d:%02d:%02d", tmv.tm_mon + 1,
+               tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+      clock = cb;
+    } else {
+      clock = "--/-- --:--:--";
+    }
 #ifdef NAMZ_SENSOR_TEST
-    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, status, bg);
+    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, status, bg, clock);
 #else
     bool wifi = WiFi.status() == WL_CONNECTED;
     String ip = wifi ? WiFi.localIP().toString() : String("");
     gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, gUploader.spillCount(),
-                    status, bg);
+                    status, bg, clock);
 #endif
   }
   vTaskDelay(pdMS_TO_TICKS(250));

@@ -1,6 +1,7 @@
 #include "Display.h"
 
-void Display::begin() {
+void Display::begin(uint32_t deviceId) {
+  deviceId_ = deviceId;
   prefs_.begin("namz", false);
   rotation_ = prefs_.getBool("flip", false) ? 3 : 1;
   tft_.init();
@@ -23,6 +24,8 @@ void Display::paintFrame(uint16_t bg) {
   tft_.setTextDatum(TL_DATUM);
   tft_.setTextColor(contrastText(bg), bg);
   tft_.drawString("NAMAZU", 4, 4, 2);
+  // デバイスID・日時は毎フレーム描く側(render)に任せる。中央の大きな震度は
+  // 全幅パディングで消去するため、その帯に重なる左上のIDは震度の後に描く。
 }
 
 // RGB565の輝度から、背景に対し読める文字色(黒/白)を選ぶ。
@@ -56,7 +59,8 @@ const char* Display::scaleAscii(float i) {
 }
 
 void Display::render(float intensity, float peakGal, bool wifi, const String& ip,
-                     uint32_t backlog, const String& status, uint16_t bgColor) {
+                     uint32_t backlog, const String& status, uint16_t bgColor,
+                     const String& clock) {
   if (!ready_) return;
   const int w = tft_.width();
   const int h = tft_.height();
@@ -67,30 +71,50 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
   const uint16_t bg = bg_;
   const uint16_t fg = contrastText(bg);  // 背景に応じた基準文字色
 
+  char buf[24];
+
+  // 日時（上中央）。毎フレーム更新されるのでフリーズ検知にもなる。
+  // NAMAZU(左)とWiFi(右)の間に収めるため font1 を使う。
+  tft_.setTextDatum(TC_DATUM);
+  tft_.setTextPadding(120);
+  tft_.setTextColor(fg, bg);
+  tft_.drawString(clock, w / 2, 6, 1);
+
   // WiFi状態（右上）。接続時のみ緑、それ以外は背景コントラスト色で必ず見えるように。
   tft_.setTextDatum(TR_DATUM);
   tft_.setTextPadding(60);
   tft_.setTextColor(wifi ? TFT_GREEN : fg, bg);
   tft_.drawString(wifi ? "WiFi" : "no wifi", w - 4, 4, 2);
 
-  // 計測震度（大きく中央）。severity は背景色が担うので、数字は視認優先で fg。
-  char buf[24];
+  // 震度階級（大きく中央）。severity は背景色が担うので文字は視認優先で fg。
+  // font6 は '+' を持たない（5+/6+ が化ける）ため、'+/-' も持つ font4 を
+  // setTextSize(2) で拡大して使う。
+  tft_.setTextDatum(MC_DATUM);
+  tft_.setTextColor(fg, bg);
+  tft_.setTextPadding(w);
+  tft_.setTextSize(2);
+  tft_.drawString(scaleAscii(intensity), w / 2, 48, 4);
+  tft_.setTextSize(1);  // 以降の描画に影響しないよう戻す
+
+  // デバイスID（NAMAZUの下・左上）。中央の階級が全幅パディングでこの帯を
+  // 消去するため、階級の後に描いて残す。左寄せなので中央とは重ならない。
+  snprintf(buf, sizeof(buf), "id:%04lu", (unsigned long)deviceId_);
+  tft_.setTextDatum(TL_DATUM);
+  tft_.setTextColor(fg, bg);
+  tft_.setTextPadding(70);
+  tft_.drawString(buf, 4, 24, 2);
+
+  // 精密な計測震度（小さく添える）。直前のIDが TL_DATUM なので中央基準に戻す。
   snprintf(buf, sizeof(buf), "%.1f", intensity);
   tft_.setTextDatum(MC_DATUM);
   tft_.setTextColor(fg, bg);
   tft_.setTextPadding(w);
-  tft_.drawString(buf, w / 2, 46, 6);  // フォント6: 大きい数字(- . 対応)
-
-  // 震度階級（Level 表記）
-  snprintf(buf, sizeof(buf), "Level %s", scaleAscii(intensity));
-  tft_.setTextColor(fg, bg);
-  tft_.setTextPadding(w);
-  tft_.drawString(buf, w / 2, 86, 4);
+  tft_.drawString(buf, w / 2, 88, 4);
 
   // 継続ステート
   tft_.setTextColor(fg, bg);
   tft_.setTextPadding(w);
-  tft_.drawString(status, w / 2, 108, 2);
+  tft_.drawString(status, w / 2, 110, 2);
 
   // 下段: ピーク加速度（左） と IP/バックログ（右）
   snprintf(buf, sizeof(buf), "peak %.1f gal", peakGal);
