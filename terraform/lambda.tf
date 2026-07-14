@@ -74,6 +74,8 @@ resource "aws_lambda_function" "watchdog" {
   environment {
     variables = merge(local.common_env, {
       NAMZ_OFFLINE_RENOTIFY_S = tostring(var.offline_renotify_seconds)
+      NAMZ_LAG_AFTER_S        = tostring(var.lag_after_seconds)
+      NAMZ_LAG_RENOTIFY_S     = tostring(var.lag_renotify_seconds)
     })
   }
 }

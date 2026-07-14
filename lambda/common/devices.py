@@ -9,9 +9,9 @@ firmware はWiFi断のあとバックフィルするので、測定時刻(last_b
 「復旧直後で追いつき中」と「本当に沈黙」が区別できない。受信壁時計で生存を、
 last_batch_start_us との差でデータ遅延を、別々に見る。
 
-欠測通知の状態(offline_notified_at_us)は watchdog だけが書く。ingest が書く
-受信系フィールドとは互いに素なので、両者を UpdateItem で分けて更新すれば
-read-modify-write の競合は起きない。
+欠測通知の状態(offline_notified_at_us)とデータ遅延通知の状態(lag_notified_at_us)は
+watchdog だけが書く。ingest が書く受信系フィールドとは互いに素なので、両者を
+UpdateItem で分けて更新すれば read-modify-write の競合は起きない。
 """
 
 from __future__ import annotations
@@ -88,9 +88,38 @@ def clear_offline(device_id: int) -> None:
     )
 
 
+def mark_lag_notified(device_id: int, at_us: int) -> None:
+    """データ遅延の通知を送ったことを記録（watchdog 専用）。"""
+    _table().update_item(
+        Key={"device_id": device_id},
+        UpdateExpression="SET lag_notified_at_us = :t",
+        ExpressionAttributeValues={":t": _dec(at_us)},
+    )
+
+
+def clear_lag(device_id: int) -> None:
+    """データ遅延状態を解除（遅延が解消したら watchdog が呼ぶ）。"""
+    _table().update_item(
+        Key={"device_id": device_id},
+        UpdateExpression="REMOVE lag_notified_at_us",
+    )
+
+
 def staleness_us(item: dict, now_us: int) -> int:
     """最後の受信からの経過[us]。未受信(記録なし)は now_us をそのまま返す。"""
     return now_us - int(item.get("last_ingest_at_us", 0))
+
+
+def lag_us(item: dict, now_us: int) -> int | None:
+    """最新データの遅延[us] = now - 最終バッチ測定開始時刻。
+
+    受信は続いていても測定時刻が実時刻に追いつかない状態（バックフィル追いつき中や
+    デバイス時計ずれ）を表す。api の /devices の lag_s と同じ定義。バッチ未記録なら None。
+    """
+    last_batch = int(item.get("last_batch_start_us", 0))
+    if not last_batch:
+        return None
+    return now_us - last_batch
 
 
 def evaluate(item: dict, now_us: int, offline_after_us: int,
@@ -114,4 +143,35 @@ def evaluate(item: dict, now_us: int, offline_after_us: int,
         return None
     if notified:
         return "recovery"
+    return None
+
+
+def evaluate_lag(item: dict, now_us: int, lag_after_us: int,
+                 renotify_after_us: int, offline_after_us: int) -> str | None:
+    """データ遅延を判定し、取るべき通知アクションを返す（副作用なし・テスト用）。
+
+    生存(受信)とは別軸。**欠測中は offline 側の通知に任せて黙る**（online の時だけ
+    見る）。offline と lag は同一サイクルで二重に鳴らない。
+
+    返り値:
+      - None           … 何もしない（遅延なし / 欠測中 / 遅延中だが再送待ち）
+      - "lag"          … 初めて遅延を検知した（受信は継続中）
+      - "lag_again"    … 遅延が続いており再送間隔を過ぎた
+      - "lag_recovery" … 遅延通知後に遅延が解消した
+    """
+    lag = lag_us(item, now_us)
+    if lag is None:
+        return None
+    if staleness_us(item, now_us) > offline_after_us:
+        return None  # 欠測中は欠測通知の担当。lag は黙る
+    notified_at = item.get("lag_notified_at_us")
+    notified = notified_at is not None
+    if lag > lag_after_us:
+        if not notified:
+            return "lag"
+        if now_us - int(notified_at) >= renotify_after_us:
+            return "lag_again"
+        return None
+    if notified:
+        return "lag_recovery"
     return None

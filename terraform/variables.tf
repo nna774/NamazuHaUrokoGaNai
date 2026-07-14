@@ -84,6 +84,18 @@ variable "offline_renotify_seconds" {
   description = "欠測が続いている間に通知を再送する間隔[秒]。既定1日。"
 }
 
+variable "lag_after_seconds" {
+  type        = number
+  default     = 600
+  description = "受信は続いているが測定時刻がこの秒数以上遅れたら「データ遅延」を通知する。既定600秒＝10分。"
+}
+
+variable "lag_renotify_seconds" {
+  type        = number
+  default     = 86400
+  description = "データ遅延が続いている間に通知を再送する間隔[秒]。既定1日。"
+}
+
 variable "watchdog_schedule" {
   type        = string
   default     = "rate(5 minutes)"
