@@ -37,11 +37,17 @@ python gen_fir_header.py   # -> firmware/lib/Shindo/JmaFirTaps.h
 export NAMZ_EVENTS_TABLE=namz-events   # or --table
 python flag_event.py mark   0001-59462454        # このイベントを人工地震に
 python flag_event.py mark --before 0001-59462454 # これ以前(同一デバイス)を全部
+python flag_event.py mark --before 0001-59462454 --confirmed-only  # うち確定済みだけ
 python flag_event.py list                        # 立っているものを一覧
 ```
 
 `mark`/`unmark` は対象を一覧表示して確認を取ってから実行する（`--before` は複数件を
 一気に書き換えるため特に注意）。確認を省くときは `-y`/`--yes`。
+
+**運用の既定: 「人工地震にして」と言われたら `--confirmed-only` を付ける。** 未確定
+（checked かつ未確定）のイベントは一覧の既定フィルタで元々隠れているので、人工地震
+フラグを立てる意味があるのは実質確定済みだけ。非確定まで一律に付けるのは手間のわりに
+効果がない。明示的に「非確定も含めて全部」と言われた時だけ `--confirmed-only` を外す。
 
 `flag_event.py` は AWS 認証情報（通常の boto3 の解決）で DynamoDB を直接更新する。
 フラグを立てたイベントはダッシュボードの一覧では隠れ（「全件」表示でのみ薄く出る）、

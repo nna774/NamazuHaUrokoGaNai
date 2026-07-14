@@ -20,6 +20,10 @@
     #   例: memo「0001-59462454 以前は全部人工地震」
     python flag_event.py mark --before 0001-59462454
 
+    # 確定済みイベントだけを対象にする（未確定は既定フィルタで元々隠れているので
+    # わざわざ人工地震にする必要がない、という運用向け）
+    python flag_event.py mark --before 0001-59462454 --confirmed-only
+
     # 現在フラグの立っているイベントを一覧
     python flag_event.py list
 """
@@ -65,13 +69,21 @@ def _set(table, eid: str, value: bool) -> None:
     )
 
 
-def _targets(table, eid: str, before: bool) -> list[str]:
+def _targets(table, eid: str, before: bool, confirmed_only: bool = False) -> list[str]:
     """操作対象の event_id 一覧を決める。
 
     before=False なら指定 eid のみ。before=True なら、指定 eid と同一デバイスで
     onset_us が指定イベント以下（=それ以前に始まった）のものを全部返す。
+
+    confirmed_only=True なら、そのうち確定済み（cloud_confirmed）のものだけに絞る。
+    未確定（checked かつ未確定）のイベントは一覧の既定フィルタで元々隠れているため、
+    人工地震フラグを立てる意味があるのは実質確定済みだけ、という運用のためのオプション。
     """
     if not before:
+        if confirmed_only:
+            ref = table.get_item(Key={"event_id": eid}).get("Item")
+            if ref is not None and not ref.get("cloud_confirmed"):
+                return []
         return [eid]
     ref = table.get_item(Key={"event_id": eid}).get("Item")
     if ref is None:
@@ -80,7 +92,8 @@ def _targets(table, eid: str, before: bool) -> list[str]:
     cutoff = int(ref.get("onset_us", 0))
     ids = [it["event_id"] for it in _scan_all(table)
            if int(it.get("device_id", _device_of(it["event_id"]))) == device
-           and int(it.get("onset_us", 0)) <= cutoff]
+           and int(it.get("onset_us", 0)) <= cutoff
+           and (not confirmed_only or it.get("cloud_confirmed"))]
     return sorted(ids)
 
 
@@ -95,7 +108,10 @@ def cmd_mark(args, value: bool):
     table = _table(args.table)
     if not EVENT_ID_RE.fullmatch(args.event_id):
         sys.exit(f"event_id の書式が不正: {args.event_id}")
-    ids = _targets(table, args.event_id, args.before)
+    ids = _targets(table, args.event_id, args.before, args.confirmed_only)
+    if not ids:
+        print("対象イベントが無い（確定済みに絞った結果 0 件の可能性）")
+        return
     verb = "人工地震フラグを立てる" if value else "人工地震フラグを降ろす"
     # --before は複数件を一気に書き換える破壊的操作なので、対象を見せて確認を取る。
     # 単体でも --yes が無ければ確認する（誤ったidへの操作を防ぐ）。
@@ -134,6 +150,9 @@ def main(argv=None):
         s.add_argument("event_id")
         s.add_argument("--before", action="store_true",
                        help="指定イベント（含む）より前の同一デバイスのイベントを全部対象にする")
+        s.add_argument("--confirmed-only", action="store_true",
+                       help="確定済み（cloud_confirmed）イベントだけを対象にする"
+                            "（未確定は一覧の既定で元々隠れているため）")
         s.add_argument("--yes", "-y", action="store_true",
                        help="確認プロンプトを省略する")
 

@@ -47,6 +47,9 @@
 - **api Lambda(Function URL)は認証なし・読み取り専用**。書き込み(フラグ操作等)は手元から
   DynamoDBを直接更新する `tools/flag_event.py` で行う。api は `/devices`・`/devices/<id>` で
   デバイス生存も返す。
+  - **「人工地震にして」と言われたら既定で `--confirmed-only` を付ける**。未確定は一覧の
+    既定フィルタで元々隠れるので、フラグを立てる意味があるのは確定済みだけ。「非確定も
+    全部」と明示された時だけ外す。
 
 ## デプロイ手順（AWS: リージョン ap-northeast-1 / project=namazu）
 
