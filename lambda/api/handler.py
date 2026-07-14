@@ -1,7 +1,8 @@
 """api Lambda: ダッシュボード向けの読み取りAPI（認証なし・CORS許可）。
 
 Lambda Function URL (payload v2.0)。
-- GET /recent?minutes=5&device=1  直近n分の波形（大きい範囲はmin/maxエンベロープに間引き）
+- GET /recent?minutes=5&start=<us> 波形。start指定で[start,start+minutes]、無指定で直近n分
+                                   （大きい範囲はmin/maxエンベロープに間引き）
 - GET /events                     イベント一覧
 - GET /event?id=<event_id>        イベントのメタ + 波形
 """
@@ -81,7 +82,17 @@ def _recent(q):
     if not math.isfinite(minutes):
         minutes = 5.0
     minutes = max(0.1, min(minutes, MAX_RECENT_MINUTES))  # 巨大値によるS3スキャン暴走を防ぐ
+    # start 指定時は [start, start+minutes] を、無指定なら [now-minutes, now] を返す。
+    # 窓幅は minutes（最大30分）で頭打ちなので、start をどこに置いてもS3スキャン量は
+    # 一定に収まる（認証なし公開のガードは minutes 上限だけで足りる）。
+    span_us = int(minutes * 60 * 1e6)
     end_us = int(time.time() * 1e6)
+    start = q.get("start")
+    if start:
+        try:
+            end_us = int(float(start)) + span_us
+        except (TypeError, ValueError):
+            pass
     gal, win_start, fs = store.load_window(s3, BUCKET, end_us, minutes * 60)
     return _json(200, _waveform_payload(gal, win_start, fs))
 
