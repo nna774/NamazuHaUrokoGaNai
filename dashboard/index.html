@@ -68,6 +68,13 @@
             <option value="2000">±2000 gal</option>
           </select>
         </label>
+        <label>軸:
+          <span id="live-axes">
+            <label style="color:#e74c3c"><input type="checkbox" id="live-ax-x" checked> X</label>
+            <label style="color:#2ecc71"><input type="checkbox" id="live-ax-y" checked> Y</label>
+            <label style="color:#3498db"><input type="checkbox" id="live-ax-z" checked> Z</label>
+          </span>
+        </label>
         <label><input type="checkbox" id="autorefresh" checked> 自動更新</label>
         <span id="live-status" class="muted"></span>
       </div>
@@ -105,6 +112,13 @@
               <option value="500">±500 gal</option>
               <option value="2000">±2000 gal</option>
             </select>
+          </label>
+          <label>軸:
+            <span id="event-axes">
+              <label style="color:#e74c3c"><input type="checkbox" id="event-ax-x" checked> X</label>
+              <label style="color:#2ecc71"><input type="checkbox" id="event-ax-y" checked> Y</label>
+              <label style="color:#3498db"><input type="checkbox" id="event-ax-z" checked> Z</label>
+            </span>
           </label>
         </div>
         <h3 id="event-title"></h3>
