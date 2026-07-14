@@ -201,9 +201,33 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
   }
 }
 
-// --- ライブ ---
+// --- ライブ / 指定時刻 ---
 let liveTimer = null;
 let lastLiveWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
+
+// raw/ の保持日数（terraform の raw_retention_days と一致させる）。開始時刻ピッカーの
+// 選べる下限に使う。これより古い時刻を選んでもAPIは「データなし」を返すだけなので、
+// 厳密一致は不要だが目安として制限しておく。
+const RAW_RETENTION_DAYS = 90;
+
+// Date → datetime-local の value 形式（ローカル時刻 'YYYY-MM-DDTHH:MM'）。
+function localDatetimeValue(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// 開始時刻ピッカーの現在値を epoch 秒で返す。未指定なら null（=ライブ）。
+function startSec() {
+  const v = document.getElementById('start-time').value;
+  if (!v) return null;
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+}
+// epoch 秒 → ピッカーへ反映（ハッシュ復元用）。
+function setStartSec(sec) {
+  document.getElementById('start-time').value =
+    sec ? localDatetimeValue(new Date(sec * 1000)) : '';
+}
 
 function redrawLive() {
   if (!lastLiveWaveform) return;
@@ -215,20 +239,29 @@ async function refreshLive() {
   const status = document.getElementById('live-status');
   const minutes = document.getElementById('minutes').value;
   const yrange = Number(document.getElementById('yrange').value) || 0;
+  const sec = startSec();
   try {
     status.textContent = '取得中…';
-    const wf = await apiGet('/recent?minutes=' + minutes);
+    const wf = await apiGet('/recent?minutes=' + minutes
+      + (sec ? '&start=' + sec * 1e6 : ''));
     lastLiveWaveform = wf;
     drawWaveform(document.getElementById('live-canvas'), wf, yrange, visibleAxes('live'));
-    // データ鮮度: バッチは完成後に送られるため、右端は常に30〜40秒ほど過去になる
-    let age = '';
-    if (wf && wf.n) {
-      const samples = wf.mode === 'envelope' ? wf.n * wf.bucket : wf.n;
-      const endUs = wf.start_us + (samples / wf.fs) * 1e6;
-      age = `・最新データ ${Math.max(0, Math.round(Date.now() / 1000 - endUs / 1e6))}秒前`;
+    if (sec) {
+      // 指定時刻表示は過去の固定窓なので鮮度は無意味。指定範囲を表示する。
+      const from = new Date(sec * 1000).toLocaleString('ja-JP');
+      status.textContent = `${from} から ${minutes}分`
+        + (wf.n ? (wf.mode === 'envelope' ? '（エンベロープ）' : '') : '・データなし');
+    } else {
+      // データ鮮度: バッチは完成後に送られるため、右端は常に30〜40秒ほど過去になる
+      let age = '';
+      if (wf && wf.n) {
+        const samples = wf.mode === 'envelope' ? wf.n * wf.bucket : wf.n;
+        const endUs = wf.start_us + (samples / wf.fs) * 1e6;
+        age = `・最新データ ${Math.max(0, Math.round(Date.now() / 1000 - endUs / 1e6))}秒前`;
+      }
+      status.textContent = '更新: ' + new Date().toLocaleTimeString('ja-JP')
+        + (wf.mode === 'envelope' ? '（エンベロープ）' : '') + age;
     }
-    status.textContent = '更新: ' + new Date().toLocaleTimeString('ja-JP')
-      + (wf.mode === 'envelope' ? '（エンベロープ）' : '') + age;
   } catch (e) {
     status.textContent = 'エラー: ' + e.message;
   }
@@ -245,7 +278,8 @@ function refreshIntervalMs() {
 
 function scheduleLive() {
   if (liveTimer) clearInterval(liveTimer);
-  if (document.getElementById('autorefresh').checked) {
+  // 指定時刻表示は過去の固定窓なので自動更新しない（新データは増えない）。
+  if (document.getElementById('autorefresh').checked && !startSec()) {
     liveTimer = setInterval(refreshLive, refreshIntervalMs());
   }
 }
@@ -427,12 +461,13 @@ function parseHash() {
   return { path, params };
 }
 
-// 現在のlive操作状態を表すハッシュ
+// 現在のlive操作状態を表すハッシュ。s=<epoch秒> があれば指定時刻表示。
 function liveHash() {
   const m = document.getElementById('minutes').value;
   const auto = document.getElementById('autorefresh').checked ? 1 : 0;
   const r = document.getElementById('yrange').value;
-  return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}`;
+  const sec = startSec();
+  return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}${sec ? `&s=${sec}` : ''}`;
 }
 
 // 現在のイベント一覧操作状態（ページ・全件フィルタ）を表すハッシュ
@@ -483,6 +518,7 @@ function route() {
     }
     if (params.r !== undefined) document.getElementById('yrange').value = params.r;
     setAxes('live', params.ax);
+    setStartSec(params.s ? parseInt(params.s, 10) : null);
     showView('live');
     refreshLive();
     scheduleLive();
@@ -498,9 +534,21 @@ window.addEventListener('load', () => {
   // 未設定（自前ホスト等）の時だけ入力欄を出す。
   if (!apiBase()) document.getElementById('api-settings').style.display = '';
   document.getElementById('save-api').onclick = () => { setApi(apiInput.value); refreshLive(); };
+  // 開始時刻ピッカーの選べる範囲を [now-保持日数, now] に制限（保存期間内のみ）。
+  const startInput = document.getElementById('start-time');
+  const now = new Date();
+  startInput.max = localDatetimeValue(now);
+  startInput.min = localDatetimeValue(new Date(now.getTime() - RAW_RETENTION_DAYS * 86400 * 1000));
+
   // 操作したらURLへ反映（hashchange→route が実際の描画を行う）
   document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
   document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
+  // 開始時刻の指定は別の時間窓を取り直すので、再フェッチを伴う route を通す。
+  startInput.onchange = () => { location.hash = liveHash(); };
+  document.getElementById('start-clear').onclick = () => {
+    startInput.value = '';
+    location.hash = liveHash();  // s なし = ライブ（最新）に戻る
+  };
   // 縦軸レンジは取得済みデータの描画変換にすぎないので再フェッチしない。
   // URLは replaceState で更新して hashchange→route(=再取得) を発火させない。
   document.getElementById('yrange').onchange = () => {
