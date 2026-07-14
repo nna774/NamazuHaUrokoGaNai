@@ -26,6 +26,8 @@ BUCKET = os.environ["NAMZ_BUCKET"]
 
 # online/offline の境目。watchdog の欠測しきい値と揃える（同じ env を両者に渡す）。
 OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))
+# データ遅延の警告値。watchdog の遅延判定と揃える。ダッシュボードの背景色警告に使う。
+LAG_AFTER_S = float(os.environ.get("NAMZ_LAG_AFTER_S", "600"))
 MAX_POINTS = 3000
 # /recent の分数上限。上限が無いと巨大値でS3 LIST/GETを大量発行して
 # ハング/課金する（認証なし公開のため要ガード）。UIの選択肢も30分まで。
@@ -195,7 +197,8 @@ def _device_view(item: dict, now_us: int) -> dict:
 def _devices():
     now_us = int(time.time() * 1e6)
     items = [_device_view(it, now_us) for it in devices.list_devices()]
-    return _json(200, {"devices": items, "offline_after_s": OFFLINE_AFTER_S})
+    return _json(200, {"devices": items, "offline_after_s": OFFLINE_AFTER_S,
+                       "lag_after_s": LAG_AFTER_S})
 
 
 def _device(device_id: int):
@@ -204,7 +207,8 @@ def _device(device_id: int):
     if item is None:
         return _json(404, {"error": "device not found"})
     return _json(200, {"device": _device_view(item, now_us),
-                       "offline_after_s": OFFLINE_AFTER_S})
+                       "offline_after_s": OFFLINE_AFTER_S,
+                       "lag_after_s": LAG_AFTER_S})
 
 
 def _waveform_payload(gal: np.ndarray, start_us: int, fs: float) -> dict:

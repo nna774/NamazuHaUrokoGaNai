@@ -73,8 +73,8 @@ resource "aws_lambda_function" "watchdog" {
 
   environment {
     variables = merge(local.common_env, {
+      # NAMZ_LAG_AFTER_S は lambda_env で共有（api の /devices と揃える）。
       NAMZ_OFFLINE_RENOTIFY_S = tostring(var.offline_renotify_seconds)
-      NAMZ_LAG_AFTER_S        = tostring(var.lag_after_seconds)
       NAMZ_LAG_RENOTIFY_S     = tostring(var.lag_renotify_seconds)
     })
   }
