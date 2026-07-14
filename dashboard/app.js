@@ -400,12 +400,22 @@ function fmtAgo(sec) {
   return `${Math.floor(h / 24)}日`;
 }
 
+// 経過秒を警告値と比べて td の class 属性を返す。半分超で黄(warn-lo)・超過で赤(warn-hi)。
+function warnBg(sec, warnAt) {
+  if (sec == null || !warnAt) return '';
+  if (sec >= warnAt) return ' class="warn-hi"';       // 超過 → 赤
+  if (sec >= warnAt / 2) return ' class="warn-lo"';   // 半分超 → 黄
+  return '';
+}
+
 async function refreshDevices() {
   const status = document.getElementById('devices-status');
   const tbody = document.querySelector('#devices-table tbody');
   try {
     status.textContent = '取得中…';
     const data = await apiGet('/devices');
+    const offlineAt = data.offline_after_s;  // 最終受信の警告値
+    const lagAt = data.lag_after_s;          // データ鮮度の警告値
     tbody.innerHTML = '';
     for (const d of (data.devices || [])) {
       const tr = document.createElement('tr');
@@ -416,8 +426,10 @@ async function refreshDevices() {
       const last = d.last_ingest_at_us
         ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
         : '—';
-      tr.innerHTML = `<td>${id}</td><td>${st}</td><td>${last}</td>`
-        + `<td>${fmtAgo(d.lag_s)}遅れ</td><td>${d.batches_total ?? 0}</td>`;
+      tr.innerHTML = `<td>${id}</td><td>${st}</td>`
+        + `<td${warnBg(d.age_s, offlineAt)}>${last}</td>`
+        + `<td${warnBg(d.lag_s, lagAt)}>${fmtAgo(d.lag_s)}遅れ</td>`
+        + `<td>${d.batches_total ?? 0}</td>`;
       tbody.appendChild(tr);
     }
     const n = (data.devices || []).length;

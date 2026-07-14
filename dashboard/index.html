@@ -24,6 +24,13 @@
     .badge-art { background: transparent; color: #888; border: 1px solid #888; margin-left: 4px; }
     .status-ok { color: #2e9b57; font-weight: 600; }
     .status-ng { color: var(--accent); font-weight: 600; }
+    /* デバイス表の警告背景: 警告値の半分超で黄、超過で赤（テーマ対応） */
+    .warn-lo { background: #fff3cd; color: #664d03; }
+    .warn-hi { background: #f8d7da; color: #842029; }
+    @media (prefers-color-scheme: dark) {
+      .warn-lo { background: #4d3f00; color: #ffe08a; }
+      .warn-hi { background: #5c1a20; color: #ffb3b8; }
+    }
     .tabs { display: flex; gap: 8px; }
     .tabs button.active { background: var(--accent); color: #fff; }
     section { display: none; }
