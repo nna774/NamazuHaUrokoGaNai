@@ -230,7 +230,8 @@ void setup() {
   gBatchQueue = xQueueCreate(4, sizeof(Batch*));
   gAlertQueue = xQueueCreate(4, sizeof(AlertMsg));
   connectWifi();
-  timesync::begin(kNtpServer1, kNtpServer2);
+  timesync::begin(kNtpServer1, kNtpServer2,
+                  static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
   gUploader.begin();
   xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0);
 #endif

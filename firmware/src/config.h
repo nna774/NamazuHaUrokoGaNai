@@ -68,6 +68,10 @@ enum SensorType : uint8_t {
 static constexpr const char* kNtpServer1 = "ntp.nict.jp";
 static constexpr const char* kNtpServer2 = "pool.ntp.org";
 static constexpr uint32_t kNtpResyncSeconds = 3600;  // 1時間ごと
+// このオフセット[s]を超えるずれは slew では詰まらないので一度だけ step で補正する。
+// これ未満はSMOOTHのslewに任せ、測定中の時刻ジャンプを避ける。水晶ドリフトは
+// ppm級(1時間で数ms)なので通常この閾値には掛からない。
+static constexpr uint32_t kNtpStepThresholdSeconds = 5;
 
 // secrets.h（gitignore対象）で定義する:
 //   kWifiSsid, kWifiPass, kIngestUrl, kAlertUrl, kDeviceId, kHmacSecret
