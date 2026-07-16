@@ -1,3 +1,5 @@
 # Lambda ランタイムに boto3 は同梱されるので numpy のみ同梱すればよい。
 # 計測震度は FFT版(jismo, numpyのみ)を使うため scipy は不要。
 numpy>=1.24
+# detect のみ: 確定報 Slack 通知に添える波形クイックルック PNG の描画に使う。
+Pillow>=10.0
