@@ -16,7 +16,9 @@
     .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
     select, input, button { font-size: 14px; padding: 6px 8px; }
     canvas { width: 100%; height: 320px; border: 1px solid var(--line); background: var(--bg); display: block; }
-    #live-canvas, #event-canvas { cursor: crosshair; }  /* ドラッグで時間ズームできる目印 */
+    /* ドラッグで時間ズームできる目印。touch-action: pan-y でタッチの縦スワイプは
+       ページスクロールに残しつつ、横ドラッグを区間選択として受け取る。 */
+    #live-canvas, #event-canvas { cursor: crosshair; touch-action: pan-y; }
     .muted { color: #888; font-size: 12px; }
     /* ステータス表示の専用行。常に1行ぶんの高さを確保し、文字の出入り・長さ変化で
        下のcanvasやテーブルが動かないようにする（レイアウトシフト対策）。 */

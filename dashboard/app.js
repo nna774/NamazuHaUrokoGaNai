@@ -234,14 +234,18 @@ function attachZoomDrag(cv, getWf, redraw, apply) {
     const f = Math.max(0, Math.min(1, (px - PAD) / plotW));
     return wf.start_us + f * (wf.n - 1) * wfStepUs(wf);
   };
+  // Pointer Events でマウスとタッチを統一的に扱う。タッチはCSSの touch-action: pan-y と
+  // 組で、縦はページスクロールのまま・横ドラッグだけを区間選択として受ける。
   let selStartPx = null;  // ドラッグ選択の始点x [CSS px]。null = 選択中でない
-  cv.addEventListener('mousedown', e => {
+  cv.addEventListener('pointerdown', e => {
     const wf = getWf();
     if (!wf || !wf.n || wf.n <= 1) return;
+    if (!e.isPrimary || selStartPx !== null) return;  // 2本目の指は無視
     selStartPx = e.offsetX;
-    e.preventDefault();
+    cv.setPointerCapture(e.pointerId);  // canvas外へ出てもmove/upを受ける
+    e.preventDefault();                 // テキスト選択等の互換マウス動作を抑止
   });
-  cv.addEventListener('mousemove', e => {
+  cv.addEventListener('pointermove', e => {
     if (selStartPx === null) return;
     redraw();
     const ctx = cv.getContext('2d');
@@ -249,17 +253,22 @@ function attachZoomDrag(cv, getWf, redraw, apply) {
     ctx.fillRect(Math.min(selStartPx, e.offsetX), 0,
                  Math.abs(e.offsetX - selStartPx), cv.clientHeight);
   });
-  // mouseupはcanvas外で離した時も拾えるようwindowで受ける
-  window.addEventListener('mouseup', e => {
+  cv.addEventListener('pointerup', e => {
     if (selStartPx === null) return;
-    const endPx = e.clientX - cv.getBoundingClientRect().left;
+    const endPx = e.offsetX;  // capture中なのでcanvas基準の座標で来る（範囲外もあり得るが後段でクランプ）
     const x0 = selStartPx;
     selStartPx = null;
-    if (Math.abs(endPx - x0) < 8) { redraw(); return; }  // クリック相当は無視
+    if (Math.abs(endPx - x0) < 8) { redraw(); return; }  // タップ・クリック相当は無視
     apply({ fromUs: Math.min(pxToUs(x0), pxToUs(endPx)),
             toUs: Math.max(pxToUs(x0), pxToUs(endPx)) });
   });
-  cv.addEventListener('dblclick', () => apply(null));
+  // スクロールに奪われた等で中断されたら選択を破棄して描き直す
+  cv.addEventListener('pointercancel', () => {
+    if (selStartPx === null) return;
+    selStartPx = null;
+    redraw();
+  });
+  cv.addEventListener('dblclick', () => apply(null));  // ダブルタップでも発火する
 }
 
 // --- ライブ / 指定時刻 ---
