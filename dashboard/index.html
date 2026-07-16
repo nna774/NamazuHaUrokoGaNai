@@ -18,6 +18,9 @@
     canvas { width: 100%; height: 320px; border: 1px solid var(--line); background: var(--bg); display: block; }
     #live-canvas, #event-canvas { cursor: crosshair; }  /* ドラッグで時間ズームできる目印 */
     .muted { color: #888; font-size: 12px; }
+    /* ステータス表示の専用行。常に1行ぶんの高さを確保し、文字の出入り・長さ変化で
+       下のcanvasやテーブルが動かないようにする（レイアウトシフト対策）。 */
+    .status-line { min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 0 8px; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
     tr[data-id] { cursor: pointer; }
@@ -89,8 +92,8 @@
           </span>
         </label>
         <label><input type="checkbox" id="autorefresh" checked> 自動更新</label>
-        <span id="live-status" class="muted"></span>
       </div>
+      <div id="live-status" class="muted status-line"></div>
       <canvas id="live-canvas"></canvas>
       <p class="muted">縦軸: 加速度 [gal]。x=赤 y=緑 z=青。範囲が広いときは min/max エンベロープ表示。
         ドラッグで時間方向に拡大（その区間を取り直すので細かくなる。自動更新は止まる）。
@@ -103,8 +106,8 @@
         <div class="row">
           <button id="reload-events">再読み込み</button>
           <label><input type="checkbox" id="events-all"> 全件（非該当も表示）</label>
-          <span id="events-status" class="muted"></span>
         </div>
+        <div id="events-status" class="muted status-line"></div>
         <table id="events-table">
           <thead><tr><th>発生時刻</th><th>震度</th><th>計測震度</th><th>ピーク[gal]</th><th>継続</th><th>速報</th><th>確定</th></tr></thead>
           <tbody></tbody>
@@ -149,8 +152,8 @@
       <div class="row">
         <button id="reload-devices">再読み込み</button>
         <label><input type="checkbox" id="devices-auto" checked> 自動更新</label>
-        <span id="devices-status" class="muted"></span>
       </div>
+      <div id="devices-status" class="muted status-line"></div>
       <table id="devices-table">
         <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th></tr></thead>
         <tbody></tbody>
