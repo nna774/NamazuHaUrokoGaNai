@@ -46,5 +46,6 @@ class Display {
   bool ready_ = false;
   uint16_t bg_ = 0;         // 現在の背景色
   bool bgInit_ = false;     // 背景を一度でも塗ったか（回転時にリセット）
+  String lastClass_;        // 前回描いた震度階級（変化時のみ描き直してちらつき回避）
   uint32_t deviceId_ = 0;   // NAMAZUの下に出すデバイスID
 };

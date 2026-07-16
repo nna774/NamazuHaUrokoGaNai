@@ -21,11 +21,21 @@ ESP32-D0WDQ6 (WROOM-32 系) + IIS3DHHC。PlatformIO / Arduino core。
 | `Batch`       | ワイヤフォーマットのエンコード |
 | `Uploader`    | 送信キュー・LittleFS退避・リトライ・HMAC署名 |
 | `TimeSync`    | NTP(smooth同期) |
+| `Display`     | 内蔵TFTへの表示（震度階級・ステート・WiFi等） |
 
 `lib/Shindo/JmaFirTaps.h` は生成物。係数を変えたら:
 
 ```bash
 cd ../tools && python gen_fir_header.py
+```
+
+`lib/Display/ClassFont.h` も生成物（震度階級用の大型フォント。内蔵フォントに
+大きな `+` が無いため、`0-9` `+` `-` `.` だけを DejaVu Sans Bold から起こしたもの）。
+字種やサイズを変えたら:
+
+```bash
+# TTF: https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37
+cd tools && ../../.venv/bin/python gen_class_font.py DejaVuSans-Bold.ttf > ../lib/Display/ClassFont.h
 ```
 
 ## セットアップ

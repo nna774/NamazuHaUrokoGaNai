@@ -1,5 +1,7 @@
 #include "Display.h"
 
+#include "ClassFont.h"
+
 void Display::begin(uint32_t deviceId) {
   deviceId_ = deviceId;
   prefs_.begin("namz", false);
@@ -20,6 +22,7 @@ void Display::applyRotation() {
 void Display::paintFrame(uint16_t bg) {
   bg_ = bg;
   bgInit_ = true;
+  lastClass_ = "";  // 全面を塗るので中央の震度階級も次のrenderで描き直させる
   tft_.fillScreen(bg);
   tft_.setTextDatum(TL_DATUM);
   tft_.setTextColor(contrastText(bg), bg);
@@ -87,17 +90,23 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
   tft_.drawString(wifi ? "WiFi" : "no wifi", w - 4, 4, 2);
 
   // 震度階級（大きく中央）。severity は背景色が担うので文字は視認優先で fg。
-  // font6 は '+' を持たない（5+/6+ が化ける）ため、'+/-' も持つ font4 を
-  // setTextSize(3) で拡大して使う。上段(〜y20)とステート(y110)の間の縦を
-  // なるべく使う。全幅パディングでこの帯を一度消す。
+  // 内蔵フォントは大きな '+' を持たないため、0-9/+/- だけを収めた専用の
+  // ClassFont(数字80px、tools/gen_class_font.py で生成)を使う。free font は
+  // 「背景塗り→透過描画」の二段描きで毎フレーム描くとちらつくので、
+  // 文字列が変わったときだけ描き直す（背景変化時は paintFrame が消す）。
   const int classY = 60;  // 中央基準のY
-  tft_.setTextDatum(MC_DATUM);
-  tft_.setTextColor(fg, bg);
-  tft_.setTextPadding(w);
-  tft_.setTextSize(3);
-  const int classBottom = classY + tft_.fontHeight(4) / 2;  // 拡大後の高さで下端を算出
-  tft_.drawString(scaleAscii(intensity), w / 2, classY, 4);
-  tft_.setTextSize(1);  // 以降の描画に影響しないよう戻す
+  const char* cls = scaleAscii(intensity);
+  // MC_DATUM のベースラインは classY + ascent/2。字面はそこから1px下まで出る。
+  const int classBottom = classY + kClassFontAscent / 2 + 2;
+  if (lastClass_ != cls) {
+    lastClass_ = cls;
+    tft_.setFreeFont(&ClassFont);
+    tft_.setTextDatum(MC_DATUM);
+    tft_.setTextColor(fg, bg);
+    tft_.setTextPadding(w);  // 全幅パディングでこの帯を一度消す
+    tft_.drawString(cls, w / 2, classY, 1);
+    tft_.setTextFont(1);  // font1(時計)がClassFontにならないよう内蔵に戻す
+  }
 
   // 精密な計測震度（右下に小さく添える）。階級の全幅パディングの後に描くので残る。
   // 右寄せ・下寄せで階級の下端にそろえる。
