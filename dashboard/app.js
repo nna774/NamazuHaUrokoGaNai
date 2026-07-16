@@ -75,6 +75,8 @@ function setAxes(prefix, s) {
   }
 }
 
+const PAD = 28;  // プロット領域の余白。描画とドラッグ座標変換で共有する。
+
 function fitCanvas(cv) {
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = cv.clientHeight;
@@ -88,7 +90,7 @@ function fitCanvas(cv) {
 function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
   const { ctx, w, h } = fitCanvas(cv);
   ctx.clearRect(0, 0, w, h);
-  const pad = 28;
+  const pad = PAD;
   const plotW = w - pad * 2, plotH = h - pad * 2;
 
   if (!wf || !wf.n) {
@@ -360,11 +362,39 @@ function renderEventInfo(m) {
 
 let lastEventWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
 let currentEventId = null;     // event-yrange 変更時に詳細ハッシュを組み直すため
+let eventZoom = null;          // 時間方向ズーム {fromUs, toUs}。null = 全体表示
+
+// 波形の1点あたりの時間 [us]。エンベロープは bucket サンプルを1点に潰している。
+function wfStepUs(wf) {
+  return ((wf.mode === 'raw' ? 1 : wf.bucket) / wf.fs) * 1e6;
+}
+
+// [fromUs, toUs] に対応する区間を切り出した波形オブジェクトを返す。
+// 手持ちデータの再描画だけで済ませるためのクライアント側ズーム（再フェッチしない）。
+// エンベロープの解像度(bucket)はそのままなので、拡大しても細部は増えない。
+function sliceWaveform(wf, fromUs, toUs) {
+  const step = wfStepUs(wf);
+  let i0 = Math.floor((fromUs - wf.start_us) / step);
+  let i1 = Math.ceil((toUs - wf.start_us) / step);
+  i0 = Math.max(0, Math.min(wf.n - 2, i0));
+  i1 = Math.max(i0 + 1, Math.min(wf.n - 1, i1));
+  const out = { ...wf, n: i1 - i0 + 1, start_us: wf.start_us + i0 * step };
+  const keys = wf.mode === 'raw' ? AXES : AXES.flatMap(a => [`${a}_min`, `${a}_max`]);
+  for (const k of keys) out[k] = wf[k].slice(i0, i1 + 1);
+  return out;
+}
+
+// いま画面に出ている（ズーム適用後の）波形。ドラッグ座標→時刻の変換にも使う。
+function displayedEventWf() {
+  const wf = lastEventWaveform;
+  if (!wf || !wf.n || wf.n <= 1 || !eventZoom) return wf;
+  return sliceWaveform(wf, eventZoom.fromUs, eventZoom.toUs);
+}
 
 function drawEventWaveform() {
   if (!lastEventWaveform) return;
   const r = Number(document.getElementById('event-yrange').value) || 0;
-  drawWaveform(document.getElementById('event-canvas'), lastEventWaveform, r, visibleAxes('event'));
+  drawWaveform(document.getElementById('event-canvas'), displayedEventWf(), r, visibleAxes('event'));
 }
 
 async function showEvent(id) {
@@ -451,7 +481,7 @@ function scheduleDevices() {
 
 // --- ハッシュルーティング ---
 // #live?m=<分>&auto=<0|1>&r=<レンジ>&ax=<表示軸> / #events?p=<頁>&all=<0|1>
-// / #event/<id>?p=&all=&r=&ax= を location.hash に持たせ、リロードや共有URLで
+// / #event/<id>?p=&all=&r=&ax=&t=<fromUs>-<toUs> を location.hash に持たせ、リロードや共有URLで
 // 状態(タブ・表示範囲・自動更新・表示軸・全件フィルタ・ページ)が復元されるようにする。
 // ax は表示中の軸を連結した文字列（例 'xy'=z非表示 / ''=全非表示 / 省略=全表示）。
 function showView(name) {
@@ -488,12 +518,13 @@ function eventsHash(pageNum) {
   return `events?p=${pageNum || 1}&all=${all}`;
 }
 
-// イベント詳細ハッシュ。戻り先の一覧状態(p/all)と詳細の縦軸レンジ(r)を持たせ、
+// イベント詳細ハッシュ。戻り先の一覧状態(p/all)・縦軸レンジ(r)・時間ズーム(t)を持たせ、
 // リロード・共有URLでフィルタや表示範囲が復元されるようにする。
 function eventHash(id) {
   const all = document.getElementById('events-all').checked ? 1 : 0;
   const r = document.getElementById('event-yrange').value;
-  return `event/${encodeURIComponent(id)}?p=${eventsPageNum}&all=${all}&r=${r}&ax=${axesStr('event')}`;
+  const t = eventZoom ? `&t=${Math.round(eventZoom.fromUs)}-${Math.round(eventZoom.toUs)}` : '';
+  return `event/${encodeURIComponent(id)}?p=${eventsPageNum}&all=${all}&r=${r}&ax=${axesStr('event')}${t}`;
 }
 
 function showEventsMode(detail) {
@@ -512,6 +543,9 @@ function route() {
     if (params.p) eventsPageNum = parseInt(params.p, 10);
     if (params.r !== undefined) document.getElementById('event-yrange').value = params.r;
     setAxes('event', params.ax);
+    // 時間ズームの復元。t が無ければ全体表示（別イベントへ移った時のリセットも兼ねる）。
+    const tz = params.t && /^\d+-\d+$/.test(params.t) ? params.t.split('-').map(Number) : null;
+    eventZoom = tz && tz[1] > tz[0] ? { fromUs: tz[0], toUs: tz[1] } : null;
     showEvent(decodeURIComponent(path.slice('event/'.length)));
   } else if (path === 'events') {
     showView('events');
@@ -584,6 +618,49 @@ window.addEventListener('load', () => {
       drawEventWaveform();
     };
   }
+  // --- イベント詳細の時間ズーム（ドラッグで区間選択→拡大、ダブルクリックで全体） ---
+  // ズームは取得済みデータの再描画にすぎないので再フェッチしない（yrangeと同じ扱い）。
+  const evCv = document.getElementById('event-canvas');
+  // canvas上のx座標 → 表示中波形上の時刻 [us]。プロット外は端にクランプ。
+  const evPxToUs = px => {
+    const wf = displayedEventWf();
+    const plotW = evCv.clientWidth - PAD * 2;
+    const f = Math.max(0, Math.min(1, (px - PAD) / plotW));
+    return wf.start_us + f * (wf.n - 1) * wfStepUs(wf);
+  };
+  const applyEventZoom = z => {
+    eventZoom = z;
+    if (currentEventId) history.replaceState(null, '', '#' + eventHash(currentEventId));
+    drawEventWaveform();
+  };
+  let selStartPx = null;  // ドラッグ選択の始点x [CSS px]。null = 選択中でない
+  evCv.addEventListener('mousedown', e => {
+    if (!lastEventWaveform || lastEventWaveform.n <= 1) return;
+    selStartPx = e.offsetX;
+    e.preventDefault();
+  });
+  evCv.addEventListener('mousemove', e => {
+    if (selStartPx === null) return;
+    // 波形を描き直した上に選択範囲を半透明で重ねる
+    drawEventWaveform();
+    const ctx = evCv.getContext('2d');
+    ctx.fillStyle = 'rgba(192,57,43,.15)';
+    ctx.fillRect(Math.min(selStartPx, e.offsetX), 0,
+                 Math.abs(e.offsetX - selStartPx), evCv.clientHeight);
+  });
+  // mouseupはcanvas外で離した時も拾えるようwindowで受ける
+  window.addEventListener('mouseup', e => {
+    if (selStartPx === null) return;
+    const endPx = e.clientX - evCv.getBoundingClientRect().left;
+    const x0 = selStartPx;
+    selStartPx = null;
+    if (Math.abs(endPx - x0) < 8) { drawEventWaveform(); return; }  // クリック相当は無視
+    applyEventZoom({ fromUs: Math.min(evPxToUs(x0), evPxToUs(endPx)),
+                     toUs: Math.max(evPxToUs(x0), evPxToUs(endPx)) });
+  });
+  evCv.addEventListener('dblclick', () => applyEventZoom(null));
+  document.getElementById('event-zoom-reset').onclick = () => applyEventZoom(null);
+
   document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
   // フィルタ切替はURLへ反映（hashchange→route が1ページ目から再取得する）
   document.getElementById('events-all').onchange = () => { location.hash = eventsHash(1); };

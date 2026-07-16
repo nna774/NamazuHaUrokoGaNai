@@ -16,6 +16,7 @@
     .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
     select, input, button { font-size: 14px; padding: 6px 8px; }
     canvas { width: 100%; height: 320px; border: 1px solid var(--line); background: var(--bg); display: block; }
+    #event-canvas { cursor: crosshair; }  /* ドラッグで時間ズームできる目印 */
     .muted { color: #888; font-size: 12px; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
@@ -132,9 +133,11 @@
               <label style="color:#3498db"><input type="checkbox" id="event-ax-z" checked> Z</label>
             </span>
           </label>
+          <button id="event-zoom-reset" title="時間方向のズームを解除">全体表示</button>
         </div>
         <h3 id="event-title"></h3>
         <canvas id="event-canvas"></canvas>
+        <p class="muted">グラフ上をドラッグで時間方向に拡大（重ねがけ可）。ダブルクリックか「全体表示」で戻る。</p>
         <table id="event-info"></table>
       </div>
     </section>
