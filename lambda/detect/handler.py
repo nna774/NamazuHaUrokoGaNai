@@ -52,14 +52,13 @@ def _process(key: str):
     if gal.shape[0] > 0:
         det = detect_core.analyze(gal, fs, win_start, THRESHOLD, HOLD_SECONDS)
         if det is not None:
-            _confirm(b.meta.device_id, det, gal, win_start, fs)
+            _confirm(b.meta.device_id, det)
 
     # 確定検知の有無に関わらず、速報イベントの波形も永久保存する。
     _preserve_prompt_waveforms(b.meta.batch_start_us)
 
 
-def _confirm(device_id: int, det: detect_core.Detection,
-             gal, win_start: int, fs: float):
+def _confirm(device_id: int, det: detect_core.Detection):
     """持続的な揺れ = クラウド確定報。波形保存 + DynamoDB + 通知。"""
     # 先にセッションへ記録して確定した event_id を得る（マージ後のidを使う）。
     eid, _ = events.record_cloud_detection(
@@ -77,7 +76,7 @@ def _confirm(device_id: int, det: detect_core.Detection,
     ord_prev = int(item.get("notified_confirm_ord", -1))
     if ci >= NOTIFY_CONFIRM_MIN and ord_now > ord_prev:
         scale = intensity_scale(ci)
-        image_url = _quicklook_url(eid, ci, gal, win_start, fs, det.onset_us)
+        image_url = _quicklook_url(eid, ci, det.onset_us)
         notify.from_env().notify(
             f"地震を検知（確定報） 震度{scale}",
             f"クラウド解析で計測震度 *{ci:.1f}* （震度{scale}）を確定。",
@@ -88,17 +87,18 @@ def _confirm(device_id: int, det: detect_core.Detection,
         events.set_field(eid, "notified_confirm_ord", ord_now)
 
 
-def _quicklook_url(eid: str, ci: float, gal, win_start: int, fs: float,
-                   onset_us: int) -> str | None:
-    """確定報の窓波形を PNG 化して外部ホストへ上げ、公開URLを返す。
+def _quicklook_url(eid: str, ci: float, onset_us: int) -> str | None:
+    """保存済みイベント波形(events/<id>/)を読み直して PNG 化し、外部ホストへ上げて
+    公開URLを返す。onset 中心の窓で描くのでダッシュボードの見た目に近い。
     画像化・配信のどこかで失敗しても通知本体は止めない（テキストのみで飛ばす）。"""
     try:
+        gal, win_start, fs = store.load_event(s3, BUCKET, eid)
+        if gal.shape[0] == 0:
+            return None
         png = quicklook.render_png(gal, fs, win_start, onset_us)
         # desc に生URLを入れておくと Gyazo のページからイベント詳細へ飛べる。
         # ダッシュボードURL未設定なら、せめてどのイベントか分かるよう event_id を残す。
-        base = os.environ.get("NAMZ_DASHBOARD_URL", "").rstrip("/")
-        ref = f"{base}/#event/{eid}" if base else eid
-        desc = f"計測震度 {ci:.1f}\n{ref}"
+        desc = f"計測震度 {ci:.1f}\n{notify.event_url(eid) or eid}"
         return imagehost.upload_png(png, title=f"namazu {eid}", desc=desc)
     except Exception as e:  # noqa: BLE001
         print(f"quicklook failed for {eid}: {e!r}")

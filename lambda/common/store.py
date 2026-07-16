@@ -33,6 +33,43 @@ def list_raw_keys_in_range(s3, bucket: str, start_us: int, end_us: int) -> list[
     return keys
 
 
+def load_event(s3, bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
+    """events/<id>/*.bin を時系列に連結して返す（永久保存したイベント波形）。
+
+    returns: (gal[N,3], window_start_us, fs)。無ければ (empty, 0, 100.0)。
+    api の _event と同じ読み方。detect のクイックルック描画で使う。
+    """
+    prefix = f"{s3util.EVENTS_PREFIX}/{eid}/"
+    keys: list[str] = []
+    token = None
+    while True:
+        kw = {"Bucket": bucket, "Prefix": prefix}
+        if token:
+            kw["ContinuationToken"] = token
+        resp = s3.list_objects_v2(**kw)
+        keys += [it["Key"] for it in resp.get("Contents", []) if it["Key"].endswith(".bin")]
+        if resp.get("IsTruncated"):
+            token = resp["NextContinuationToken"]
+        else:
+            break
+    keys.sort()  # キー末尾の startus(20桁ゼロ埋め) で時系列順
+    parts = []
+    win_start = None
+    fs = 100.0
+    for key in keys:
+        try:
+            b = get_batch(s3, bucket, key)
+        except Exception:
+            continue
+        if win_start is None:
+            win_start = b.meta.batch_start_us
+        fs = b.meta.sample_rate_hz
+        parts.append(b.gal)
+    if not parts:
+        return np.empty((0, 3)), 0, fs
+    return np.concatenate(parts, axis=0), win_start, fs
+
+
 def load_window(s3, bucket: str, end_us: int, seconds: float) -> tuple[np.ndarray, int, float]:
     """end_us を終端とする直近 `seconds` 秒の波形を連結して返す。
 
