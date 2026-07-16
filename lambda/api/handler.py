@@ -5,6 +5,8 @@ Lambda Function URL (payload v2.0)。
                                    （大きい範囲はmin/maxエンベロープに間引き）
 - GET /events                     イベント一覧
 - GET /event?id=<event_id>        イベントのメタ + 波形
+      &from=<us>&to=<to>          任意。保存済み波形からこの区間だけ切り出して返す
+                                  （ダッシュボードのズームが狭い区間のrawを取り直す用）
 """
 
 from __future__ import annotations
@@ -172,8 +174,30 @@ def _event(q):
         fs = b.meta.sample_rate_hz
         parts.append(b.gal)
     gal = np.concatenate(parts, axis=0) if parts else np.empty((0, 3))
-    payload = _waveform_payload(gal, win_start or meta.get("onset_us", 0), fs)
+    win_start = win_start or meta.get("onset_us", 0)
+    # from/to 指定があれば区間を切り出す。狭い区間なら MAX_POINTS に収まり raw で返るので、
+    # ダッシュボードのズームがエンベロープ(間引き)から100Hz生波形に切り替えられる。
+    gal, win_start = _slice_gal(gal, win_start, fs, q.get("from"), q.get("to"))
+    payload = _waveform_payload(gal, win_start, fs)
     return _json(200, {"meta": meta, "waveform": payload})
+
+
+def _slice_gal(gal: np.ndarray, win_start: int, fs: float, frm, to):
+    """波形から [frm, to] (us) の区間を切り出す。不正・範囲外はクランプし、
+    パース不能や区間が実質空なら全体をそのまま返す。"""
+    if gal.shape[0] == 0 or frm is None or to is None:
+        return gal, win_start
+    try:
+        f_us, t_us = int(float(frm)), int(float(to))
+    except (TypeError, ValueError):
+        return gal, win_start
+    if t_us <= f_us:
+        return gal, win_start
+    i0 = max(0, int((f_us - win_start) * fs / 1e6))
+    i1 = min(gal.shape[0], int(math.ceil((t_us - win_start) * fs / 1e6)) + 1)
+    if i1 - i0 < 2:  # 端の外を指す等で実質空 → 全体を返す（クライアントは何かしら描ける）
+        return gal, win_start
+    return gal[i0:i1], win_start + int(i0 / fs * 1e6)
 
 
 def _device_view(item: dict, now_us: int) -> dict:
