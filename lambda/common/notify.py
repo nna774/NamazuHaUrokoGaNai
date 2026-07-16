@@ -56,11 +56,17 @@ class SlackNotifier(Notifier):
         urllib.request.urlopen(req, timeout=5).read()
 
 
+def event_url(eid: str) -> str:
+    """ダッシュボードの該当イベントページの生URL。NAMZ_DASHBOARD_URL 未設定なら空文字。"""
+    base = os.environ.get("NAMZ_DASHBOARD_URL", "").rstrip("/")
+    return f"{base}/#event/{eid}" if base else ""
+
+
 def event_field(eid: str) -> str:
     """イベントIDを、ダッシュボードの該当ページへの Slack mrkdwn リンクにする。
     NAMZ_DASHBOARD_URL 未設定ならID文字列のまま返す。"""
-    base = os.environ.get("NAMZ_DASHBOARD_URL", "").rstrip("/")
-    return f"<{base}/#event/{eid}|{eid}>" if base else eid
+    url = event_url(eid)
+    return f"<{url}|{eid}>" if url else eid
 
 
 def from_env() -> Notifier:
