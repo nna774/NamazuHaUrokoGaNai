@@ -35,13 +35,21 @@ def render_png(gal: np.ndarray, fs: float, start_us: int,
     plot_w = W - PAD_L - PAD_R
     plot_h = H - PAD_T - PAD_B
 
-    n = gal.shape[0]
-    if n < 2:
+    if gal.shape[0] < 2:
         d.text((PAD_L, H // 2), "データなし", fill=TEXT)
         return _to_bytes(img)
 
-    # 各軸 DC を引いて0中心に。全軸まとめて値域を決める。
+    # DC(重力等)は窓全体で推定してから引く（静穏部を含む方が安定）。
     centered = gal - gal.mean(axis=0, keepdims=True)
+    # 揺れの前後の静穏区間を落として活動区間にズームする。撮影時点で onset 後が
+    # 数秒しか無くても、手前の長い平坦部を捨てれば揺れがフレームに収まる。
+    lo_i, hi_i = _active_bounds(centered, fs)
+    if hi_i - lo_i >= 2:
+        centered = centered[lo_i:hi_i]
+        start_us = int(start_us + lo_i / fs * 1e6)
+    n = centered.shape[0]
+
+    # 全軸まとめて値域を決める。
     lo, hi = float(centered.min()), float(centered.max())
     if lo == hi:
         lo, hi = lo - 1.0, hi + 1.0
@@ -97,6 +105,22 @@ def render_png(gal: np.ndarray, fs: float, start_us: int,
         d.text((W - PAD_R - 54 + k * 18, PAD_T - 14), AXIS_LABEL[ax], fill=COLORS[ax])
 
     return _to_bytes(img)
+
+
+def _active_bounds(centered: np.ndarray, fs: float,
+                   margin_s: float = 3.0, frac: float = 0.08) -> tuple[int, int]:
+    """揺れの活動区間 [lo, hi) を返す。全軸の絶対値のピークに対し frac 以上の
+    区間を活動とみなし、前後に margin_s の余白を付ける。活動が無ければ全域。"""
+    act = np.abs(centered).max(axis=1)
+    n = act.shape[0]
+    peak = float(act.max()) if n else 0.0
+    if peak <= 0:
+        return 0, n
+    idx = np.nonzero(act >= peak * frac)[0]
+    if idx.size == 0:
+        return 0, n
+    m = int(margin_s * fs)
+    return max(0, int(idx[0]) - m), min(n, int(idx[-1]) + 1 + m)
 
 
 def _fmt_time(us: float, span_sec: float) -> str:

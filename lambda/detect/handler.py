@@ -89,7 +89,8 @@ def _confirm(device_id: int, det: detect_core.Detection):
 
 def _quicklook_url(eid: str, ci: float, onset_us: int) -> str | None:
     """保存済みイベント波形(events/<id>/)を読み直して PNG 化し、外部ホストへ上げて
-    公開URLを返す。onset 中心の窓で描くのでダッシュボードの見た目に近い。
+    公開URLを返す。quicklook 側で静穏区間を落として揺れにズームするので、通知時点で
+    onset 後が数秒しか溜まっていなくても手前の平坦部に潰されず読める。
     画像化・配信のどこかで失敗しても通知本体は止めない（テキストのみで飛ばす）。"""
     try:
         gal, win_start, fs = store.load_event(s3, BUCKET, eid)
