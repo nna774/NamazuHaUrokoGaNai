@@ -113,13 +113,13 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
     if (wf.mode === 'raw') {
       const dc = mean(wf[a]);
       const v = wf[a].map(x => x - dc);
-      series[a] = { v };
+      series[a] = { v, dc };
       for (const x of v) { if (x < lo) lo = x; if (x > hi) hi = x; }
     } else {
       const dc = mean(wf[a + '_max'].concat(wf[a + '_min']));
       const mn = wf[a + '_min'].map(x => x - dc);
       const mx = wf[a + '_max'].map(x => x - dc);
-      series[a] = { min: mn, max: mx };
+      series[a] = { min: mn, max: mx, dc };
       for (const x of mn) if (x < lo) lo = x;
       for (const x of mx) if (x > hi) hi = x;
     }
@@ -169,12 +169,20 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
     }
   }
 
-  // 軸の凡例
+  // 軸の凡例。DC(≈重力980gal)が700gal超の軸を上下(UD)と注記する。
+  // DCの二乗和は重力の二乗で一定なので、700gal超(>980/√2≈693)は高々1軸。
+  // 斜め設置でどの軸も超えない時は無印に戻るだけ（上下軸が存在しないので正しい）。
   ctx.font = '12px system-ui';
-  axes.forEach((a, i) => {
-    ctx.fillStyle = COLORS[a];
-    ctx.fillText(a.toUpperCase(), w - pad - 60 + i * 20, pad + 12);
-  });
+  const legend = axes.map(a => ({
+    a,
+    text: Math.abs(series[a].dc) > 700 ? `${a.toUpperCase()}(UD)` : a.toUpperCase(),
+  }));
+  let lx = w - pad - legend.reduce((s, l) => s + ctx.measureText(l.text).width + 8, -8);
+  for (const l of legend) {
+    ctx.fillStyle = COLORS[l.a];
+    ctx.fillText(l.text, lx, pad + 12);
+    lx += ctx.measureText(l.text).width + 8;
+  }
 
   // 横軸（時刻目盛り + 薄いグリッド線）
   if (wf.start_us && n > 1) {
