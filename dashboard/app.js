@@ -758,6 +758,20 @@ window.addEventListener('load', () => {
   document.getElementById('event-back').onclick = () => { location.hash = eventsHash(eventsPageNum); };
   document.getElementById('reload-devices').onclick = () => refreshDevices();
   document.getElementById('devices-auto').onchange = () => scheduleDevices();
+  // タイトルクリックで全操作状態を既定に戻す（ライブ・1分窓・自動更新・±100gal・全軸）。
+  // イベント側のフィルタ・ページも既定へ。既に既定ならハッシュが変わらないので直接 route する。
+  document.getElementById('home').onclick = () => {
+    document.getElementById('minutes').value = '1';
+    document.getElementById('autorefresh').checked = true;
+    document.getElementById('yrange').value = '100';
+    for (const a of AXES) document.getElementById(`live-ax-${a}`).checked = true;
+    startInput.value = '';
+    liveZoom = null;
+    document.getElementById('events-all').checked = false;
+    eventsPageNum = 1;
+    const h = liveHash();
+    if (location.hash === '#' + h) route(); else location.hash = h;
+  };
   document.getElementById('tab-live').onclick = () => { location.hash = liveHash(); };
   document.getElementById('tab-events').onclick = () => { location.hash = eventsHash(eventsPageNum); };
   document.getElementById('tab-devices').onclick = () => { location.hash = 'devices'; };

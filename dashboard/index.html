@@ -11,7 +11,7 @@
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; margin: 0; color: var(--fg); background: var(--bg); }
     header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    h1 { font-size: 16px; margin: 0; }
+    h1 { font-size: 16px; margin: 0; cursor: pointer; }  /* クリックで既定表示に戻る */
     main { padding: 16px; max-width: 1100px; margin: 0 auto; }
     .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
     select, input, button { font-size: 14px; padding: 6px 8px; }
@@ -43,7 +43,7 @@
 </head>
 <body>
   <header>
-    <h1>🐟 NamazuHaUrokoGaNai</h1>
+    <h1 id="home" title="既定の表示に戻る">🐟 NamazuHaUrokoGaNai</h1>
     <div class="tabs">
       <button id="tab-live" class="active">ライブ</button>
       <button id="tab-events">イベント</button>
