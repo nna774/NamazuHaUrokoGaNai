@@ -117,12 +117,16 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
   tft_.drawString(buf, w - 6, classBottom, 4);
 
   // デバイスID（NAMAZUの下・左上）。中央の階級が全幅パディングでこの帯を
-  // 消去するため、階級の後に描いて残す。左寄せなので中央とは重ならない。
-  snprintf(buf, sizeof(buf), "id:%04lu", (unsigned long)deviceId_);
-  tft_.setTextDatum(TL_DATUM);
-  tft_.setTextColor(fg, bg);
-  tft_.setTextPadding(70);
-  tft_.drawString(buf, 4, 24, 2);
+  // 消去するため、階級の後に描いて残す。ただし2文字の階級("5+"等)は幅161pxで
+  // x40まで迫り、IDのパディング矩形(x4-74)が字面の左上を削ってしまうため、
+  // その間はIDを描かない（階級の再描画が全幅を消すので消し処理も不要）。
+  if (cls[1] == '\0') {
+    snprintf(buf, sizeof(buf), "id:%04lu", (unsigned long)deviceId_);
+    tft_.setTextDatum(TL_DATUM);
+    tft_.setTextColor(fg, bg);
+    tft_.setTextPadding(70);
+    tft_.drawString(buf, 4, 24, 2);
+  }
 
   // 継続ステート
   tft_.setTextDatum(MC_DATUM);
