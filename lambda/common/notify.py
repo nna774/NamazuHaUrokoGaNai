@@ -10,24 +10,28 @@ from abc import ABC, abstractmethod
 
 class Notifier(ABC):
     @abstractmethod
-    def notify(self, title: str, text: str, fields: dict | None = None) -> None:
+    def notify(self, title: str, text: str, fields: dict | None = None,
+               *, image_url: str | None = None, image_alt: str | None = None) -> None:
         ...
 
 
 class NullNotifier(Notifier):
-    def notify(self, title, text, fields=None):
+    def notify(self, title, text, fields=None, *, image_url=None, image_alt=None):
         pass
 
 
 class SlackNotifier(Notifier):
     """Slack Incoming Webhook。channel を指定すると payload に載せる
-    （レガシーwebhookでは送信先を上書きできる。アプリ版webhookでは無視される点に注意）。"""
+    （レガシーwebhookでは送信先を上書きできる。アプリ版webhookでは無視される点に注意）。
+
+    image_url を渡すと image ブロックで画像を添付する。Incoming Webhook は
+    ファイルアップロードができないので、Slack が取得できる公開URL（例: Gyazo）を渡す。"""
 
     def __init__(self, webhook_url: str, channel: str = ""):
         self.webhook_url = webhook_url
         self.channel = channel
 
-    def notify(self, title, text, fields=None):
+    def notify(self, title, text, fields=None, *, image_url=None, image_alt=None):
         blocks = [
             {"type": "header", "text": {"type": "plain_text", "text": title}},
             {"type": "section", "text": {"type": "mrkdwn", "text": text}},
@@ -36,6 +40,12 @@ class SlackNotifier(Notifier):
             blocks.append({
                 "type": "section",
                 "fields": [{"type": "mrkdwn", "text": f"*{k}*\n{v}"} for k, v in fields.items()],
+            })
+        if image_url:
+            blocks.append({
+                "type": "image",
+                "image_url": image_url,
+                "alt_text": image_alt or title,
             })
         body = {"text": title, "blocks": blocks}
         if self.channel:
