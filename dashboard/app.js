@@ -203,9 +203,78 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
   }
 }
 
+// 波形の1点あたりの時間 [us]。エンベロープは bucket サンプルを1点に潰している。
+function wfStepUs(wf) {
+  return ((wf.mode === 'raw' ? 1 : wf.bucket) / wf.fs) * 1e6;
+}
+
+// [fromUs, toUs] に対応する区間を切り出した波形オブジェクトを返す。
+// 手持ちデータの再描画だけで済ませるためのクライアント側ズーム（再フェッチしない）。
+// 解像度(bucket)はそのままなので、拡大しても細部は増えない。
+function sliceWaveform(wf, fromUs, toUs) {
+  const step = wfStepUs(wf);
+  let i0 = Math.floor((fromUs - wf.start_us) / step);
+  let i1 = Math.ceil((toUs - wf.start_us) / step);
+  i0 = Math.max(0, Math.min(wf.n - 2, i0));
+  i1 = Math.max(i0 + 1, Math.min(wf.n - 1, i1));
+  const out = { ...wf, n: i1 - i0 + 1, start_us: wf.start_us + i0 * step };
+  const keys = wf.mode === 'raw' ? AXES : AXES.flatMap(a => [`${a}_min`, `${a}_max`]);
+  for (const k of keys) out[k] = wf[k].slice(i0, i1 + 1);
+  return out;
+}
+
+// canvas にドラッグでの時間区間選択を付ける。選択中は redraw() の上に半透明の矩形を
+// 重ね、確定で apply({fromUs, toUs})、ダブルクリックで apply(null)（=全体に戻す）。
+// getWf() は「いま表示中の」波形を返すこと（ズーム済みならその区間）。
+function attachZoomDrag(cv, getWf, redraw, apply) {
+  // canvas上のx座標 → 表示中波形上の時刻 [us]。プロット外は端にクランプ。
+  const pxToUs = px => {
+    const wf = getWf();
+    const plotW = cv.clientWidth - PAD * 2;
+    const f = Math.max(0, Math.min(1, (px - PAD) / plotW));
+    return wf.start_us + f * (wf.n - 1) * wfStepUs(wf);
+  };
+  let selStartPx = null;  // ドラッグ選択の始点x [CSS px]。null = 選択中でない
+  cv.addEventListener('mousedown', e => {
+    const wf = getWf();
+    if (!wf || !wf.n || wf.n <= 1) return;
+    selStartPx = e.offsetX;
+    e.preventDefault();
+  });
+  cv.addEventListener('mousemove', e => {
+    if (selStartPx === null) return;
+    redraw();
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = 'rgba(192,57,43,.15)';
+    ctx.fillRect(Math.min(selStartPx, e.offsetX), 0,
+                 Math.abs(e.offsetX - selStartPx), cv.clientHeight);
+  });
+  // mouseupはcanvas外で離した時も拾えるようwindowで受ける
+  window.addEventListener('mouseup', e => {
+    if (selStartPx === null) return;
+    const endPx = e.clientX - cv.getBoundingClientRect().left;
+    const x0 = selStartPx;
+    selStartPx = null;
+    if (Math.abs(endPx - x0) < 8) { redraw(); return; }  // クリック相当は無視
+    apply({ fromUs: Math.min(pxToUs(x0), pxToUs(endPx)),
+            toUs: Math.max(pxToUs(x0), pxToUs(endPx)) });
+  });
+  cv.addEventListener('dblclick', () => apply(null));
+}
+
 // --- ライブ / 指定時刻 ---
 let liveTimer = null;
 let lastLiveWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
+let liveZoom = null;          // ドラッグ拡大 {fromUs, toUs}。固定窓になり自動更新は止まる
+
+// いま画面に出ている（ズーム適用後の）波形。ドラッグ座標→時刻の変換にも使う。
+// ズーム時は区間を /recent で取り直すが、取得窓はAPIの最小幅(0.1分)等で指定より
+// 広いことがあるので、表示は常に指定区間へ切り出す。
+function displayedLiveWf() {
+  const wf = lastLiveWaveform;
+  if (!wf || !wf.n || wf.n <= 1 || !liveZoom) return wf;
+  return sliceWaveform(wf, liveZoom.fromUs, liveZoom.toUs);
+}
 
 // raw/ の保持日数（terraform の raw_retention_days と一致させる）。開始時刻ピッカーの
 // 選べる下限に使う。これより古い時刻を選んでもAPIは「データなし」を返すだけなので、
@@ -234,20 +303,32 @@ function setStartSec(sec) {
 function redrawLive() {
   if (!lastLiveWaveform) return;
   const yrange = Number(document.getElementById('yrange').value) || 0;
-  drawWaveform(document.getElementById('live-canvas'), lastLiveWaveform, yrange, visibleAxes('live'));
+  drawWaveform(document.getElementById('live-canvas'), displayedLiveWf(), yrange, visibleAxes('live'));
 }
 
 async function refreshLive() {
   const status = document.getElementById('live-status');
   const minutes = document.getElementById('minutes').value;
-  const yrange = Number(document.getElementById('yrange').value) || 0;
   const sec = startSec();
   try {
     status.textContent = '取得中…';
+    if (liveZoom) {
+      // ドラッグ拡大: その区間だけ取り直す。窓が狭いほど間引きが細かくなる。
+      // APIの minutes は0.1分が下限なので、指定区間へは displayedLiveWf が切り出す。
+      const spanMin = Math.max(0.1, (liveZoom.toUs - liveZoom.fromUs) / 60e6);
+      lastLiveWaveform = await apiGet('/recent?minutes=' + spanMin.toFixed(4)
+        + '&start=' + Math.round(liveZoom.fromUs));
+      redrawLive();
+      const wf = displayedLiveWf();
+      const from = new Date(liveZoom.fromUs / 1000).toLocaleTimeString('ja-JP');
+      status.textContent = `拡大表示: ${from} から ${((liveZoom.toUs - liveZoom.fromUs) / 1e6).toFixed(1)}秒`
+        + (wf.n ? (wf.mode === 'envelope' ? '（エンベロープ）' : '') : '・データなし');
+      return;
+    }
     const wf = await apiGet('/recent?minutes=' + minutes
       + (sec ? '&start=' + sec * 1e6 : ''));
     lastLiveWaveform = wf;
-    drawWaveform(document.getElementById('live-canvas'), wf, yrange, visibleAxes('live'));
+    redrawLive();
     if (sec) {
       // 指定時刻表示は過去の固定窓なので鮮度は無意味。指定範囲を表示する。
       const from = new Date(sec * 1000).toLocaleString('ja-JP');
@@ -280,8 +361,8 @@ function refreshIntervalMs() {
 
 function scheduleLive() {
   if (liveTimer) clearInterval(liveTimer);
-  // 指定時刻表示は過去の固定窓なので自動更新しない（新データは増えない）。
-  if (document.getElementById('autorefresh').checked && !startSec()) {
+  // 指定時刻表示・ドラッグ拡大は過去の固定窓なので自動更新しない（新データは増えない）。
+  if (document.getElementById('autorefresh').checked && !startSec() && !liveZoom) {
     liveTimer = setInterval(refreshLive, refreshIntervalMs());
   }
 }
@@ -363,32 +444,50 @@ function renderEventInfo(m) {
 let lastEventWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
 let currentEventId = null;     // event-yrange 変更時に詳細ハッシュを組み直すため
 let eventZoom = null;          // 時間方向ズーム {fromUs, toUs}。null = 全体表示
+// ズーム区間のraw再取得キャッシュ。全体波形はエンベロープ(間引き)で来るので、
+// 十分狭く拡大したら /event?from=&to= でその区間だけ100Hz生波形を取り直す。
+let eventRawWf = null;         // {fromUs, toUs, wf}
+let eventRawSeq = 0;           // 遅れて届いた古い応答を捨てるためのトークン
+// APIの MAX_POINTS と一致させる（この点数以下ならAPIはrawで返す）
+const EVENT_RAW_MAX_POINTS = 3000;
 
-// 波形の1点あたりの時間 [us]。エンベロープは bucket サンプルを1点に潰している。
-function wfStepUs(wf) {
-  return ((wf.mode === 'raw' ? 1 : wf.bucket) / wf.fs) * 1e6;
-}
-
-// [fromUs, toUs] に対応する区間を切り出した波形オブジェクトを返す。
-// 手持ちデータの再描画だけで済ませるためのクライアント側ズーム（再フェッチしない）。
-// エンベロープの解像度(bucket)はそのままなので、拡大しても細部は増えない。
-function sliceWaveform(wf, fromUs, toUs) {
-  const step = wfStepUs(wf);
-  let i0 = Math.floor((fromUs - wf.start_us) / step);
-  let i1 = Math.ceil((toUs - wf.start_us) / step);
-  i0 = Math.max(0, Math.min(wf.n - 2, i0));
-  i1 = Math.max(i0 + 1, Math.min(wf.n - 1, i1));
-  const out = { ...wf, n: i1 - i0 + 1, start_us: wf.start_us + i0 * step };
-  const keys = wf.mode === 'raw' ? AXES : AXES.flatMap(a => [`${a}_min`, `${a}_max`]);
-  for (const k of keys) out[k] = wf[k].slice(i0, i1 + 1);
-  return out;
+// raw キャッシュが現在のズーム区間を覆っているか
+function rawCovers(z) {
+  return eventRawWf && eventRawWf.fromUs <= z.fromUs && z.toUs <= eventRawWf.toUs;
 }
 
 // いま画面に出ている（ズーム適用後の）波形。ドラッグ座標→時刻の変換にも使う。
+// ズーム区間のrawを取得済みならそちらを使う（更に狭めた時もクライアント側で切るだけ）。
 function displayedEventWf() {
   const wf = lastEventWaveform;
   if (!wf || !wf.n || wf.n <= 1 || !eventZoom) return wf;
-  return sliceWaveform(wf, eventZoom.fromUs, eventZoom.toUs);
+  const src = rawCovers(eventZoom) ? eventRawWf.wf : wf;
+  return sliceWaveform(src, eventZoom.fromUs, eventZoom.toUs);
+}
+
+// ズームが十分狭くなったら、その区間の生波形をAPIから取り直す。
+// 取れるまではエンベロープの切り出しが表示されており、届いたら差し替える。
+async function maybeFetchRawZoom() {
+  const wf = lastEventWaveform;
+  if (!wf || !wf.n || !eventZoom || wf.mode === 'raw') return;  // 全体がrawなら不要
+  const spanS = (eventZoom.toUs - eventZoom.fromUs) / 1e6;
+  if (spanS * wf.fs > EVENT_RAW_MAX_POINTS) return;  // まだ広い（エンベロープでしか返らない）
+  if (rawCovers(eventZoom)) return;                  // キャッシュ済み
+  const seq = ++eventRawSeq;
+  const id = currentEventId;
+  const { fromUs, toUs } = eventZoom;
+  try {
+    const data = await apiGet(`/event?id=${encodeURIComponent(id)}`
+      + `&from=${Math.round(fromUs)}&to=${Math.round(toUs)}`);
+    // 取得中にイベントやズームが変わっていたら捨てる
+    if (seq !== eventRawSeq || id !== currentEventId) return;
+    if (data.waveform && data.waveform.n && data.waveform.mode === 'raw') {
+      eventRawWf = { fromUs, toUs, wf: data.waveform };
+      drawEventWaveform();
+    }
+  } catch (e) {
+    // raw が取れなくてもエンベロープ表示のままで実害なし。静かに諦める。
+  }
 }
 
 function drawEventWaveform() {
@@ -403,12 +502,15 @@ async function showEvent(id) {
   title.textContent = '読み込み中… ' + id;
   document.getElementById('event-info').innerHTML = '';
   lastEventWaveform = null;
+  eventRawWf = null;  // 別イベントのrawを誤って使わないようキャッシュを破棄
+  eventRawSeq++;      // 取得中の応答も無効化
   try {
     const data = await apiGet('/event?id=' + encodeURIComponent(id));
     const m = data.meta || {};
     title.textContent = `震度${m.scale || ''}（計測震度 ${Number(m.max_intensity || 0).toFixed(1)}）`;
     lastEventWaveform = data.waveform;
     drawEventWaveform();
+    maybeFetchRawZoom();  // ハッシュ復元で狭いズームが指定済みならrawを取りにいく
     renderEventInfo(m);
   } catch (e) {
     title.textContent = 'エラー: ' + e.message;
@@ -495,6 +597,13 @@ function showView(name) {
   if (name !== 'devices' && devicesTimer) { clearInterval(devicesTimer); devicesTimer = null; }
 }
 
+// t=<fromUs>-<toUs> 形式のズームパラメータを {fromUs, toUs} | null に変換
+function parseZoomParam(t) {
+  if (!t || !/^\d+-\d+$/.test(t)) return null;
+  const [f, to] = t.split('-').map(Number);
+  return to > f ? { fromUs: f, toUs: to } : null;
+}
+
 function parseHash() {
   const raw = location.hash.replace(/^#/, '');
   const [path, query] = raw.split('?');
@@ -503,13 +612,15 @@ function parseHash() {
   return { path, params };
 }
 
-// 現在のlive操作状態を表すハッシュ。s=<epoch秒> があれば指定時刻表示。
+// 現在のlive操作状態を表すハッシュ。s=<epoch秒> があれば指定時刻表示、
+// t=<fromUs>-<toUs> があればドラッグ拡大の固定窓。
 function liveHash() {
   const m = document.getElementById('minutes').value;
   const auto = document.getElementById('autorefresh').checked ? 1 : 0;
   const r = document.getElementById('yrange').value;
   const sec = startSec();
-  return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}${sec ? `&s=${sec}` : ''}`;
+  const t = liveZoom ? `&t=${Math.round(liveZoom.fromUs)}-${Math.round(liveZoom.toUs)}` : '';
+  return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}${sec ? `&s=${sec}` : ''}${t}`;
 }
 
 // 現在のイベント一覧操作状態（ページ・全件フィルタ）を表すハッシュ
@@ -544,8 +655,7 @@ function route() {
     if (params.r !== undefined) document.getElementById('event-yrange').value = params.r;
     setAxes('event', params.ax);
     // 時間ズームの復元。t が無ければ全体表示（別イベントへ移った時のリセットも兼ねる）。
-    const tz = params.t && /^\d+-\d+$/.test(params.t) ? params.t.split('-').map(Number) : null;
-    eventZoom = tz && tz[1] > tz[0] ? { fromUs: tz[0], toUs: tz[1] } : null;
+    eventZoom = parseZoomParam(params.t);
     showEvent(decodeURIComponent(path.slice('event/'.length)));
   } else if (path === 'events') {
     showView('events');
@@ -565,6 +675,7 @@ function route() {
     if (params.r !== undefined) document.getElementById('yrange').value = params.r;
     setAxes('live', params.ax);
     setStartSec(params.s ? parseInt(params.s, 10) : null);
+    liveZoom = parseZoomParam(params.t);  // t が無ければズーム解除
     showView('live');
     refreshLive();
     scheduleLive();
@@ -587,13 +698,15 @@ window.addEventListener('load', () => {
   startInput.min = localDatetimeValue(new Date(now.getTime() - RAW_RETENTION_DAYS * 86400 * 1000));
 
   // 操作したらURLへ反映（hashchange→route が実際の描画を行う）
-  document.getElementById('minutes').onchange = () => { location.hash = liveHash(); };
+  // 表示範囲・開始時刻の変更は新しい窓の明示指定なので、ドラッグ拡大は解除する。
+  document.getElementById('minutes').onchange = () => { liveZoom = null; location.hash = liveHash(); };
   document.getElementById('autorefresh').onchange = () => { location.hash = liveHash(); };
   // 開始時刻の指定は別の時間窓を取り直すので、再フェッチを伴う route を通す。
-  startInput.onchange = () => { location.hash = liveHash(); };
+  startInput.onchange = () => { liveZoom = null; location.hash = liveHash(); };
   document.getElementById('start-clear').onclick = () => {
     startInput.value = '';
-    location.hash = liveHash();  // s なし = ライブ（最新）に戻る
+    liveZoom = null;
+    location.hash = liveHash();  // s も t も無し = ライブ（最新）に戻る
   };
   // 縦軸レンジは取得済みデータの描画変換にすぎないので再フェッチしない。
   // URLは replaceState で更新して hashchange→route(=再取得) を発火させない。
@@ -619,47 +732,25 @@ window.addEventListener('load', () => {
     };
   }
   // --- イベント詳細の時間ズーム（ドラッグで区間選択→拡大、ダブルクリックで全体） ---
-  // ズームは取得済みデータの再描画にすぎないので再フェッチしない（yrangeと同じ扱い）。
-  const evCv = document.getElementById('event-canvas');
-  // canvas上のx座標 → 表示中波形上の時刻 [us]。プロット外は端にクランプ。
-  const evPxToUs = px => {
-    const wf = displayedEventWf();
-    const plotW = evCv.clientWidth - PAD * 2;
-    const f = Math.max(0, Math.min(1, (px - PAD) / plotW));
-    return wf.start_us + f * (wf.n - 1) * wfStepUs(wf);
-  };
+  // ズームは手持ちデータの再描画で即反映し、十分狭ければその区間のrawを取り直す。
   const applyEventZoom = z => {
     eventZoom = z;
     if (currentEventId) history.replaceState(null, '', '#' + eventHash(currentEventId));
     drawEventWaveform();
+    maybeFetchRawZoom();
   };
-  let selStartPx = null;  // ドラッグ選択の始点x [CSS px]。null = 選択中でない
-  evCv.addEventListener('mousedown', e => {
-    if (!lastEventWaveform || lastEventWaveform.n <= 1) return;
-    selStartPx = e.offsetX;
-    e.preventDefault();
-  });
-  evCv.addEventListener('mousemove', e => {
-    if (selStartPx === null) return;
-    // 波形を描き直した上に選択範囲を半透明で重ねる
-    drawEventWaveform();
-    const ctx = evCv.getContext('2d');
-    ctx.fillStyle = 'rgba(192,57,43,.15)';
-    ctx.fillRect(Math.min(selStartPx, e.offsetX), 0,
-                 Math.abs(e.offsetX - selStartPx), evCv.clientHeight);
-  });
-  // mouseupはcanvas外で離した時も拾えるようwindowで受ける
-  window.addEventListener('mouseup', e => {
-    if (selStartPx === null) return;
-    const endPx = e.clientX - evCv.getBoundingClientRect().left;
-    const x0 = selStartPx;
-    selStartPx = null;
-    if (Math.abs(endPx - x0) < 8) { drawEventWaveform(); return; }  // クリック相当は無視
-    applyEventZoom({ fromUs: Math.min(evPxToUs(x0), evPxToUs(endPx)),
-                     toUs: Math.max(evPxToUs(x0), evPxToUs(endPx)) });
-  });
-  evCv.addEventListener('dblclick', () => applyEventZoom(null));
+  attachZoomDrag(document.getElementById('event-canvas'),
+                 displayedEventWf, drawEventWaveform, applyEventZoom);
   document.getElementById('event-zoom-reset').onclick = () => applyEventZoom(null);
+
+  // --- ライブの時間ズーム。区間を /recent で取り直す（狭い窓ほど間引きが細かくなり、
+  // 30秒以下ならraw）。指定時刻表示と同じく固定窓なので自動更新は止まる。 ---
+  attachZoomDrag(document.getElementById('live-canvas'),
+                 displayedLiveWf, redrawLive, z => {
+    liveZoom = z;
+    // 取り直しが要るので route を通す（scheduleLive も再評価され自動更新が止まる/戻る）
+    location.hash = liveHash();
+  });
 
   document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
   // フィルタ切替はURLへ反映（hashchange→route が1ページ目から再取得する）
