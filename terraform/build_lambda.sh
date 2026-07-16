@@ -17,24 +17,28 @@ mkdir -p "$BUILD"
 
 build_one() {
   fn="$1"
+  shift
+  extra_pkgs="$*"   # numpy に加えて同梱する追加パッケージ（関数ごと）
   stage="$BUILD/$fn"
   mkdir -p "$stage"
   cp "$LAMBDA/$fn/handler.py" "$stage/handler.py"
   cp -r "$LAMBDA/common" "$stage/common"
   cp -r "$JISMO" "$stage/jismo"
-  # numpy を同梱（Lambda実行環境=Python3.12/x86_64 向け manylinux wheel を明示指定。
+  # numpy(+追加) を同梱（Lambda実行環境=Python3.12/x86_64 向け manylinux wheel を明示指定。
   # ローカルのpythonが3.12以外でも正しい版を掴むよう --python-version等を渡す）
   "$PY" -m pip install --quiet \
     --platform manylinux2014_x86_64 \
     --implementation cp --python-version 3.12 --abi cp312 \
     --only-binary=:all: \
-    --target "$stage" numpy >/dev/null
+    --target "$stage" numpy $extra_pkgs >/dev/null
   # __pycache__ 除去
   find "$stage" -name '__pycache__' -type d -prune -exec rm -rf {} +
   (cd "$stage" && zip -qr "$BUILD/$fn.zip" .)
   echo "built $BUILD/$fn.zip"
 }
 
-for fn in ingest detect api watchdog; do
+# detect は確定報の波形クイックルック PNG 描画に Pillow を要する。他はnumpyのみ。
+for fn in ingest api watchdog; do
   build_one "$fn"
 done
+build_one detect Pillow

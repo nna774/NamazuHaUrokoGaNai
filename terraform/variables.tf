@@ -45,6 +45,13 @@ variable "slack_channel" {
   description = "通知先チャンネル（例 #nona-kanshi）。レガシーwebhookでのみ上書き可。空ならwebhook既定先。"
 }
 
+variable "gyazo_token" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Gyazo アクセストークン。確定報 Slack 通知に波形画像を添えるのに使う。空なら画像なしでテキストのみ通知。"
+}
+
 variable "detect_threshold" {
   type    = number
   default = 0.5

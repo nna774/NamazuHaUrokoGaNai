@@ -4,6 +4,7 @@ project           = "namazu"
 hmac_secret       = "change-me-32bytes-random-secret" # firmware secrets.h と一致させる
 slack_webhook_url = "https://hooks.slack.com/services/XXX/YYY/ZZZ"
 slack_channel     = "#nona-kanshi" # 通知先(レガシーwebhookのみ上書き可)。空ならwebhook既定先
+gyazo_token       = "" # Gyazoアクセストークン(scope public)。確定報に波形画像を添える。空なら画像なし
 
 # 検知パラメータ（バックテストで調整）
 detect_threshold      = 0.5
