@@ -157,15 +157,22 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
       series[a].v.forEach((v, i) => { const x = X(i), y = Y(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.stroke();
     } else {
-      // エンベロープ: min/max を塗り、輪郭線も引いて見やすくする
+      // エンベロープ: min/max を半透明で塗り、輪郭を不透明の実線でなぞる。
+      // ズーム等で帯が細くなっても輪郭だけは濃く残り、薄く見えない。
+      const path = () => {
+        ctx.beginPath();
+        series[a].max.forEach((v, i) => { const x = X(i), y = Y(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+        for (let i = n - 1; i >= 0; i--) { ctx.lineTo(X(i), Y(series[a].min[i])); }
+        ctx.closePath();
+      };
+      path();
       ctx.globalAlpha = 0.65;
-      ctx.beginPath();
-      series[a].max.forEach((v, i) => { const x = X(i), y = Y(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-      for (let i = n - 1; i >= 0; i--) { ctx.lineTo(X(i), Y(series[a].min[i])); }
-      ctx.closePath();
       ctx.fillStyle = COLORS[a];
       ctx.fill();
       ctx.globalAlpha = 1;
+      path();
+      ctx.lineWidth = 1;
+      ctx.stroke();  // strokeStyle はループ先頭で COLORS[a] 設定済み
     }
   }
 
