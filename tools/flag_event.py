@@ -16,6 +16,9 @@
     python flag_event.py mark   0001-59462454
     python flag_event.py unmark 0001-59462454
 
+    # 複数イベントをまとめて立てる / 降ろす（スペース区切りで並べる）
+    python flag_event.py mark 0001-59462454 0001-59470001 0002-12345678
+
     # 指定イベント（含む）より前の同一デバイスのイベントを全部人工地震にする
     #   例: memo「0001-59462454 以前は全部人工地震」
     python flag_event.py mark --before 0001-59462454
@@ -106,9 +109,18 @@ def _confirm(prompt: str) -> bool:
 
 def cmd_mark(args, value: bool):
     table = _table(args.table)
-    if not EVENT_ID_RE.fullmatch(args.event_id):
-        sys.exit(f"event_id の書式が不正: {args.event_id}")
-    ids = _targets(table, args.event_id, args.before, args.confirmed_only)
+    for eid in args.event_id:
+        if not EVENT_ID_RE.fullmatch(eid):
+            sys.exit(f"event_id の書式が不正: {eid}")
+    # 複数指定・--before の展開・確定済み絞り込みの結果を重複排除して束ねる。
+    seen: set[str] = set()
+    ids: list[str] = []
+    for eid in args.event_id:
+        for t in _targets(table, eid, args.before, args.confirmed_only):
+            if t not in seen:
+                seen.add(t)
+                ids.append(t)
+    ids.sort()
     if not ids:
         print("対象イベントが無い（確定済みに絞った結果 0 件の可能性）")
         return
@@ -147,9 +159,11 @@ def main(argv=None):
 
     for name, help_ in (("mark", "人工地震フラグを立てる"), ("unmark", "人工地震フラグを降ろす")):
         s = sub.add_parser(name, help=help_)
-        s.add_argument("event_id")
+        s.add_argument("event_id", nargs="+",
+                       help="対象の event_id（スペース区切りで複数指定可）")
         s.add_argument("--before", action="store_true",
-                       help="指定イベント（含む）より前の同一デバイスのイベントを全部対象にする")
+                       help="指定イベント（含む）より前の同一デバイスのイベントを全部対象にする"
+                            "（複数指定した各イベントそれぞれに適用し、和集合を取る）")
         s.add_argument("--confirmed-only", action="store_true",
                        help="確定済み（cloud_confirmed）イベントだけを対象にする"
                             "（未確定は一覧の既定で元々隠れているため）")
