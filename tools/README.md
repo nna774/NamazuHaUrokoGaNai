@@ -53,6 +53,31 @@ python flag_event.py list                        # 立っているものを一�
 フラグを立てたイベントはダッシュボードの一覧では隠れ（「全件」表示でのみ薄く出る）、
 詳細で「人工地震（テスト等）」と表示される。震度や確定状態は変えない。
 
+## ノイズに埋もれた小地震の炙り出し（`detectlab.py`）
+
+時間波形1本では環境ノイズ（足音・ファン・交通）のRMSに埋もれて見えない弱い揺れを、
+**バンドパス波形・スペクトログラム（時間×周波数）・STA/LTA比**の3視点で可視化し、
+立ち上がり候補時刻を出力する解析ビュー。STA/LTA（短期/長期エネルギー比）は地震観測網の
+トリガと同じ原理で、振幅がノイズに紛れても帯域集中した過渡だけがピークする。
+
+```bash
+# ある時刻を中心に前後N分をS3(raw/)から取って解析（--at はJST）
+python detectlab.py --at "2026-07-24 20:53" --minutes 3 --out /tmp/2053.png
+# イベントID指定（events/<id>/ を連結）
+python detectlab.py --event 0001-59462454
+# 手元のキャプチャ/合成CSVで
+python detectlab.py --csv cap.csv --band 1 8 --thr 3
+# 取得した生窓をCSVに落として spectrum.py / backtest.py に流す
+python detectlab.py --at "2026-07-24 20:53" --dump-csv /tmp/2053.csv --out /tmp/2053.png
+```
+
+主なオプション: `--band LO HI`（帯域[Hz]、既定 `1 10`）、`--sta`/`--lta`（STA/LTA窓[秒]、
+既定 `1`/`30`）、`--thr`（検出閾値、既定 `4`）。データはAPIではなく `lambda/common` 経由で
+S3を直読みする（APIは30秒超でエンベロープに間引かれ、スペクトル解析に使えないため）。
+rawバケットは `--bucket` / 環境変数 `NAMZ_RAW_BUCKET` / `terraform output -raw data_bucket`
+の順で解決。遠地・弱震は帯域選びで感度が変わる（遠いほど低周波寄り＝ノイズ帯と重なる）ので
+`--band` で追い込む。本CLIは検出**器**ではなく解析**ビュー**（自動検知は detect Lambda の担当）。
+
 ## テスト
 
 ```bash
