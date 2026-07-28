@@ -98,6 +98,19 @@ def test_rectilinearity_linear_vs_isotropic():
     assert rl[s2].mean() > ri[s2].mean() + 0.3
 
 
+def test_rectilinearity_two_axis():
+    # 2軸(水平のみ)でも動く。直線運動は高く、等方は低い。
+    n = 4000
+    t = np.arange(n) / FS
+    s = np.sin(2 * np.pi * 3.0 * t)
+    linear = np.stack([s, 0.4 * s], axis=1)          # 2軸で直線
+    rng = np.random.default_rng(1)
+    iso = rng.standard_normal((n, 2))
+    s2 = slice(500, 3500)
+    assert detectlab.rectilinearity(linear, FS, 2.0)[s2].mean() > 0.9
+    assert detectlab.rectilinearity(iso, FS, 2.0)[s2].mean() < 0.5
+
+
 def test_rectilinearity_lifts_on_buried_quake():
     # 埋めた地震(帯域集中の実体波的過渡)は、その区間で直線性が背景より上がる。
     data = _buried_quake(amp_gal=5.0)

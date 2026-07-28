@@ -143,30 +143,30 @@ def detect_onsets(ratio: np.ndarray, fs: float, start_us: int, thr: float) -> li
 
 
 def rectilinearity(band: np.ndarray, fs: float, win_s: float) -> np.ndarray:
-    """3軸の粒子運動の直線性(0..1)を移動窓の共分散行列の固有値から算出。
+    """粒子運動の直線性(0..1)を移動窓の共分散行列の固有値から算出。2軸/3軸対応。
 
     地震の実体波(特にP波)は震源方向に沿った直線偏光 → 最大固有値に集中して1に近づく。
-    ランダムな環境ノイズは等方的で3固有値が拮抗 → 0に近づく。
-    rect = 1 - (λ2+λ3)/(2λ1)  （λ1≥λ2≥λ3）。
+    ランダムな環境ノイズは等方的で固有値が拮抗 → 0に近づく。
+    rect = 1 - mean(小さい固有値) / 最大固有値。
     """
-    n = len(band)
+    n, k = band.shape
     w = max(3, int(round(win_s * fs)))
     b = band - band.mean(axis=0)
-    k = np.ones(w) / w
+    kern = np.ones(w) / w
 
     def ma(x: np.ndarray) -> np.ndarray:
-        return np.convolve(x, k, mode="same")
+        return np.convolve(x, kern, mode="same")
 
-    cov = np.empty((n, 3, 3))
-    for i in range(3):
-        for j in range(i, 3):
+    cov = np.empty((n, k, k))
+    for i in range(k):
+        for j in range(i, k):
             c = ma(b[:, i] * b[:, j])
             cov[:, i, j] = c
             cov[:, j, i] = c
-    ev = np.linalg.eigvalsh(cov)  # 昇順: ev[:,0]<=ev[:,1]<=ev[:,2]
-    l3, l2, l1 = ev[:, 0], ev[:, 1], ev[:, 2]
-    rect = 1.0 - (l2 + l3) / (2.0 * np.maximum(l1, 1e-20))
-    return np.clip(rect, 0.0, 1.0)
+    ev = np.linalg.eigvalsh(cov)  # 昇順: ev[:,0] <= ... <= ev[:,-1]
+    largest = np.maximum(ev[:, -1], 1e-20)
+    smaller_mean = ev[:, :-1].mean(axis=1)
+    return np.clip(1.0 - smaller_mean / largest, 0.0, 1.0)
 
 
 # ---- 震源ジオメトリ・到達予測 -------------------------------------------
@@ -235,7 +235,7 @@ def dump_csv(path: str, data: np.ndarray, start_us: int, fs: float) -> None:
 
 
 def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
-         rect, arrivals, out, show):
+         rect, arrivals, out, show, vec=None, axes_label="xyz"):
     import matplotlib
 
     if not show:
@@ -268,7 +268,8 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
     axs[1].set_ylabel(f"BP {band_lo:g}-{band_hi:g}Hz [gal]")
     axs[1].set_title("バンドパス後（過渡が浮き上がる）", fontsize=9, loc="left")
 
-    vec = np.sqrt((band ** 2).sum(axis=1))
+    if vec is None:
+        vec = np.sqrt((band ** 2).sum(axis=1))
     nper = int(min(256, n))
     if nper >= 8:
         f_s, t_s, sxx = signal.spectrogram(
@@ -307,7 +308,8 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
             a.axvline(ot, color="m", lw=0.8, alpha=0.6)
 
     t0 = datetime.fromtimestamp(start_us / 1e6, JST)
-    fig.suptitle(f"detectlab  start={t0:%Y-%m-%d %H:%M:%S JST}  fs={fs:.1f}Hz  N={n}")
+    fig.suptitle(f"detectlab  start={t0:%Y-%m-%d %H:%M:%S JST}  fs={fs:.1f}Hz"
+                 f"  N={n}  axes={axes_label}")
     fig.tight_layout()
     if out:
         fig.savefig(out, dpi=110)
@@ -344,7 +346,10 @@ def main() -> int:
     p.add_argument("--lta", type=float, default=30.0, help="LTA窓[秒]（既定30）")
     p.add_argument("--thr", type=float, default=4.0, help="STA/LTA検出閾値（既定4）")
     p.add_argument("--rect-win", dest="rect_win", type=float, default=3.0,
-                   help="3軸直線性の移動窓[秒]（既定3）")
+                   help="直線性の移動窓[秒]（既定3）")
+    p.add_argument("--axes", choices=["xyz", "xy"], default="xyz",
+                   help="STA/LTA・スペクトログラム・直線性に使う軸。xy=水平のみ"
+                        "（z軸の低周波ノイズが大きい時、遠地弱震で有利）")
     p.add_argument("--eew", help='震源で答え合わせ。"緯度,経度,深さkm,発生時刻(JST)" '
                    '例 "37.7,141.7,60,2026-07-24 20:52:59"。P/S到達窓を重ね描き＋SNR/直線性を出す')
     p.add_argument("--station", help='観測点座標 "lat,lon"（既定は NAMZ_STATION_LATLON / 湯沢町）')
@@ -370,18 +375,20 @@ def main() -> int:
 
     lo, hi = args.band
     band = bandpass(data, fs, lo, hi)
-    cf = (band ** 2).sum(axis=1)
+    nax = 2 if args.axes == "xy" else 3          # xy=水平のみ / xyz=3軸
+    bsel = band[:, :nax]
+    cf = (bsel ** 2).sum(axis=1)
     ratio = sta_lta(cf, fs, args.sta, args.lta)
     onsets = detect_onsets(ratio, fs, start_us, args.thr)
-    rect = rectilinearity(band, fs, args.rect_win)
+    rect = rectilinearity(bsel, fs, args.rect_win)
     vec = np.sqrt(cf)
 
     t0 = datetime.fromtimestamp(start_us / 1e6, JST)
     raw_rms = np.sqrt(np.mean((data - data.mean(axis=0)) ** 2))
     bp_rms = np.sqrt(np.mean(band ** 2))
     print(f"# start={t0:%Y-%m-%d %H:%M:%S JST}  fs={fs:.2f}Hz  N={n}  ({n / fs:.1f}s)")
-    print(f"# band={lo:g}-{hi:g}Hz  raw_rms={raw_rms:.4f}gal  bp_rms={bp_rms:.4f}gal"
-          f"  STA/LTA peak={ratio.max():.2f}")
+    print(f"# band={lo:g}-{hi:g}Hz  axes={args.axes}  raw_rms={raw_rms:.4f}gal"
+          f"  bp_rms={bp_rms:.4f}gal  STA/LTA peak={ratio.max():.2f}")
     if onsets:
         for o in onsets:
             ot = datetime.fromtimestamp(o / 1e6, JST)
@@ -424,7 +431,8 @@ def main() -> int:
         dump_csv(args.dump, data, start_us, fs)
 
     plot(data, band, fs, start_us, ratio, args.thr, onsets, lo, hi,
-         rect, arrivals, args.out, show=args.show or not args.out)
+         rect, arrivals, args.out, show=args.show or not args.out,
+         vec=vec, axes_label=args.axes)
     return 0
 
 
