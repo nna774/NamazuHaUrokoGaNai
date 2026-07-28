@@ -138,6 +138,31 @@ def cmd_mark(args, value: bool):
     print(f"{verb}: {len(ids)} 件 完了")
 
 
+def cmd_note(args):
+    """任意のイベントに自由記述メモを付ける/消す。"""
+    table = _table(args.table)
+    if not EVENT_ID_RE.fullmatch(args.event_id):
+        sys.exit(f"event_id の書式が不正: {args.event_id}")
+    if args.clear:
+        table.update_item(
+            Key={"event_id": args.event_id},
+            UpdateExpression="REMOVE #n",
+            ExpressionAttributeNames={"#n": "note"},
+        )
+        print(f"メモを削除: {args.event_id}")
+        return
+    if not args.text:
+        sys.exit("メモ本文が空。テキストを渡すか --clear で削除しろ")
+    text = " ".join(args.text)
+    table.update_item(
+        Key={"event_id": args.event_id},
+        UpdateExpression="SET #n = :v",
+        ExpressionAttributeNames={"#n": "note"},
+        ExpressionAttributeValues={":v": text},
+    )
+    print(f"メモを設定: {args.event_id}  「{text}」")
+
+
 def cmd_list(args):
     table = _table(args.table)
     items = [it for it in _scan_all(table) if it.get("artificial")]
@@ -172,6 +197,11 @@ def main(argv=None):
 
     sub.add_parser("list", help="人工地震フラグの立っているイベントを一覧")
 
+    sn = sub.add_parser("note", help="イベントに自由記述メモを付ける/消す")
+    sn.add_argument("event_id", help="対象の event_id")
+    sn.add_argument("text", nargs="*", help="メモ本文（複数語はスペース連結）")
+    sn.add_argument("--clear", action="store_true", help="メモを削除する")
+
     args = p.parse_args(argv)
     if not args.table:
         sys.exit("テーブル名が未指定。--table か環境変数 NAMZ_EVENTS_TABLE を設定しろ")
@@ -182,6 +212,8 @@ def main(argv=None):
         cmd_mark(args, False)
     elif args.cmd == "list":
         cmd_list(args)
+    elif args.cmd == "note":
+        cmd_note(args)
 
 
 if __name__ == "__main__":

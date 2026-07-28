@@ -120,6 +120,50 @@ def record_cloud_detection(device_id, onset_us, intensity, peak_gal, waveform_pr
     return eid, newly_confirmed
 
 
+def record_manual_event(device_id, onset_us, intensity, peak_gal,
+                         waveform_prefix=None, note=None):
+    """手動で raw→events に昇格したイベントを記録する。
+
+    `manual` フラグを立て、評価済み(`checked`)として一覧の既定にも出す（既定フィルタは
+    manual を確定と同格に扱う）。自動確定ではないので `cloud_confirmed` は立てない。
+    セッションマージはせず onset から決まる固定 id を使う（再実行は同じ id に上書き=冪等）。
+    """
+    eid = event_id(device_id, onset_us)
+    tbl = _table()
+    prev = tbl.get_item(Key={"event_id": eid}).get("Item")
+    item = prev or {
+        "event_id": eid,
+        "device_id": device_id,
+        "device_prompt": False,
+        "cloud_confirmed": False,
+    }
+    item["device_id"] = device_id
+    item["onset_us"] = Decimal(str(onset_us))
+    item["last_us"] = max(Decimal(str(onset_us)), Decimal(str(item.get("last_us", onset_us))))
+    item["max_intensity"] = Decimal(str(intensity))
+    item["peak_gal"] = Decimal(str(peak_gal))
+    item["manual"] = True
+    item["checked"] = True
+    if waveform_prefix is not None:
+        item["waveform_prefix"] = waveform_prefix
+    if note is not None:
+        item["note"] = note
+    tbl.put_item(Item=item)
+    return eid
+
+
+def set_note(eid: str, note: str | None) -> None:
+    """イベントに自由記述メモを付ける/消す（note=None または "" で削除）。どのイベントにも付く。"""
+    if note:
+        set_field(eid, "note", note)
+    else:
+        _table().update_item(
+            Key={"event_id": eid},
+            UpdateExpression="REMOVE #n",
+            ExpressionAttributeNames={"#n": "note"},
+        )
+
+
 def get_event(eid: str) -> dict | None:
     return _table().get_item(Key={"event_id": eid}).get("Item")
 
@@ -186,7 +230,7 @@ def list_page(page: int = 0, size: int = 20, show_all: bool = False) -> tuple[li
     items = _scan_all()
     if not show_all:
         items = [it for it in items
-                 if (it.get("cloud_confirmed") or not it.get("checked"))
+                 if (it.get("cloud_confirmed") or it.get("manual") or not it.get("checked"))
                  and not it.get("artificial")]
     items.sort(key=lambda x: int(x.get("onset_us", 0)), reverse=True)
     start = max(0, page) * size

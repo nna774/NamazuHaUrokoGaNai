@@ -53,6 +53,32 @@ python flag_event.py list                        # 立っているものを一�
 フラグを立てたイベントはダッシュボードの一覧では隠れ（「全件」表示でのみ薄く出る）、
 詳細で「人工地震（テスト等）」と表示される。震度や確定状態は変えない。
 
+## イベントのメモ・手動昇格（`flag_event.py note` / `promote_event.py`）
+
+どのイベントにも自由記述メモ（`note`）を付けられる。
+
+```bash
+python flag_event.py note 0001-59507458 "令和8年熊本地震。P波到達を水平2軸で確認"
+python flag_event.py note 0001-59507458 --clear   # メモ削除
+```
+
+`promote_event.py` は、自動検知に満たない弱い揺れや振り返りたい時間帯を、raw の保持期限
+（90日）で消える前に手動で events/ へ昇格（永久保存）する。`manual` フラグが立ち、一覧の
+既定にも確定と同格で出る。保存区間から計測震度も計算して記録する。
+
+```bash
+export NAMZ_EVENTS_TABLE=namazu-events   # or --table
+export NAMZ_BUCKET=namazu-data-XXXX      # or --bucket（既定は terraform output data_bucket）
+# 2026-07-28 16:29頃を前60秒〜後300秒ぶん保存し、メモを付ける
+python promote_event.py --onset "2026-07-28 16:29:00" --pre 60 --post 300 \
+    --note "令和8年熊本地震" 
+python promote_event.py --onset "2026-07-28 16:29:00" --dry-run   # 書き込まず内容表示
+```
+
+`--device` は既定で raw のファイル名から推定。`--dry-run` で保存内容（event_id・バッチ数・
+計測震度）を確認してから実行するのが安全。書き込み系なので api(参照専用)ではなく手元から
+S3/DynamoDB を直接操作する（`flag_event.py` と同じ思想）。
+
 ## ノイズに埋もれた小地震の炙り出し（`detectlab.py`）
 
 時間波形1本では環境ノイズ（足音・ファン・交通）のRMSに埋もれて見えない弱い揺れを、

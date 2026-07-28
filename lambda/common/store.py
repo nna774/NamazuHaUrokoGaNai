@@ -70,6 +70,22 @@ def load_event(s3, bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
     return np.concatenate(parts, axis=0), win_start, fs
 
 
+def copy_raw_to_event(s3, bucket: str, eid: str, start_us: int, end_us: int) -> int:
+    """[start,end] と重なる raw バッチを events/<eid>/ へコピー（永久保存）。コピー数を返す。"""
+    copied = 0
+    for key in list_raw_keys_in_range(s3, bucket, start_us, end_us):
+        try:  # ファイル名末尾の startus で範囲判定
+            b_start = int(key.rsplit("-", 1)[1].split(".")[0])
+        except (IndexError, ValueError):
+            continue
+        if b_start < start_us - 30_000_000 or b_start > end_us:
+            continue
+        s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": key},
+                       Key=s3util.event_batch_key(eid, b_start))
+        copied += 1
+    return copied
+
+
 def load_window(s3, bucket: str, end_us: int, seconds: float) -> tuple[np.ndarray, int, float]:
     """end_us を終端とする直近 `seconds` 秒の波形を連結して返す。
 
