@@ -256,14 +256,15 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
     t = np.arange(n) / fs
     fig, axs = plt.subplots(5, 1, figsize=(12, 12), sharex=True)
 
+    shown = "xy" if axes_label == "xy" else "xyz"  # 解析に使う軸だけ描く
     raw_ac = data - data.mean(axis=0)  # 重力DCを除いて交流成分だけ見る
-    for i, ax in enumerate("xyz"):
+    for i, ax in enumerate(shown):
         axs[0].plot(t, raw_ac[:, i], lw=0.4, label=ax)
     axs[0].set_ylabel("raw-DC [gal]")
     axs[0].legend(loc="upper right", ncol=3, fontsize=8)
     axs[0].set_title("生波形（重力DC除去。ここでは埋もれて見えない）", fontsize=9, loc="left")
 
-    for i, ax in enumerate("xyz"):
+    for i, ax in enumerate(shown):
         axs[1].plot(t, band[:, i], lw=0.4, label=ax)
     axs[1].set_ylabel(f"BP {band_lo:g}-{band_hi:g}Hz [gal]")
     axs[1].set_title("バンドパス後（過渡が浮き上がる）", fontsize=9, loc="left")
@@ -290,7 +291,8 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
     axs[4].set_ylim(0, 1)
     axs[4].set_ylabel("直線性")
     axs[4].set_xlabel("t [s] （窓先頭からの経過）")
-    axs[4].set_title("3軸直線性（1=直線偏光≒地震の実体波 / 0.5前後=等方ノイズ）",
+    rect_axes = "水平2軸" if axes_label == "xy" else "3軸"
+    axs[4].set_title(f"{rect_axes}直線性（1=直線偏光≒地震の実体波 / 0.5前後=等方ノイズ）",
                      fontsize=9, loc="left")
 
     # 到達予測窓（Pは青・Sは赤の帯）。全パネルに重ねる。
