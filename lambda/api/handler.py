@@ -143,6 +143,9 @@ def _event(q):
             meta["cloud_confirmed"] = bool(item.get("cloud_confirmed"))
             meta["checked"] = bool(item.get("checked"))
             meta["artificial"] = bool(item.get("artificial"))
+            meta["manual"] = bool(item.get("manual"))
+            # メモは DynamoDB を権威とする（meta.json の値より後の編集を優先）。
+            meta["note"] = item.get("note", meta.get("note"))
     except s3.exceptions.NoSuchKey:
         # 速報のみのイベントは波形コピーが無い。DynamoDBの情報だけ返す。
         item = events.get_event(eid)
@@ -160,7 +163,8 @@ def _event(q):
             "cloud_confirmed": bool(item.get("cloud_confirmed")),
             "checked": bool(item.get("checked")),
             "artificial": bool(item.get("artificial")),
-            "note": "速報のみ（波形の永久保存なし）。raw/が残っていればライブ表示で遡れる。",
+            "manual": bool(item.get("manual")),
+            "note": item.get("note"),  # ユーザーの自由記述メモ（無ければ null）
         }
         return _json(200, {"meta": meta, "waveform": _waveform_payload(np.empty((0, 3)), meta["onset_us"], 100.0)})
     # 波形（events/<id>/*.bin を連結）

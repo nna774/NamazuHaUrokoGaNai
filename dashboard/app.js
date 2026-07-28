@@ -416,11 +416,13 @@ async function reloadEvents(pageNum = 1) {
       // 添える。列を足すとチェック有無でレイアウトが変わるため、既存セル内で完結させる。
       // グレーは震度0とも紛らわしいので「人工」タグを併記して判別を確実にする（全件表示でのみ出る）。
       const artTag = ev.artificial ? ' <span class="badge badge-art">人工地震</span>' : '';
-      tr.innerHTML = `<td>${t}</td><td>${scaleBadge(scale, ev.artificial)}${artTag}</td>`
+      const manualTag = ev.manual ? ' <span class="badge badge-manual">手動</span>' : '';
+      tr.innerHTML = `<td>${t}</td><td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
         + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
-      // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）
-      if (ev.artificial || (ev.checked && !ev.cloud_confirmed)) tr.style.opacity = '0.45';
+      // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）。
+      // 手動保存(manual)は意図して残したものなので薄くしない。
+      if (ev.artificial || (ev.checked && !ev.cloud_confirmed && !ev.manual)) tr.style.opacity = '0.45';
       tr.onclick = () => { location.hash = eventHash(ev.event_id); };
       tbody.appendChild(tr);
     }
@@ -442,9 +444,21 @@ async function reloadEvents(pageNum = 1) {
 
 function eventStateLabel(m) {
   if (m.artificial) return '人工地震（テスト等）';
+  if (m.manual) return '手動保存';
   if (m.cloud_confirmed) return '確定';
   if (m.checked) return '非該当（評価済み・未確定）';
   return '速報のみ（評価待ち）';
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// メモをエスケープしつつ http(s) URL をリンク化する（ユーザー入力なので必ずエスケープ）。
+function noteHtml(note) {
+  return escapeHtml(note).replace(/(https?:\/\/[^\s]+)/g,
+    '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
 
 function renderEventInfo(m) {
@@ -462,6 +476,7 @@ function renderEventInfo(m) {
   rows.push(['状態', eventStateLabel(m)]);
   rows.push(['検知経路', `${m.device_prompt ? '速報✓ ' : ''}${m.cloud_confirmed ? '確定✓' : ''}`.trim() || '—']);
   rows.push(['イベントID', m.event_id || '']);
+  if (m.note) rows.push(['メモ', noteHtml(m.note)]);
   tbody.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 }
 
