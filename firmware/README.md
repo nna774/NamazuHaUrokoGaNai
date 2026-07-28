@@ -78,3 +78,9 @@ TTGO T-Display 系ボード（ESP32 + 内蔵ST7789 TFT）向けの割り当て�
 - `postBatch` は現状 `setInsecure()` でTLS証明書を検証していない。運用前に
   Function URL のルート証明書をピン留めすること（`config.h` にTODO）。
 - HMAC鍵はデバイスとingest Lambdaで共有。デバイスごとに変えるなら device_id で引く。
+
+## serial port
+
+```bash
+pio device monitor -b 115200
+```
