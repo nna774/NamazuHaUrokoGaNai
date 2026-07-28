@@ -133,6 +133,29 @@ python detectlab.py --at "2026-07-24 20:53" --minutes 10 --band 0.3 1.5 --thr 3 
 > 注: 遠地・弱震は帯域選びで感度が変わる（遠いほど低周波寄り＝ノイズ帯と重なる）。
 > `--band` を振って STA/LTA ピークが立つ帯域を探すのが実践的。
 
+### tenki.jp のURLから一発で（`tenki_view.py`）
+
+`detectlab.py` に諸元（緯度経度・深さ・発生時刻）を手入力する代わりに、tenki.jp の
+地震詳細URLを渡すだけで済むラッパ。ページから諸元を抽出し、`--at` と `--eew` を
+組み立てて `detectlab.py` を呼ぶ。震源距離から既定バンドも自動選択する。
+
+```bash
+python tenki_view.py "https://earthquake.tenki.jp/bousai/earthquake/detail/2026/07/24/2026-07-24-20-53-08.html" \
+    --minutes 8 --out fig.png
+# → # 福島県沖  M4  深さ50km  発生 2026-07-24 20:53:00 (分単位)
+#   # 最大震度1  震央距離268km 震源距離273km
+#   （detectlab がP/S到達窓つきの図を生成）
+
+python tenki_view.py <URL> --dry-run   # 実行せず組み立てたコマンドだけ表示
+```
+
+`--band`/`--thr`/`--out`/`--bucket` などの追加オプションはそのまま `detectlab.py` に渡る
+（`--band` 未指定なら距離から自動: >700km→`0.3 1.5` / >300km→`0.5 3` / それ以下→`1 10`）。
+
+制約: tenki の発生時刻は**分単位**（秒なし）なので到達窓に±30秒程度の不定性が乗る。
+確定前の速報ページは緯度経度が「---」で取れないことがあり、その時は確定を待つか
+`detectlab.py` に手で `--eew` を渡す。HTML取得は標準ライブラリ（追加依存なし）。
+
 ## テスト
 
 ```bash
