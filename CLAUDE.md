@@ -14,6 +14,7 @@
 | 全体像・データフロー・ディレクトリ構成 | [README.md](README.md) |
 | 設計判断の理由（サンプリング/震度アルゴリズム/信頼性/S3レイアウト） | [docs/design.md](docs/design.md) |
 | いま何がどこまで動いているか・実機の検証結果・ハード配線 | [docs/STATUS.md](docs/STATUS.md) |
+| 実機のノイズ特性・検出限界・センサ選定の知見 | [docs/noise.md](docs/noise.md) |
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
 | 各領域の詳細 | `firmware/` `lambda/` `terraform/` `dashboard/` `tools/` の各 `README.md` |
