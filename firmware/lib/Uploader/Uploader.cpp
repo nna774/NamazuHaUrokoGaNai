@@ -109,7 +109,12 @@ bool Uploader::postBatch(const uint8_t* body, size_t len) {
   int code = http.POST(const_cast<uint8_t*>(body), len);
   http.end();
   bool ok = (code >= 200 && code < 300);
-  if (!ok) Serial.printf("[uploader] POST failed code=%d\n", code);
+  if (!ok) {
+    // TLSハンドシェイクは大きな連続ブロックを要求するので、空きの総量より
+    // 「取れる最大ブロック」が効く。code=-1 が続く時はここを見る。
+    Serial.printf("[uploader] POST failed code=%d (heap free=%u maxblock=%u)\n",
+                  code, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  }
   return ok;
 }
 

@@ -258,7 +258,8 @@ void setup() {
 
   // バッチ1本のRAM量はセンサのサンプル幅で倍違う（int16 18KB / int32 36KB）。
   // kMaxRamBatches が実機のヒープに収まっているかを起動時に見えるようにしておく。
-  Serial.printf("[mem] free heap %u, batch %u B x %u\n", ESP.getFreeHeap(),
+  Serial.printf("[mem] free heap %u maxblock %u, batch %u B x %u\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
                 (unsigned)(kBatchSamples * (gSensor.sampleFormat() == 1 ? 12 : 6)),
                 (unsigned)kMaxRamBatches);
 

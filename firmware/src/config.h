@@ -18,13 +18,24 @@ static constexpr uint32_t kOversample = 10;
 static constexpr uint32_t kReadPeriodUs = kSamplePeriodUs / kOversample;  // 読み周期 1ms
 
 // --- バッチ ---
+// int32 センサ(ADXL355)は 1サンプル12バイトで int16 機の倍を食う。30秒だと 36KB/本
+// になり、「送信待ち1本＋充填中1本」の最小構成でも 72KB を占めて mbedTLS の
+// ハンドシェイクが確保に失敗する（実機で BIGNUM - Memory allocation failed）。
+// バッチ長を半分にして 18KB/本 に戻す。int16 機と同じ重さになる。
+// ワイヤ形式は sample_count をヘッダに持つので、長さが変わってもクラウドは無変更。
+#ifdef NAMZ_SENSOR_ADXL355
+static constexpr uint32_t kBatchSeconds = 15;
+#else
 static constexpr uint32_t kBatchSeconds = 30;
-static constexpr uint32_t kBatchSamples = kSampleRateHz * kBatchSeconds;  // 3000
+#endif
+static constexpr uint32_t kBatchSamples = kSampleRateHz * kBatchSeconds;
 
 // --- 送信キュー / ローカルバッファ ---
 // RAM上に保持する未送信バッチ数。これを超えたら LittleFS へ退避する。
-// ADXL355 は int32 サンプル(12B/sample = 36KB/batch)なので本数を減らす。
-// 6本だとヒープが持たない（WiFiスタックぶんを引くと 150KB 前後しか空かない）。
+// ADXL355 は 18KB/本(15秒×12B)で int16 機と同じ重さだが、本数は少なめにしておく。
+// WiFi断からの復旧時、溜まったバッチを抱えたまま TLS ハンドシェイクをやることになる
+// ため、ここを高くすると復旧できないまま詰まる。溢れたぶんは LittleFS へ逃げるので
+// データは落ちない。
 #ifdef NAMZ_SENSOR_ADXL355
 static constexpr uint32_t kMaxRamBatches = 3;
 #else
