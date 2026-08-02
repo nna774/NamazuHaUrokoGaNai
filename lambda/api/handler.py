@@ -97,8 +97,27 @@ def _recent(q):
             end_us = int(float(start)) + span_us
         except (TypeError, ValueError):
             pass
-    gal, win_start, fs = store.load_window(s3, BUCKET, end_us, minutes * 60)
-    return _json(200, _waveform_payload(gal, win_start, fs))
+    # 波形は1デバイスぶんに絞る。混ぜると継ぎ目の段差が揺れに見える。
+    # 無指定は最若番のデバイス（多点化前のURLがそのまま動くように）。
+    device_id = _resolve_device(q.get("device"))
+    if device_id is None:
+        return _json(200, _waveform_payload(np.empty((0, 3)), end_us, 100.0))
+    gal, win_start, fs = store.load_window(s3, BUCKET, end_us, minutes * 60, device_id)
+    payload = _waveform_payload(gal, win_start, fs)
+    payload["device_id"] = device_id
+    return _json(200, payload)
+
+
+def _resolve_device(raw) -> int | None:
+    """?device=<id>。無指定なら最若番。該当が無ければ None。"""
+    try:
+        if raw is not None:
+            return int(raw)
+    except (TypeError, ValueError):
+        pass
+    ids = sorted(int(it["device_id"]) for it in devices.list_devices()
+                 if it.get("device_id") is not None)
+    return ids[0] if ids else None
 
 
 def _int_param(q, name, default, lo, hi):

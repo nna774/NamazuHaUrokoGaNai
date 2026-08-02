@@ -91,11 +91,12 @@ def resolve_bucket(explicit: str | None) -> str:
         )
 
 
-def load_s3_window(bucket: str, end_us: int, seconds: float) -> tuple[np.ndarray, int, float]:
+def load_s3_window(bucket: str, end_us: int, seconds: float,
+                   device_id: int) -> tuple[np.ndarray, int, float]:
     from common import store  # 遅延import。CSV経路ではboto3/AWSに触れない。
     import boto3
 
-    return store.load_window(boto3.client("s3"), bucket, end_us, seconds)
+    return store.load_window(boto3.client("s3"), bucket, end_us, seconds, device_id)
 
 
 def load_s3_event(bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
@@ -355,6 +356,8 @@ def main() -> int:
     p.add_argument("--eew", help='震源で答え合わせ。"緯度,経度,深さkm,発生時刻(JST)" '
                    '例 "37.7,141.7,60,2026-07-24 20:52:59"。P/S到達窓を重ね描き＋SNR/直線性を出す')
     p.add_argument("--station", help='観測点座標 "lat,lon"（既定は NAMZ_STATION_LATLON / 湯沢町）')
+    p.add_argument("--device", type=int, default=1,
+                   help="デバイスID（--at 系で必須。既定1）。混ぜると継ぎ目の段差が揺れに見える")
     p.add_argument("--bucket", help="rawバケット名（既定は NAMZ_RAW_BUCKET / terraform）")
     p.add_argument("--out", help="図の保存先PNG（無指定なら画面表示）")
     p.add_argument("--dump-csv", dest="dump", help="取得した生窓をCSV保存（再利用用）")
@@ -369,7 +372,8 @@ def main() -> int:
         center = at_to_us(args.at) if args.at else args.at_us
         seconds = args.minutes * 60.0
         end_us = int(center + seconds / 2 * 1e6)
-        data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds)
+        data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
+                                            args.device)
 
     n = data.shape[0]
     if n == 0:

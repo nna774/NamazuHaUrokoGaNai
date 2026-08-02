@@ -12,13 +12,22 @@ def get_batch(s3, bucket: str, key: str) -> wire.Batch:
     return wire.parse(obj["Body"].read())
 
 
-def list_raw_keys_in_range(s3, bucket: str, start_us: int, end_us: int) -> list[str]:
-    """[start,end] と重なる raw/ のキーを時系列順で返す。"""
+def list_raw_keys_in_range(s3, bucket: str, start_us: int, end_us: int,
+                           device_id: int | None = None) -> list[str]:
+    """[start,end] と重なる raw/ のキーを時系列順で返す。
+
+    **device_id を渡さないと全デバイスのキーが混ざる。** キーは
+    `raw/.../<device>-<startus>.bin` なので、sort() ではデバイス番号が先に効き、
+    時系列に見えて実は「1号機の全部→2号機の全部」の順に並ぶ。これを波形として
+    連結すると継ぎ目に巨大な段差ができ、震度が跳ねる（実際に踏んだ）。
+    波形を組み立てる用途では必ず device_id を指定すること。
+    """
     keys: list[str] = []
+    dev = f"{device_id:04d}-" if device_id is not None else ""
     for prefix in s3util.raw_hour_prefixes(start_us, end_us):
         token = None
         while True:
-            kw = {"Bucket": bucket, "Prefix": prefix}
+            kw = {"Bucket": bucket, "Prefix": prefix + dev}
             if token:
                 kw["ContinuationToken"] = token
             resp = s3.list_objects_v2(**kw)
@@ -70,10 +79,15 @@ def load_event(s3, bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
     return np.concatenate(parts, axis=0), win_start, fs
 
 
-def copy_raw_to_event(s3, bucket: str, eid: str, start_us: int, end_us: int) -> int:
-    """[start,end] と重なる raw バッチを events/<eid>/ へコピー（永久保存）。コピー数を返す。"""
+def copy_raw_to_event(s3, bucket: str, eid: str, start_us: int, end_us: int,
+                      device_id: int) -> int:
+    """[start,end] と重なる raw バッチを events/<eid>/ へコピー（永久保存）。コピー数を返す。
+
+    device_id は必須。混ぜると events/<eid>/ に別デバイスの波形が入り、
+    `load_event` が同じ罠を踏む（イベントは永久保存なので後始末が高くつく）。
+    """
     copied = 0
-    for key in list_raw_keys_in_range(s3, bucket, start_us, end_us):
+    for key in list_raw_keys_in_range(s3, bucket, start_us, end_us, device_id):
         try:  # ファイル名末尾の startus で範囲判定
             b_start = int(key.rsplit("-", 1)[1].split(".")[0])
         except (IndexError, ValueError):
@@ -86,13 +100,17 @@ def copy_raw_to_event(s3, bucket: str, eid: str, start_us: int, end_us: int) -> 
     return copied
 
 
-def load_window(s3, bucket: str, end_us: int, seconds: float) -> tuple[np.ndarray, int, float]:
-    """end_us を終端とする直近 `seconds` 秒の波形を連結して返す。
+def load_window(s3, bucket: str, end_us: int, seconds: float,
+                device_id: int) -> tuple[np.ndarray, int, float]:
+    """end_us を終端とする直近 `seconds` 秒の波形を1デバイスぶん連結して返す。
+
+    device_id は必須。省略できるようにしておくと、多点化した時に別デバイスの波形を
+    つなげて震度が跳ねる（`list_raw_keys_in_range` の注記を読め）。
 
     returns: (gal[N,3], window_start_us, fs)。データが無ければ (empty, end_us, 100.0)。
     """
     start_us = int(end_us - seconds * 1e6)
-    keys = list_raw_keys_in_range(s3, bucket, start_us - 60_000_000, end_us)
+    keys = list_raw_keys_in_range(s3, bucket, start_us - 60_000_000, end_us, device_id)
     parts = []
     win_start = None
     fs = 100.0
@@ -100,6 +118,9 @@ def load_window(s3, bucket: str, end_us: int, seconds: float) -> tuple[np.ndarra
         try:
             b = get_batch(s3, bucket, key)
         except Exception:
+            continue
+        # プレフィックスで絞ってあるが中身でも確かめる。連結してよいのは同一デバイスだけ。
+        if b.meta.device_id != device_id:
             continue
         b_start = b.meta.batch_start_us
         b_end = b_start + int(b.meta.sample_count / b.meta.sample_rate_hz * 1e6)

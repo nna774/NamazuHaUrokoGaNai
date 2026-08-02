@@ -50,6 +50,11 @@
     落ちている間は `NAMZ_OFFLINE_RENOTIFY_S`(既定1日)ごとに再送、受信再開で復帰通知。
     欠測状態(`offline_notified_at_us`)は watchdog だけが書き、ingestの受信系フィールドとは
     互いに素なのでUpdateItemで分ければ競合しない。状態遷移は `devices.evaluate()` に集約。
+- **波形を組み立てる時は必ず device_id で絞る**（`lambda/common/store.py`）。raw のキーは
+  `raw/.../<device>-<startus>.bin` なので、絞らずに列挙して `sort()` すると**デバイス番号が
+  先に効き**、時系列に見えて「1号機の全部→2号機の全部」の順に並ぶ。これを連結すると
+  継ぎ目の段差が揺れに見えて震度が跳ねる（実際に踏み、偽の確定報が4件出た）。
+  `load_window` / `copy_raw_to_event` は device_id を必須引数にしてある。
 - **デバイスの払い出しは `tools/devices.json` が単一の真実**（gitignore対象・鍵を含む）。
   `tools/provision_device.py` が `secrets.h` / `terraform.tfvars` の `device_hmac_secrets` /
   焼く `[env:]` の3本を導出する。**サーバ側を apply してから焼く**（逆順だと 401）。

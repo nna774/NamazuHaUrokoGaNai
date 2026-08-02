@@ -48,7 +48,9 @@ def _process(key: str):
     batch_len_us = int(b.meta.sample_count / b.meta.sample_rate_hz * 1e6)
     end_us = b.meta.batch_start_us + batch_len_us
 
-    gal, win_start, fs = store.load_window(s3, BUCKET, end_us, WINDOW_SECONDS)
+    # 窓は必ず1デバイスぶんに絞る。混ぜると継ぎ目の段差で震度が跳ねる。
+    gal, win_start, fs = store.load_window(s3, BUCKET, end_us, WINDOW_SECONDS,
+                                           b.meta.device_id)
     if gal.shape[0] > 0:
         det = detect_core.analyze(gal, fs, win_start, THRESHOLD, HOLD_SECONDS)
         if det is not None:
@@ -64,7 +66,7 @@ def _confirm(device_id: int, det: detect_core.Detection):
     eid, _ = events.record_cloud_detection(
         device_id, det.onset_us, det.max_intensity, det.peak_gal)
     prefix = f"{s3util.EVENTS_PREFIX}/{eid}/"
-    _copy_event_waveforms(eid, det.onset_us)
+    _copy_event_waveforms(eid, det.onset_us, device_id)
     _put_meta(eid, device_id, det.onset_us, det.max_intensity, det.peak_gal, det.a0)
     events.set_waveform_prefix(eid, prefix)
 
@@ -123,7 +125,7 @@ def _preserve_prompt_waveforms(now_start_us: int):
             continue  # 1時間より古い未保存の速報は諦める(通常は数十秒で保存される)
         eid = item["event_id"]
         device_id = int(item.get("device_id", 0))
-        if _copy_event_waveforms(eid, onset) == 0:
+        if _copy_event_waveforms(eid, onset, device_id) == 0:
             continue
         _put_meta(eid, device_id, onset,
                   float(item.get("max_intensity", 0)), float(item.get("peak_gal", 0)))
@@ -131,12 +133,16 @@ def _preserve_prompt_waveforms(now_start_us: int):
         events.set_field(eid, "checked", True)  # detect評価済み（未確定なら既定で隠す）
 
 
-def _copy_event_waveforms(eid: str, onset_us: int) -> int:
-    """onset 周辺の raw バッチを events/<id>/ へコピー（永久保存）。コピー数を返す。"""
+def _copy_event_waveforms(eid: str, onset_us: int, device_id: int) -> int:
+    """onset 周辺の raw バッチを events/<id>/ へコピー（永久保存）。コピー数を返す。
+
+    device_id で絞るのは必須。events/ は永久保存なので、別デバイスを混ぜると
+    後始末が高くつく。
+    """
     start_us = int(onset_us - PRE_SECONDS * 1e6)
     end_us = int(onset_us + POST_SECONDS * 1e6)
     copied = 0
-    for key in store.list_raw_keys_in_range(s3, BUCKET, start_us, end_us):
+    for key in store.list_raw_keys_in_range(s3, BUCKET, start_us, end_us, device_id):
         # ファイル名末尾の startus で範囲判定
         try:
             b_start = int(key.rsplit("-", 1)[1].split(".")[0])

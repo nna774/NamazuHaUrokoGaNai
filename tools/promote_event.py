@@ -113,7 +113,10 @@ def main(argv=None) -> int:
     start_us = int(onset_us - args.pre * 1e6)
     end_us = int(onset_us + args.post * 1e6)
 
-    keys = [k for k in store.list_raw_keys_in_range(s3, bucket, start_us, end_us)
+    # デバイス未指定なら、まず全デバイスから列挙して最初のキーで推定する。
+    # 推定した後は必ず絞り直す（多点化した環境で混ぜたまま読むと震度が跳ねる）。
+    keys = [k for k in store.list_raw_keys_in_range(s3, bucket, start_us, end_us,
+                                                    args.device)
             if (bs := _batch_start_of(k)) is not None
             and start_us - 30_000_000 <= bs <= end_us]
     if not keys:
@@ -121,8 +124,11 @@ def main(argv=None) -> int:
     device_id = args.device if args.device is not None else _device_of(keys[0])
     if device_id is None:
         raise SystemExit("デバイスIDを推定できない。--device で指定しろ")
+    if args.device is None:
+        print(f"# --device 未指定。{device_id:04d} と推定した", file=sys.stderr)
 
-    gal, win_start, fs = store.load_window(s3, bucket, end_us, (end_us - start_us) / 1e6)
+    gal, win_start, fs = store.load_window(s3, bucket, end_us, (end_us - start_us) / 1e6,
+                                           device_id)
     # 端の扱いを detect Lambda と揃える。ここがずれると手動昇格と自動確定で
     # 同じ波形から違う震度が出る。
     comp = jma_fft.filtered_composite(gal[:, 0], gal[:, 1], gal[:, 2], fs)
@@ -146,7 +152,7 @@ def main(argv=None) -> int:
     if not args.yes and not _confirm("この内容で events/ へ昇格して保存するか?"):
         raise SystemExit("中止した")
 
-    copied = store.copy_raw_to_event(s3, bucket, eid, start_us, end_us)
+    copied = store.copy_raw_to_event(s3, bucket, eid, start_us, end_us, device_id)
     meta = {
         "event_id": eid, "device_id": device_id, "onset_us": onset_us,
         "max_intensity": res.intensity, "scale": intensity_scale(res.intensity),

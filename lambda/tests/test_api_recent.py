@@ -11,12 +11,15 @@ def _capture_load_window(monkeypatch):
     """store.load_window の呼び出し引数を捕捉し、空波形を返すスタブに差し替える。"""
     captured = {}
 
-    def fake(s3, bucket, end_us, seconds):
+    def fake(s3, bucket, end_us, seconds, device_id):
         captured["end_us"] = end_us
         captured["seconds"] = seconds
+        captured["device_id"] = device_id
         return np.empty((0, 3)), end_us, 100.0
 
     monkeypatch.setattr(api.store, "load_window", fake)
+    monkeypatch.setattr(api.devices, "list_devices",
+                        lambda: [{"device_id": 2}, {"device_id": 1}])
     return captured
 
 
@@ -46,3 +49,17 @@ def test_recent_bad_start_falls_back_to_now(monkeypatch):
     resp = api._recent({"minutes": "1", "start": "not-a-number"})
     assert resp["statusCode"] == 200
     assert cap["end_us"] == int(3000.0 * 1e6)
+
+
+def test_recent_defaults_to_lowest_device(monkeypatch):
+    """?device 無指定でも1デバイスに絞ること。多点化前のURLがそのまま動く。"""
+    cap = _capture_load_window(monkeypatch)
+    api._recent({"minutes": "5"})
+    assert cap["device_id"] == 1
+
+
+def test_recent_honours_device_param(monkeypatch):
+    cap = _capture_load_window(monkeypatch)
+    resp = api._recent({"minutes": "5", "device": "2"})
+    assert cap["device_id"] == 2
+    assert '"device_id": 2' in resp["body"]
