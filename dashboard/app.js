@@ -124,9 +124,13 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
       for (const x of mx) if (x > hi) hi = x;
     }
   }
+  // クリップされたかどうかを後で知らせるため、実データの振れ幅を控えておく。
+  const dataPeak = Math.max(Math.abs(lo), Math.abs(hi));
+  let clipped = 0;
   if (fixedRange > 0) {
     // 固定レンジ（0中心対称）。安定した縦軸で「直線からの逸脱=異常」を読みやすくする。
     // レンジ外はクリップして描く（エンベロープ表示では上下端に張り付く）。
+    if (dataPeak > fixedRange) clipped = dataPeak;
     lo = -fixedRange; hi = fixedRange;
   } else {
     if (lo === hi) { lo -= 1; hi += 1; }
@@ -148,6 +152,15 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
   ctx.fillStyle = '#888'; ctx.font = '11px system-ui';
   ctx.fillText(hi.toFixed(2), 2, Y(hi) + 4);
   ctx.fillText(lo.toFixed(2), 2, Y(lo) + 4);
+
+  // レンジ外は上下端に張り付き、波形が方形波のように見えて「軸が反転した」と誤読する。
+  // 実際の振れ幅を出して、縦軸を上げれば済むと分かるようにする。
+  if (clipped) {
+    ctx.fillStyle = '#e67e22';
+    ctx.textAlign = 'right';
+    ctx.fillText(`レンジ外 実測±${clipped.toFixed(0)} gal`, w - 4, pad + 12);
+    ctx.textAlign = 'left';
+  }
 
   for (const a of axes) {
     ctx.strokeStyle = COLORS[a];
@@ -330,10 +343,42 @@ function redrawLive() {
   drawWaveform(document.getElementById('live-canvas'), displayedLiveWf(), yrange, visibleAxes('live'));
 }
 
+// 波形は1デバイスぶんだけ引く。混ぜると継ぎ目の段差が揺れに見える（api側も絞る）。
+// 選択の真実は liveDeviceId 側に置く。<select> の選択肢は /devices を引くまで
+// 空なので、DOM を真実にすると URL 復元と埋め込みの順序に依存してしまう。
+let liveDeviceId = null;
+let liveDevices = [];
+
+function liveDeviceParam() {
+  return liveDeviceId ? '&device=' + encodeURIComponent(liveDeviceId) : '';
+}
+
+async function fillLiveDevices() {
+  const sel = document.getElementById('live-device');
+  if (!sel) return;
+  try {
+    const data = await apiGet('/devices');
+    const ids = (data.devices || []).map(d => Number(d.device_id)).sort((a, b) => a - b);
+    if (ids.join() !== liveDevices.join()) {
+      liveDevices = ids;
+      sel.innerHTML = ids.map(id =>
+        `<option value="${id}">${String(id).padStart(4, '0')}</option>`).join('');
+    }
+    // URL 由来の選択が実在しなければ最若番へ倒す（デバイスを外した後のURL対策）。
+    if (!ids.map(String).includes(String(liveDeviceId))) {
+      liveDeviceId = ids.length ? String(ids[0]) : null;
+    }
+    if (liveDeviceId) sel.value = liveDeviceId;
+  } catch (e) {
+    // デバイス一覧が引けなくても波形表示は続ける（api 側が最若番を選ぶ）。
+  }
+}
+
 async function refreshLive() {
   const status = document.getElementById('live-status');
   const minutes = document.getElementById('minutes').value;
   const sec = startSec();
+  await fillLiveDevices();
   try {
     status.textContent = '取得中…';
     if (liveZoom) {
@@ -341,7 +386,7 @@ async function refreshLive() {
       // APIの minutes は0.1分が下限なので、指定区間へは displayedLiveWf が切り出す。
       const spanMin = Math.max(0.1, (liveZoom.toUs - liveZoom.fromUs) / 60e6);
       lastLiveWaveform = await apiGet('/recent?minutes=' + spanMin.toFixed(4)
-        + '&start=' + Math.round(liveZoom.fromUs));
+        + '&start=' + Math.round(liveZoom.fromUs) + liveDeviceParam());
       redrawLive();
       const wf = displayedLiveWf();
       const from = new Date(liveZoom.fromUs / 1000).toLocaleTimeString('ja-JP');
@@ -350,7 +395,7 @@ async function refreshLive() {
       return;
     }
     const wf = await apiGet('/recent?minutes=' + minutes
-      + (sec ? '&start=' + sec * 1e6 : ''));
+      + (sec ? '&start=' + sec * 1e6 : '') + liveDeviceParam());
     lastLiveWaveform = wf;
     redrawLive();
     if (sec) {
@@ -366,7 +411,9 @@ async function refreshLive() {
         const endUs = wf.start_us + (samples / wf.fs) * 1e6;
         age = `・最新データ ${Math.max(0, Math.round(Date.now() / 1000 - endUs / 1e6))}秒前`;
       }
-      status.textContent = '更新: ' + new Date().toLocaleTimeString('ja-JP')
+      // どのデバイスを見ているかは常に出す。多点では「静かだ」の意味が変わる。
+      const dev = wf.device_id != null ? `[${String(wf.device_id).padStart(4, '0')}] ` : '';
+      status.textContent = dev + '更新: ' + new Date().toLocaleTimeString('ja-JP')
         + (wf.mode === 'envelope' ? '（エンベロープ）' : '') + age;
     }
   } catch (e) {
@@ -659,7 +706,8 @@ function liveHash() {
   const r = document.getElementById('yrange').value;
   const sec = startSec();
   const t = liveZoom ? `&t=${Math.round(liveZoom.fromUs)}-${Math.round(liveZoom.toUs)}` : '';
-  return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}${sec ? `&s=${sec}` : ''}${t}`;
+  const d = liveDeviceId ? `&d=${liveDeviceId}` : '';
+  return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}${sec ? `&s=${sec}` : ''}${t}${d}`;
 }
 
 // 現在のイベント一覧操作状態（ページ・全件フィルタ）を表すハッシュ
@@ -715,6 +763,7 @@ function route() {
     setAxes('live', params.ax);
     setStartSec(params.s ? parseInt(params.s, 10) : null);
     liveZoom = parseZoomParam(params.t);  // t が無ければズーム解除
+    if (params.d) liveDeviceId = params.d;
     showView('live');
     refreshLive();
     scheduleLive();
@@ -795,6 +844,13 @@ window.addEventListener('load', () => {
   // フィルタ切替はURLへ反映（hashchange→route が1ページ目から再取得する）
   document.getElementById('events-all').onchange = () => { location.hash = eventsHash(1); };
   document.getElementById('event-back').onclick = () => { location.hash = eventsHash(eventsPageNum); };
+  // デバイスを変えても時間窓（拡大・指定時刻）は保つ。同じ揺れを別の機体で見比べるのが
+  // 多点化の主目的で、解除すると比較のたびに時刻を探し直すことになる。
+  // URL に載せるので「この時刻のこの機体」をそのまま共有できる。
+  document.getElementById('live-device').onchange = (e) => {
+    liveDeviceId = e.target.value;
+    location.hash = liveHash();
+  };
   document.getElementById('reload-devices').onclick = () => refreshDevices();
   document.getElementById('devices-auto').onchange = () => scheduleDevices();
   // タイトルクリックで全操作状態を既定に戻す（ライブ・1分窓・自動更新・±100gal・全軸）。
