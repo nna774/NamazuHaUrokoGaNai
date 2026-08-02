@@ -26,8 +26,8 @@ pip install -r requirements.txt
 # 合成波形を作ってFFT版とFIR版の震度を比較
 python gen_synthetic.py --kind quake --amp 20 --seconds 90 | python backtest.py -
 
-# 実機シリアルをCSVに保存（LSB->gal換算）
-python capture_serial.py --port /dev/tty.usbserial-XXXX --seconds 60 > cap.csv
+# 実機シリアルをCSVに保存（LSB->gal換算。--sensor か --scale の指定は必須）
+python capture_serial.py --sensor iis3dhhc --port /dev/tty.usbserial-XXXX --seconds 60 > cap.csv
 python backtest.py cap.csv --trace
 
 # ファーム用のFIR係数ヘッダを生成

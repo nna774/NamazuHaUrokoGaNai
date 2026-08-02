@@ -181,7 +181,7 @@ ADXL355 の生値（3.9 µg/LSB）を素で int16 に入れると **±0.128g = 1
 
 0. `pio run -e adxl355-sensortest -t upload && pio device monitor` で
    `[sensor] ADXL355 ready` が出るか（出なければ配線かCSを疑う）
-1. `python tools/capture_serial.py` でシリアルキャプチャ
+1. `python tools/capture_serial.py --sensor adxl355 --port ... > cap.csv` でシリアルキャプチャ
 2. `python tools/backtest.py cap.csv` で `tools/jismo` と**数値照合**
 3. 静穏区間を数時間流し、[noise.md](noise.md) と同じ手順で ASD を出す
 

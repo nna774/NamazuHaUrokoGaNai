@@ -52,8 +52,9 @@ cp src/secrets.h.example src/secrets.h   # WiFi・エンドポイント・HMAC�
 pio run -t upload && pio device monitor
 
 # Phase1: センサ検証のみ（WiFi/送信なし、シリアルにt_us,x,y,z）
-pio run -e sensortest -t upload
-python ../tools/capture_serial.py --port /dev/tty.usbserial-XXXX --seconds 60 > cap.csv
+pio run -e sensortest -t upload            # ADXL355機は -e adxl355-sensortest
+python ../tools/capture_serial.py --sensor iis3dhhc \
+    --port /dev/tty.usbserial-XXXX --seconds 60 > cap.csv
 python ../tools/backtest.py cap.csv
 ```
 
