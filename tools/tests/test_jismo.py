@@ -64,6 +64,58 @@ def test_amplitude_scaling_matches_formula():
     assert r10.intensity_raw - r1.intensity_raw == pytest.approx(2.0, abs=1e-6)
 
 
+def _add_ramp(data, gal_over_record):
+    """記録全体で gal_over_record だけ直線的にずれるドリフトを重ねる。"""
+    n = data.shape[0]
+    ramp = np.linspace(0.0, gal_over_record, n)
+    return data + ramp[:, None]
+
+
+def test_detrend_removes_ramp():
+    n = 1000
+    sig = 3.0 + 0.01 * np.arange(n)
+    assert np.abs(jma_fft.detrend(sig)).max() < 1e-9
+
+
+def test_drift_does_not_inflate_intensity():
+    """傾斜・熱ドリフトで震度が水増しされないこと（実機ADXL355で発覚）。
+
+    Y(f) は f=0 で 0 なので直流は落ちるが傾きは落ちない。傾きが残ると
+    FFTの巡回畳み込みで記録の端が繋がる際に段差ができ、そこがリンギングして
+    静穏なのに震度2級の値が出る。
+    """
+    data = synth_noise(100.0, 120.0, rms_gal=0.2, seed=3)
+    quiet = jma_fft.measured_intensity(data[:, 0], data[:, 1], data[:, 2], 100.0)
+    # 重力DC(1g)＋120秒で8galのドリフト。実機で観測したのと同程度。
+    drifted = _add_ramp(data, 8.0)
+    drifted[:, 2] += 980.0
+    res = jma_fft.measured_intensity(drifted[:, 0], drifted[:, 1], drifted[:, 2], 100.0)
+    assert res.intensity < 0.5
+    assert res.intensity_raw == pytest.approx(quiet.intensity_raw, abs=0.1)
+
+
+def test_drift_does_not_change_quake_intensity():
+    """本物の揺れの震度はドリフトの有無で変わらないこと（修正が過剰でないこと）。"""
+    data = synth_quake(100.0, 90.0, amp_gal=20.0, seed=7)
+    plain = jma_fft.measured_intensity(data[:, 0], data[:, 1], data[:, 2], 100.0)
+    drifted = _add_ramp(data, 8.0)
+    res = jma_fft.measured_intensity(drifted[:, 0], drifted[:, 1], drifted[:, 2], 100.0)
+    assert res.intensity_raw == pytest.approx(plain.intensity_raw, abs=0.02)
+
+
+def test_fft_and_fir_intensities_agree_on_quake():
+    """FFT版とFIR版の計測震度が一致すること（tools/jismo の数値照合の本体）。"""
+    for amp in (5.0, 20.0, 100.0):
+        data = synth_quake(100.0, 90.0, amp_gal=amp, seed=7)
+        fft = jma_fft.measured_intensity(data[:, 0], data[:, 1], data[:, 2], 100.0)
+        rt = RealtimeIntensity(100.0)
+        best = 0.0
+        for row in data:
+            rt.push(*row)
+            best = max(best, rt.current_intensity())
+        assert best == pytest.approx(fft.intensity, abs=0.1), f"amp={amp}"
+
+
 def test_fir_composite_approximates_fft():
     # FIR版のフィルタ後合成加速度が FFT版とよく一致すること（ピーク相対誤差）
     data = synth_quake(100.0, 90.0, amp_gal=20.0, seed=7)

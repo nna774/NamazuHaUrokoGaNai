@@ -11,13 +11,14 @@ numpyのみに依存する軽量モジュールだけを公開する。fir/realt
 `from jismo.realtime import RealtimeIntensity` のように明示的に読み込むこと。
 """
 
-from .jma_fft import measured_intensity, filtered_composite
+from .jma_fft import measured_intensity, filtered_composite, intensity_from_composite
 from .filters import jma_filter_response
 from .rounding import jma_round, intensity_scale
 
 __all__ = [
     "measured_intensity",
     "filtered_composite",
+    "intensity_from_composite",
     "jma_filter_response",
     "jma_round",
     "intensity_scale",

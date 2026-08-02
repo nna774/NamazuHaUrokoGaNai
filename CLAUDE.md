@@ -15,6 +15,7 @@
 | 設計判断の理由（サンプリング/震度アルゴリズム/信頼性/S3レイアウト） | [docs/design.md](docs/design.md) |
 | いま何がどこまで動いているか・実機の検証結果・ハード配線 | [docs/STATUS.md](docs/STATUS.md) |
 | 実機のノイズ特性・検出限界・センサ選定の知見 | [docs/noise.md](docs/noise.md) |
+| 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
 | ADXL355機の追加計画（未着手） | [docs/adxl355.md](docs/adxl355.md) |
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
@@ -32,6 +33,9 @@
 
 - **計測震度ロジックの単一の真実は `tools/jismo/`**。detect Lambda はこれを共有し、
   ファームのC++実装(`firmware/lib/Shindo`)は `tools/backtest.py` で数値照合してから使う。
+  - 照合は**合成波か実イベントの波形で行う**。FFT版は記録全体・FIR版は60秒移動窓なので、
+    静穏データで `backtest.py` の diff を見ても意味がない（[docs/intensity_pitfalls.md](docs/intensity_pitfalls.md)）。
+  - FFT版は入力を線形デトレンドしてから掛ける。傾斜・熱ドリフトを残すと窓の端が暴れる。
 - **イベントのデータモデル**（DynamoDB `namazu-events`、[lambda/common/events.py](lambda/common/events.py)）:
   - `device_prompt` … デバイス速報が来た / `cloud_confirmed` … クラウドFFTで確定
   - `checked` … detectが評価済み（未確定なら一覧の既定で隠れる=非該当）

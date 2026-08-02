@@ -35,6 +35,35 @@ def test_single_spike_not_detected():
     assert det is None
 
 
+def test_drifting_noise_not_detected():
+    """ドリフトのある静穏窓で誤検知しないこと（実機ADXL355の据え付け前データで発覚）。
+
+    120秒で8gal傾く＋z軸に重力1g。修正前はフィルタ後合成が端で4gal級に暴れ、
+    peak_gal と震度が実体の8倍に膨れていた。
+    """
+    data = synth_noise(100.0, 120.0, rms_gal=0.2, seed=4)
+    data += np.linspace(0.0, 8.0, data.shape[0])[:, None]
+    data[:, 2] += 980.0
+    assert detect_core.analyze(data, 100.0, window_start_us=0, threshold=0.5) is None
+
+
+def test_quake_survives_drift():
+    """ドリフトが乗っても本物の揺れは検知され、震度が動かないこと。"""
+    data = synth_quake(100.0, 120.0, amp_gal=20.0, seed=1)
+    plain = detect_core.analyze(data, 100.0, window_start_us=0, threshold=0.5)
+    drifted = data + np.linspace(0.0, 8.0, data.shape[0])[:, None]
+    drifted[:, 2] += 980.0
+    det = detect_core.analyze(drifted, 100.0, window_start_us=0, threshold=0.5)
+    assert det is not None
+    assert det.max_intensity == pytest.approx(plain.max_intensity, abs=0.1)
+
+
+def test_core_slice_keeps_short_windows_whole():
+    # 端を落とすと評価するものが無くなる短い窓では落とさない
+    assert detect_core.core_slice(300, 100.0) == slice(0, 300)
+    assert detect_core.core_slice(12000, 100.0) == slice(500, 11500)
+
+
 def test_amp_for_intensity_inverse():
     # amp_for_intensity は I=2log10(a)+0.94 の逆関数
     a = detect_core.amp_for_intensity(2.0)

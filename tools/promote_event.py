@@ -102,7 +102,7 @@ def main(argv=None) -> int:
         os.environ["AWS_DEFAULT_REGION"] = os.environ["AWS_REGION"]
 
     import boto3
-    from common import events, s3util, store
+    from common import detect_core, events, s3util, store
     from jismo import jma_fft
     from jismo.rounding import intensity_scale
 
@@ -123,8 +123,11 @@ def main(argv=None) -> int:
         raise SystemExit("デバイスIDを推定できない。--device で指定しろ")
 
     gal, win_start, fs = store.load_window(s3, bucket, end_us, (end_us - start_us) / 1e6)
-    res = jma_fft.measured_intensity(gal[:, 0], gal[:, 1], gal[:, 2], fs)
+    # 端の扱いを detect Lambda と揃える。ここがずれると手動昇格と自動確定で
+    # 同じ波形から違う震度が出る。
     comp = jma_fft.filtered_composite(gal[:, 0], gal[:, 1], gal[:, 2], fs)
+    comp = comp[detect_core.core_slice(comp.size, fs)]
+    res = jma_fft.intensity_from_composite(comp, fs)
     peak_gal = float(np.max(comp)) if comp.size else 0.0
     eid = events.event_id(device_id, onset_us)
 

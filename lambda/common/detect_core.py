@@ -12,9 +12,24 @@ import numpy as np
 from jismo import jma_fft
 
 
+# 窓の端から捨てる秒数。FFTフィルタは巡回畳み込みなので、記録の終端と始端が
+# 繋がったものとして扱われ、そこに段差があると端がリンギングする。デトレンド
+# （jma_fft.detrend）で大半は消えるが、窓の切れ目に本物の過渡が跨いだ場合は残る。
+# 窓は WINDOW_SECONDS=120 でバッチ毎(30秒)に評価するので重なりが厚く、端を数秒
+# 捨てても取りこぼさない（次の窓では同じ時刻が内側に来る）。
+# 詳細は docs/intensity_pitfalls.md。
+EDGE_GUARD_SECONDS = 5.0
+
+
 def amp_for_intensity(intensity: float) -> float:
     """計測震度 I に対応する基準加速度 a0 [gal]。I = 2log10(a0)+0.94 の逆。"""
     return 10.0 ** ((intensity - 0.94) / 2.0)
+
+
+def core_slice(n: int, fs: float, edge_seconds: float = EDGE_GUARD_SECONDS) -> slice:
+    """端を落とした評価区間。短すぎる窓では落とさない（落とすものが無くなるため）。"""
+    g = int(edge_seconds * fs)
+    return slice(g, n - g) if n > 4 * g else slice(0, n)
 
 
 @dataclass
@@ -35,6 +50,8 @@ def analyze(gal: np.ndarray, fs: float, window_start_us: int,
         return None
 
     comp = jma_fft.filtered_composite(gal[:, 0], gal[:, 1], gal[:, 2], fs)
+    core = core_slice(comp.size, fs)
+    comp = comp[core]
     a_th = amp_for_intensity(threshold)
     above = comp >= a_th
 
@@ -44,10 +61,10 @@ def analyze(gal: np.ndarray, fs: float, window_start_us: int,
     if onset_idx is None:
         return None
 
-    res = jma_fft.measured_intensity(gal[:, 0], gal[:, 1], gal[:, 2], fs)
-    onset_us = int(window_start_us + onset_idx / fs * 1e6)
+    res = jma_fft.intensity_from_composite(comp, fs)
+    onset_us = int(window_start_us + (core.start + onset_idx) / fs * 1e6)
     return Detection(onset_us=onset_us, max_intensity=res.intensity,
-                     peak_gal=float(comp.max()), a0=res.a0)
+                     peak_gal=res.peak_gal, a0=res.a0)
 
 
 def _first_sustained_run(mask: np.ndarray, min_len: int) -> int | None:
