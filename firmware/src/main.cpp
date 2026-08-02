@@ -119,6 +119,12 @@ static void samplingTask(void*) {
       } else {
         cur->begin(ts, gSensor.sensorType(), gSensor.scaleMgPerLsb(),
                    kSampleRateHz, kDeviceId);
+        // 温度はバッチ先頭の1点だけ載せる。架台の熱ドリフトは分〜時間の時定数で
+        // 動くので、30秒に1点あれば傾きは追える。
+        uint16_t temp = 0;
+        if (gSensor.readTemperatureRaw(temp)) {
+          cur->addTrailer(kTrailerSensorTemp, &temp, sizeof(temp));
+        }
       }
     }
     if (cur) {

@@ -30,6 +30,13 @@ void Adxl355::readIds(uint8_t& devidAd, uint8_t& devidMst, uint8_t& partId) {
   partId = buf[2];
 }
 
+bool Adxl355::readTemperatureRaw(uint16_t& out) {
+  uint8_t buf[2];
+  readRegs(kTemp2, buf, sizeof(buf));  // TEMP2=上位4bit, TEMP1=下位8bit
+  out = static_cast<uint16_t>(((buf[0] & 0x0F) << 8) | buf[1]);
+  return true;
+}
+
 bool Adxl355::read(AccelSample& out) {
   uint8_t buf[9];
   readRegs(kXData3, buf, sizeof(buf));

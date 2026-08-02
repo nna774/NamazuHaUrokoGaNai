@@ -5,8 +5,19 @@
 #include <cstdint>
 
 static constexpr uint32_t kWireMagic = 0x4E414D5A;  // "NAMZ"
-static constexpr uint8_t kWireVersion = 1;
+// v2: サンプル列の後ろに TLV トレイラーが付きうる（付かないバッチも v2 で正しい）。
+static constexpr uint8_t kWireVersion = 2;
 static constexpr size_t kWireHeaderSize = 32;
+
+// --- トレイラー（TLV: [u16 type][u16 len][payload]）---
+// 種別はセンサに紐付けない。「ADXL355だから温度がある」ではなく
+// 「温度のTLVがあれば温度がある」。読み手は知らない type を len ぶん読み飛ばせる。
+static constexpr size_t kTlvHeaderSize = 4;
+enum TrailerType : uint16_t {
+  // センサ内蔵温度の生値(u16)。バッチ先頭時点の1点。単位はセンサ依存なので
+  // ℃への換算はクラウド側で行う（換算定数をファームに焼くと訂正が全機再書き込みになる）。
+  kTrailerSensorTemp = 1,
+};
 
 #pragma pack(push, 1)
 struct BatchHeader {

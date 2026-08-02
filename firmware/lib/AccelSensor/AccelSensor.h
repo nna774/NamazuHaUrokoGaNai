@@ -28,6 +28,10 @@ class AccelSensor {
 
   // 生値のフォーマット: 0=int16, 1=int32。
   virtual uint8_t sampleFormat() const = 0;
+
+  // センサ内蔵温度の生値。持たないセンサは false を返す（既定）。
+  // ℃への換算はクラウド側で行うので、ここでは生値のまま出す。
+  virtual bool readTemperatureRaw(uint16_t& out) { (void)out; return false; }
 };
 
 // LSB -> gal(cm/s^2) 変換ヘルパ。mg * 0.980665 = gal。

@@ -26,6 +26,7 @@ class Adxl355 : public AccelSensor {
   float scaleMgPerLsb() const override { return 0.00390625f; }
   uint8_t sensorType() const override { return 1; /* kSensorAdxl355 */ }
   uint8_t sampleFormat() const override { return 1; /* int32 */ }
+  bool readTemperatureRaw(uint16_t& out) override;
 
   // ID 3種を一括で読む（0xAD / 0x1D / 0xED なら生きている）。
   void readIds(uint8_t& devidAd, uint8_t& devidMst, uint8_t& partId);
@@ -33,6 +34,7 @@ class Adxl355 : public AccelSensor {
  private:
   // レジスタ
   static constexpr uint8_t kDevidAd = 0x00;
+  static constexpr uint8_t kTemp2 = 0x06;  // TEMP2/TEMP1 で12bit
   static constexpr uint8_t kXData3 = 0x08;
   static constexpr uint8_t kFilter = 0x28;
   static constexpr uint8_t kRange = 0x2C;

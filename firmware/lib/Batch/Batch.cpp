@@ -6,7 +6,8 @@ Batch::Batch(uint32_t capacitySamples, uint8_t sampleFormat)
     : sampleFormat_(sampleFormat),
       sampleBytes_(sampleBytesFor(sampleFormat)),
       capacity_(capacitySamples) {
-  size_t total = kWireHeaderSize + static_cast<size_t>(capacitySamples) * sampleBytes_;
+  size_t total = kWireHeaderSize + static_cast<size_t>(capacitySamples) * sampleBytes_
+                 + kMaxTrailerBytes;
   buf_ = static_cast<uint8_t*>(malloc(total));
   if (buf_) {
     std::memset(buf_, 0, kWireHeaderSize);
@@ -19,6 +20,7 @@ void Batch::begin(uint64_t startUs, uint8_t sensorType, float scaleMgPerLsb,
                   uint32_t sampleRateHz, uint32_t deviceId) {
   startUs_ = startUs;
   count_ = 0;
+  trailerLen_ = 0;
   BatchHeader h{};
   h.magic = kWireMagic;
   h.version = kWireVersion;
@@ -49,9 +51,24 @@ bool Batch::addSample(int32_t x, int32_t y, int32_t z) {
   return true;
 }
 
+bool Batch::addTrailer(uint16_t type, const void* data, uint16_t len) {
+  if (trailerLen_ + kTlvHeaderSize + len > kMaxTrailerBytes) return false;
+  uint8_t* p = trailer_ + trailerLen_;
+  std::memcpy(p + 0, &type, 2);
+  std::memcpy(p + 2, &len, 2);
+  std::memcpy(p + 4, data, len);
+  trailerLen_ += kTlvHeaderSize + len;
+  return true;
+}
+
 const uint8_t* Batch::bytes() {
   // sample_count を確定
   std::memcpy(buf_ + 20, &count_, sizeof(uint32_t));
+  // トレイラーはサンプル列の直後。位置は count_ が決まって初めて確定する。
+  if (trailerLen_) {
+    std::memcpy(buf_ + kWireHeaderSize + static_cast<size_t>(count_) * sampleBytes_,
+                trailer_, trailerLen_);
+  }
   return buf_;
 }
 

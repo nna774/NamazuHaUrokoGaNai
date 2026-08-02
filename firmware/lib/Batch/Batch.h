@@ -29,14 +29,19 @@ class Batch {
   // センサ側の scaleMgPerLsb で int16 に収まることを保証しておくこと。
   bool addSample(int32_t x, int32_t y, int32_t z);
 
+  // TLV トレイラーを1件足す。サンプル列の後ろに出る。満杯なら false。
+  // begin() で消えるので、バッチ毎に入れ直すこと。
+  bool addTrailer(uint16_t type, const void* data, uint16_t len);
+
   bool isFull() const { return count_ >= capacity_; }
   uint32_t count() const { return count_; }
   uint64_t startUs() const { return startUs_; }
 
-  // ヘッダの sample_count を確定し、送信用バイト列を返す。
+  // ヘッダの sample_count を確定し、トレイラーを連結して送信用バイト列を返す。
   const uint8_t* bytes();
   size_t size() const {
-    return fixedSize_ ? fixedSize_ : kWireHeaderSize + count_ * sampleBytes_;
+    return fixedSize_ ? fixedSize_
+                      : kWireHeaderSize + count_ * sampleBytes_ + trailerLen_;
   }
 
   // 退避ファイルから復元（バイト列を丸ごと保持）。
@@ -47,6 +52,12 @@ class Batch {
   static size_t sampleBytesFor(uint8_t sampleFormat) {
     return sampleFormat == 1 ? 3 * sizeof(int32_t) : 3 * sizeof(int16_t);
   }
+
+  // トレイラーの上限。サンプル列の長さは count_ で動くので、確定した位置へ
+  // bytes() の時点で書き込む。それまではここに溜めておく。
+  static constexpr size_t kMaxTrailerBytes = 32;
+  uint8_t trailer_[kMaxTrailerBytes] = {};
+  size_t trailerLen_ = 0;
 
   uint8_t* buf_ = nullptr;
   uint8_t sampleFormat_ = 0;

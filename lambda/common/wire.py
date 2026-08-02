@@ -1,9 +1,13 @@
-"""バッチのバイナリ形式 v1 のパース。docs/wire_format.md / firmware WireFormat.h と一致。"""
+"""バッチのバイナリ形式のパース。docs/wire_format.md / firmware WireFormat.h と一致。
+
+v1 = ヘッダ + サンプル列。v2 = その後ろに TLV トレイラーが付きうる。
+トレイラーは無くても v2 として正しい。
+"""
 
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -13,6 +17,23 @@ HEADER_SIZE = struct.calcsize(HEADER_FMT)
 MG_TO_GAL = 0.980665
 
 assert HEADER_SIZE == 32, HEADER_SIZE
+
+# --- トレイラー種別（firmware WireFormat.h の TrailerType と一致させる）---
+TLV_HEADER_FMT = "<HH"
+TLV_HEADER_SIZE = struct.calcsize(TLV_HEADER_FMT)
+TRAILER_SENSOR_TEMP = 1
+
+# ADXL355 の内蔵温度の換算（データシートの公称値）。
+#   温度[℃] = 25 + (TEMP_AT_25C - raw) / LSB_PER_DEGC
+# 部品ごとのばらつきが大きく**絶対値は当てにならない**。ドリフトとの相関を見る
+# 用途（相対変化）にのみ使うこと。ファームは生値のまま送る。
+ADXL355_TEMP_AT_25C = 1852.0
+ADXL355_TEMP_LSB_PER_DEGC = -9.05
+
+
+def adxl355_temp_c(raw: int) -> float:
+    """ADXL355 の温度生値を℃へ。絶対精度は無い（上のコメント参照）。"""
+    return 25.0 + (raw - ADXL355_TEMP_AT_25C) / ADXL355_TEMP_LSB_PER_DEGC
 
 
 @dataclass
@@ -26,6 +47,14 @@ class BatchMeta:
     sample_count: int
     scale_mg_per_lsb: float
     device_id: int
+    # TLV トレイラー。{type: payload}。未知の type もそのまま持つ。
+    trailer: dict[int, bytes] = field(default_factory=dict)
+
+    @property
+    def sensor_temp_raw(self) -> int | None:
+        """センサ内蔵温度の生値（バッチ先頭時点）。無ければ None。"""
+        v = self.trailer.get(TRAILER_SENSOR_TEMP)
+        return struct.unpack("<H", v)[0] if v and len(v) >= 2 else None
 
 
 @dataclass
@@ -69,4 +98,23 @@ def parse(data: bytes) -> Batch:
         raise ValueError(f"payload short: {len(payload)} < {need}")
     raw = np.frombuffer(payload[:need], dtype=dtype).reshape(count, 3).astype(np.int64)
     gal = raw.astype(float) * scale * MG_TO_GAL
+    meta.trailer = parse_trailer(payload[need:])
     return Batch(meta=meta, raw=raw, gal=gal)
+
+
+def parse_trailer(data: bytes) -> dict[int, bytes]:
+    """TLV 列を {type: payload} にする。
+
+    壊れていても例外にしない。トレイラーは補助情報であって、これを理由に
+    波形1バッチを丸ごと捨てるのは割に合わない。読める分だけ返す。
+    """
+    out: dict[int, bytes] = {}
+    pos = 0
+    while pos + TLV_HEADER_SIZE <= len(data):
+        typ, length = struct.unpack(TLV_HEADER_FMT, data[pos:pos + TLV_HEADER_SIZE])
+        pos += TLV_HEADER_SIZE
+        if pos + length > len(data):
+            break  # 途中で切れている
+        out[typ] = data[pos:pos + length]
+        pos += length
+    return out
