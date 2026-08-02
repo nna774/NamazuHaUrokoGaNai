@@ -66,6 +66,28 @@ def test_manual_but_artificial_hidden(monkeypatch):
     assert items == [] and total == 0
 
 
+def test_device_filter(monkeypatch):
+    # device_id を渡すとそのデバイスのイベントだけ（総件数もフィルタ後）
+    _stub_scan(monkeypatch, [
+        {"event_id": "0001-10", "onset_us": 10, "device_id": 1, "cloud_confirmed": True},
+        {"event_id": "0002-20", "onset_us": 20, "device_id": 2, "cloud_confirmed": True},
+        {"event_id": "0001-30", "onset_us": 30, "device_id": 1, "cloud_confirmed": True},
+    ])
+    items, total = events.list_page(device_id=1)
+    assert _ids(items) == ["0001-30", "0001-10"] and total == 2
+
+
+def test_device_filter_none_means_all(monkeypatch):
+    # 無指定は全デバイス。device_id 欠落のイベント（旧データ）も落とさない
+    _stub_scan(monkeypatch, [
+        {"event_id": "0001-10", "onset_us": 10, "device_id": 1, "cloud_confirmed": True},
+        {"event_id": "0002-20", "onset_us": 20, "device_id": 2, "cloud_confirmed": True},
+        {"event_id": "0009-30", "onset_us": 30, "cloud_confirmed": True},
+    ])
+    items, total = events.list_page()
+    assert total == 3 and len(items) == 3
+
+
 class _FakeTable:
     """DynamoDB Table の最小スタブ（get/put/update: SET #n=:v と REMOVE #n のみ）。"""
 

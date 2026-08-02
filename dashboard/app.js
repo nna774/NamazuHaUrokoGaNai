@@ -441,15 +441,46 @@ function scheduleLive() {
 // --- イベント ---
 const EVENTS_PAGE_SIZE = 20;
 let eventsPageNum = 1;  // 詳細→戻る/行クリック時に一覧の現在ページを引き継ぐ
+// イベントのデバイス絞り込み。'all' は全機（既定）。ライブと同じく選択の真実は
+// この変数に置く（<select> の選択肢は /devices を引くまで空なので DOM は真実にできない）。
+let eventsDeviceId = 'all';
+
+function eventsDeviceParam() {
+  return eventsDeviceId !== 'all' ? '&device=' + encodeURIComponent(eventsDeviceId) : '';
+}
+
+// イベント絞り込みの選択肢を埋める。「全機」は常に残す。
+async function fillEventsDevices() {
+  const sel = document.getElementById('events-device');
+  if (!sel) return;
+  try {
+    const data = await apiGet('/devices');
+    const ids = (data.devices || []).map(d => Number(d.device_id)).sort((a, b) => a - b);
+    const want = ['all'].concat(ids.map(String));
+    const have = Array.from(sel.options).map(o => o.value);
+    if (want.join() !== have.join()) {
+      sel.innerHTML = '<option value="all">全機</option>'
+        + ids.map(id => `<option value="${id}">${String(id).padStart(4, '0')}</option>`).join('');
+    }
+    // URL 由来の選択が実在しなければ全機へ倒す（デバイスを外した後のURL対策）。
+    if (!want.includes(String(eventsDeviceId))) eventsDeviceId = 'all';
+    sel.value = eventsDeviceId;
+  } catch (e) {
+    // デバイス一覧が引けなくても一覧表示は続ける（絞り込みは効いたまま）。
+  }
+}
+
 async function reloadEvents(pageNum = 1) {
   eventsPageNum = pageNum;
   const status = document.getElementById('events-status');
   const tbody = document.querySelector('#events-table tbody');
   const page0 = Math.max(0, pageNum - 1);
   const all = document.getElementById('events-all').checked ? '&all=1' : '';
+  await fillEventsDevices();
   try {
     status.textContent = '取得中…';
-    const data = await apiGet(`/events?page=${page0}&size=${EVENTS_PAGE_SIZE}${all}`);
+    const data = await apiGet(`/events?page=${page0}&size=${EVENTS_PAGE_SIZE}${all}`
+      + eventsDeviceParam());
     tbody.innerHTML = '';
     for (const ev of data.events) {
       const tr = document.createElement('tr');
@@ -464,7 +495,9 @@ async function reloadEvents(pageNum = 1) {
       // グレーは震度0とも紛らわしいので「人工」タグを併記して判別を確実にする（全件表示でのみ出る）。
       const artTag = ev.artificial ? ' <span class="badge badge-art">人工地震</span>' : '';
       const manualTag = ev.manual ? ' <span class="badge badge-manual">手動</span>' : '';
-      tr.innerHTML = `<td>${t}</td><td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
+      // どの機のイベントかは常に出す。多点では震度の意味が機ごとに違う。
+      const dev = ev.device_id != null ? String(ev.device_id).padStart(4, '0') : '—';
+      tr.innerHTML = `<td>${t}</td><td>${dev}</td><td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
         + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
       // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）。
@@ -515,6 +548,7 @@ function renderEventInfo(m) {
   const last = Number(m.last_us || onset);
   const dur = onset ? Math.max(0, (last - onset) / 1e6) : 0;
   if (onset) rows.push(['発生時刻', new Date(onset / 1000).toLocaleString('ja-JP')]);
+  if (m.device_id != null) rows.push(['デバイス', String(m.device_id).padStart(4, '0')]);
   rows.push(['継続時間', `${dur.toFixed(0)} 秒`]);
   rows.push(['計測震度', Number(m.max_intensity || 0).toFixed(1)]);
   rows.push(['震度', scaleBadge(m.scale || intensityScale(Number(m.max_intensity || 0)), m.artificial)]);
@@ -668,8 +702,8 @@ function scheduleDevices() {
 }
 
 // --- ハッシュルーティング ---
-// #live?m=<分>&auto=<0|1>&r=<レンジ>&ax=<表示軸> / #events?p=<頁>&all=<0|1>
-// / #event/<id>?p=&all=&r=&ax=&t=<fromUs>-<toUs> を location.hash に持たせ、リロードや共有URLで
+// #live?m=<分>&auto=<0|1>&r=<レンジ>&ax=<表示軸> / #events?p=<頁>&all=<0|1>&d=<デバイス>
+// / #event/<id>?p=&all=&d=&r=&ax=&t=<fromUs>-<toUs> を location.hash に持たせ、リロードや共有URLで
 // 状態(タブ・表示範囲・自動更新・表示軸・全件フィルタ・ページ)が復元されるようにする。
 // ax は表示中の軸を連結した文字列（例 'xy'=z非表示 / ''=全非表示 / 省略=全表示）。
 function showView(name) {
@@ -710,19 +744,25 @@ function liveHash() {
   return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}${sec ? `&s=${sec}` : ''}${t}${d}`;
 }
 
-// 現在のイベント一覧操作状態（ページ・全件フィルタ）を表すハッシュ
-function eventsHash(pageNum) {
-  const all = document.getElementById('events-all').checked ? 1 : 0;
-  return `events?p=${pageNum || 1}&all=${all}`;
+// イベント一覧のデバイス絞り込みのハッシュ表現（全機は既定なので省く）
+function eventsDeviceHash() {
+  return eventsDeviceId !== 'all' ? `&d=${encodeURIComponent(eventsDeviceId)}` : '';
 }
 
-// イベント詳細ハッシュ。戻り先の一覧状態(p/all)・縦軸レンジ(r)・時間ズーム(t)を持たせ、
+// 現在のイベント一覧操作状態（ページ・全件フィルタ・デバイス絞り込み）を表すハッシュ
+function eventsHash(pageNum) {
+  const all = document.getElementById('events-all').checked ? 1 : 0;
+  return `events?p=${pageNum || 1}&all=${all}${eventsDeviceHash()}`;
+}
+
+// イベント詳細ハッシュ。戻り先の一覧状態(p/all/d)・縦軸レンジ(r)・時間ズーム(t)を持たせ、
 // リロード・共有URLでフィルタや表示範囲が復元されるようにする。
 function eventHash(id) {
   const all = document.getElementById('events-all').checked ? 1 : 0;
   const r = document.getElementById('event-yrange').value;
   const t = eventZoom ? `&t=${Math.round(eventZoom.fromUs)}-${Math.round(eventZoom.toUs)}` : '';
-  return `event/${encodeURIComponent(id)}?p=${eventsPageNum}&all=${all}&r=${r}&ax=${axesStr('event')}${t}`;
+  return `event/${encodeURIComponent(id)}?p=${eventsPageNum}&all=${all}`
+    + `${eventsDeviceHash()}&r=${r}&ax=${axesStr('event')}${t}`;
 }
 
 function showEventsMode(detail) {
@@ -738,6 +778,7 @@ function route() {
     showEventsMode(true);
     // 戻り先の一覧状態と詳細の縦軸レンジを操作子へ復元してから描画
     document.getElementById('events-all').checked = params.all === '1';
+    eventsDeviceId = params.d ? decodeURIComponent(params.d) : 'all';  // 戻り先の絞り込み
     if (params.p) eventsPageNum = parseInt(params.p, 10);
     if (params.r !== undefined) document.getElementById('event-yrange').value = params.r;
     setAxes('event', params.ax);
@@ -748,6 +789,7 @@ function route() {
     showView('events');
     showEventsMode(false);
     document.getElementById('events-all').checked = params.all === '1';
+    eventsDeviceId = params.d ? decodeURIComponent(params.d) : 'all';
     reloadEvents(params.p ? parseInt(params.p, 10) : 1);
   } else if (path === 'devices') {
     showView('devices');
@@ -843,6 +885,11 @@ window.addEventListener('load', () => {
   document.getElementById('reload-events').onclick = () => route();  // 現在ページを再読込
   // フィルタ切替はURLへ反映（hashchange→route が1ページ目から再取得する）
   document.getElementById('events-all').onchange = () => { location.hash = eventsHash(1); };
+  // デバイス絞り込みを変えたら1ページ目から。件数が変わるのでページ番号は保てない。
+  document.getElementById('events-device').onchange = (e) => {
+    eventsDeviceId = e.target.value;
+    location.hash = eventsHash(1);
+  };
   document.getElementById('event-back').onclick = () => { location.hash = eventsHash(eventsPageNum); };
   // デバイスを変えても時間窓（拡大・指定時刻）は保つ。同じ揺れを別の機体で見比べるのが
   // 多点化の主目的で、解除すると比較のたびに時刻を探し直すことになる。
@@ -863,6 +910,7 @@ window.addEventListener('load', () => {
     startInput.value = '';
     liveZoom = null;
     document.getElementById('events-all').checked = false;
+    eventsDeviceId = 'all';
     eventsPageNum = 1;
     const h = liveHash();
     if (location.hash === '#' + h) route(); else location.hash = h;

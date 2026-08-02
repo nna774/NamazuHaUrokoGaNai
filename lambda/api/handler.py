@@ -3,7 +3,7 @@
 Lambda Function URL (payload v2.0)。
 - GET /recent?minutes=5&start=<us> 波形。start指定で[start,start+minutes]、無指定で直近n分
                                    （大きい範囲はmin/maxエンベロープに間引き）
-- GET /events                     イベント一覧
+- GET /events?device=<id>         イベント一覧（device無指定は全デバイス）
 - GET /event?id=<event_id>        イベントのメタ + 波形
       &from=<us>&to=<to>          任意。保存済み波形からこの区間だけ切り出して返す
                                   （ダッシュボードのズームが狭い区間のrawを取り直す用）
@@ -133,13 +133,23 @@ def _events(q):
     page = _int_param(q, "page", 0, 0, 100000)
     size = _int_param(q, "size", 20, 1, 100)
     show_all = q.get("all") in ("1", "true")
-    items, total = events.list_page(page, size, show_all=show_all)
+    # ?device=<id> でデバイス絞り込み。/recent と違い無指定は全デバイス
+    # （イベントは混ぜても壊れない。既定で全部見えるほうが「取り逃し」に気付ける）。
+    device_id = None
+    raw = q.get("device")
+    if raw not in (None, "", "all"):
+        try:
+            device_id = int(raw)
+        except (TypeError, ValueError):
+            return _json(400, {"error": "bad device"})
+    items, total = events.list_page(page, size, show_all=show_all, device_id=device_id)
     # 一覧・詳細で同じ値を出すため、震度は effective_intensity に統一する。
     for it in items:
         eff = events.effective_intensity(it)
         it["max_intensity"] = eff
         it["scale"] = intensity_scale(eff)
-    return _json(200, {"events": items, "page": page, "size": size, "total": total})
+    return _json(200, {"events": items, "page": page, "size": size, "total": total,
+                       "device_id": device_id})
 
 
 def _event(q):
@@ -173,6 +183,7 @@ def _event(q):
         intensity = float(item.get("max_intensity", 0))
         meta = {
             "event_id": eid,
+            "device_id": int(item.get("device_id", 0)),
             "onset_us": int(item.get("onset_us", 0)),
             "last_us": int(item.get("last_us", item.get("onset_us", 0))),
             "max_intensity": intensity,

@@ -217,17 +217,23 @@ def _scan_all() -> list[dict]:
     return out
 
 
-def list_page(page: int = 0, size: int = 20, show_all: bool = False) -> tuple[list[dict], int]:
+def list_page(page: int = 0, size: int = 20, show_all: bool = False,
+              device_id: int | None = None) -> tuple[list[dict], int]:
     """新しい順に並べた page ページ目(0始まり)の size 件と、（フィルタ後の）総件数を返す。
 
     show_all=False（既定）では「確定済み or 未評価(pending)」だけ出し、detectが評価して
     確定しなかったイベント（速報は来たが地震でなかった = checked かつ未確定）と、
     人工地震（artificial）としてフラグ付けしたものを隠す。
 
+    device_id を指定すると、そのデバイスのイベントだけに絞る（既定は全デバイス。
+    波形と違いイベントは混ぜても壊れないので、絞り込みは任意）。
+
     件数が数千規模までは全件 scan+ソートで十分。それ以上に育ったら
     時刻レンジGSIでの本格ページングに移行する。
     """
     items = _scan_all()
+    if device_id is not None:
+        items = [it for it in items if int(it.get("device_id", -1)) == device_id]
     if not show_all:
         items = [it for it in items
                  if (it.get("cloud_confirmed") or it.get("manual") or not it.get("checked"))
