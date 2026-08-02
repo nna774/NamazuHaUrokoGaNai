@@ -64,6 +64,44 @@ def test_core_slice_keeps_short_windows_whole():
     assert detect_core.core_slice(12000, 100.0) == slice(500, 11500)
 
 
+def test_stride_zero_evaluates_every_batch():
+    # 既定(0)は間引きなし。バッチ長がいくらでも常に担当する
+    for start in (0, 1_000_000, 15_000_000, 999_999_999):
+        assert detect_core.crosses_stride(start, start + 15_000_000, 0.0)
+
+
+def test_stride_halves_15s_batches():
+    """15秒バッチ・stride 30秒でちょうど2回に1回になる（絶対時刻の格子で決まる）。"""
+    hits = [detect_core.crosses_stride(i * 15_000_000, (i + 1) * 15_000_000, 30.0)
+            for i in range(8)]
+    assert hits == [False, True, False, True, False, True, False, True]
+
+
+def test_stride_does_not_thin_when_batch_is_long_enough():
+    # batch_len >= stride なら全バッチが境界を跨ぐ = 劣化しない
+    for i in range(8):
+        assert detect_core.crosses_stride(i * 30_000_000, (i + 1) * 30_000_000, 30.0)
+    # 格子に揃っていないバッチでも同じ（30秒進めば必ずどこかの境界を越える）
+    for i in range(8):
+        s = 7_123_456 + i * 30_000_000
+        assert detect_core.crosses_stride(s, s + 30_000_000, 30.0)
+
+
+def test_stride_skips_batch_with_no_new_span():
+    # 長さ0のバッチは新しい時間を持たないので担当しない
+    assert not detect_core.crosses_stride(30_000_000, 30_000_000, 30.0)
+
+
+def test_clamp_stride_limits_to_effective_window():
+    # 実効窓長 = 120 - 2*5 = 110 を超える刻みは取りこぼしになるので切り詰める
+    assert detect_core.clamp_stride(200.0, 120.0) == 110.0
+    assert detect_core.clamp_stride(30.0, 120.0) == 30.0
+    assert detect_core.clamp_stride(0.0, 120.0) == 0.0
+    assert detect_core.clamp_stride(-5.0, 120.0) == 0.0
+    # 端を落とす余裕も無い短い窓では間引かない方向に倒す
+    assert detect_core.clamp_stride(30.0, 5.0) == 0.0
+
+
 def test_amp_for_intensity_inverse():
     # amp_for_intensity は I=2log10(a)+0.94 の逆関数
     a = detect_core.amp_for_intensity(2.0)

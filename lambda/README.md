@@ -38,6 +38,7 @@ Python。計測震度は `tools/jismo`（FFT版・numpyのみ）を共有する�
 | `NAMZ_NOTIFIER` | 通知種別（既定 slack） |
 | `NAMZ_GYAZO_TOKEN` | Gyazoアクセストークン（scope `public`）。確定報に波形画像を添える。空なら画像なし（detectのみ） |
 | `NAMZ_DETECT_WINDOW_S` / `_THRESHOLD` / `_HOLD_S` | 検知パラメータ |
+| `NAMZ_DETECT_STRIDE_S` | 窓を再評価する刻み[秒]（detect・既定0=バッチ到着ごと）。0超なら「この刻みの境界を跨いだバッチ」だけが評価する |
 | `NAMZ_OFFLINE_AFTER_S` | 欠測とみなす最終受信からの秒数（api/watchdog共通・既定300） |
 | `NAMZ_OFFLINE_RENOTIFY_S` | 欠測継続中の再送間隔[秒]（watchdog・既定86400） |
 

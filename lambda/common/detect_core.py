@@ -15,8 +15,9 @@ from jismo import jma_fft
 # 窓の端から捨てる秒数。FFTフィルタは巡回畳み込みなので、記録の終端と始端が
 # 繋がったものとして扱われ、そこに段差があると端がリンギングする。デトレンド
 # （jma_fft.detrend）で大半は消えるが、窓の切れ目に本物の過渡が跨いだ場合は残る。
-# 窓は WINDOW_SECONDS=120 でバッチ毎(30秒)に評価するので重なりが厚く、端を数秒
-# 捨てても取りこぼさない（次の窓では同じ時刻が内側に来る）。
+# 窓は WINDOW_SECONDS=120 を 30秒刻み(NAMZ_DETECT_STRIDE_S)で評価するので重なりが厚く、
+# 端を数秒捨てても取りこぼさない（次の窓では同じ時刻が内側に来る）。刻みを実効窓長
+# （120-2*5=110秒）より粗くすると成り立たなくなるので clamp_stride で切り詰める。
 # 詳細は docs/intensity_pitfalls.md。
 EDGE_GUARD_SECONDS = 5.0
 
@@ -30,6 +31,33 @@ def core_slice(n: int, fs: float, edge_seconds: float = EDGE_GUARD_SECONDS) -> s
     """端を落とした評価区間。短すぎる窓では落とさない（落とすものが無くなるため）。"""
     g = int(edge_seconds * fs)
     return slice(g, n - g) if n > 4 * g else slice(0, n)
+
+
+def clamp_stride(stride_seconds: float, window_seconds: float) -> float:
+    """評価刻み(stride)を実効窓長に収める。0以下なら0（間引きなし）。
+
+    刻みが実効窓長（端を捨てた後の長さ）を超えると、どの窓にも入らない時刻ができて
+    取りこぼしになる。設定ミスで検知が穴だらけになるのは避けたいので切り詰める。
+    """
+    if stride_seconds <= 0:
+        return 0.0
+    return min(stride_seconds, max(0.0, window_seconds - 2 * EDGE_GUARD_SECONDS))
+
+
+def crosses_stride(batch_start_us: int, batch_end_us: int, stride_seconds: float) -> bool:
+    """このバッチが stride の境界を跨ぐか = 窓の再評価を担当するか。
+
+    detect はバッチ到着ごとに起動するが、窓長より短いバッチでは評価が重複する。
+    「stride の境界を跨いだバッチだけが担当」という規則にすると、Lambda 側に前回の
+    記憶を持たずに間引ける（絶対時刻の格子で決まるのでデバイス間でも位相が揃う）。
+    `batch_len >= stride` なら全バッチが跨ぐので自動的に間引かれなくなる。
+    刻みを粗くする代償は確定報の遅れ（最大 stride ぶん）で、取りこぼしではない。
+    詳細は docs/design.md。
+    """
+    if stride_seconds <= 0:
+        return True
+    stride_us = int(stride_seconds * 1e6)
+    return batch_end_us // stride_us > batch_start_us // stride_us
 
 
 @dataclass

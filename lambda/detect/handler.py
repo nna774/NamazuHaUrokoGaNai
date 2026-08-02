@@ -25,6 +25,11 @@ BUCKET = os.environ["NAMZ_BUCKET"]
 WINDOW_SECONDS = float(os.environ.get("NAMZ_DETECT_WINDOW_S", "120"))
 THRESHOLD = float(os.environ.get("NAMZ_DETECT_THRESHOLD", "0.5"))
 HOLD_SECONDS = float(os.environ.get("NAMZ_DETECT_HOLD_S", "2.0"))
+# 窓の再評価をこの秒数の刻みまで間引く（0 = バッチ到着ごとに毎回評価する従来動作）。
+# バッチ長を短くすると「起動回数」と「1回に読むオブジェクト数」が両方増え、S3 GET が
+# 長さの二乗で効く。刻みを転送の都合から切り離すための設定。
+STRIDE_SECONDS = detect_core.clamp_stride(
+    float(os.environ.get("NAMZ_DETECT_STRIDE_S", "0")), WINDOW_SECONDS)
 # 確定報を Slack 通知する最小計測震度(l)。速報の閾値(k)より低くする想定。
 NOTIFY_CONFIRM_MIN = float(os.environ.get("NAMZ_NOTIFY_CONFIRM_MIN", "1.5"))
 # イベント波形として保存する範囲（onset を基準に前後）
@@ -48,15 +53,18 @@ def _process(key: str):
     batch_len_us = int(b.meta.sample_count / b.meta.sample_rate_hz * 1e6)
     end_us = b.meta.batch_start_us + batch_len_us
 
-    # 窓は必ず1デバイスぶんに絞る。混ぜると継ぎ目の段差で震度が跳ねる。
-    gal, win_start, fs = store.load_window(s3, BUCKET, end_us, WINDOW_SECONDS,
-                                           b.meta.device_id)
-    if gal.shape[0] > 0:
-        det = detect_core.analyze(gal, fs, win_start, THRESHOLD, HOLD_SECONDS)
-        if det is not None:
-            _confirm(b.meta.device_id, det)
+    # 窓の読み直し(LIST+GET)は重いので、stride の境界を跨いだバッチだけが担当する。
+    if detect_core.crosses_stride(b.meta.batch_start_us, end_us, STRIDE_SECONDS):
+        # 窓は必ず1デバイスぶんに絞る。混ぜると継ぎ目の段差で震度が跳ねる。
+        gal, win_start, fs = store.load_window(s3, BUCKET, end_us, WINDOW_SECONDS,
+                                               b.meta.device_id)
+        if gal.shape[0] > 0:
+            det = detect_core.analyze(gal, fs, win_start, THRESHOLD, HOLD_SECONDS)
+            if det is not None:
+                _confirm(b.meta.device_id, det)
 
-    # 確定検知の有無に関わらず、速報イベントの波形も永久保存する。
+    # 確定検知の有無に関わらず、速報イベントの波形も永久保存する。stride で間引くのは
+    # 窓の再評価だけ。こちらは S3 GET を伴わないので毎バッチ回す。
     _preserve_prompt_waveforms(b.meta.batch_start_us)
 
 
