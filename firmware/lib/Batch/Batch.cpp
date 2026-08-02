@@ -2,8 +2,11 @@
 
 #include <cstring>
 
-Batch::Batch(uint32_t capacitySamples) : capacity_(capacitySamples) {
-  size_t total = kWireHeaderSize + static_cast<size_t>(capacitySamples) * kSampleBytes;
+Batch::Batch(uint32_t capacitySamples, uint8_t sampleFormat)
+    : sampleFormat_(sampleFormat),
+      sampleBytes_(sampleBytesFor(sampleFormat)),
+      capacity_(capacitySamples) {
+  size_t total = kWireHeaderSize + static_cast<size_t>(capacitySamples) * sampleBytes_;
   buf_ = static_cast<uint8_t*>(malloc(total));
   if (buf_) {
     std::memset(buf_, 0, kWireHeaderSize);
@@ -12,15 +15,15 @@ Batch::Batch(uint32_t capacitySamples) : capacity_(capacitySamples) {
 
 Batch::~Batch() { free(buf_); }
 
-void Batch::begin(uint64_t startUs, uint8_t sensorType, uint8_t sampleFormat,
-                  float scaleMgPerLsb, uint32_t sampleRateHz, uint32_t deviceId) {
+void Batch::begin(uint64_t startUs, uint8_t sensorType, float scaleMgPerLsb,
+                  uint32_t sampleRateHz, uint32_t deviceId) {
   startUs_ = startUs;
   count_ = 0;
   BatchHeader h{};
   h.magic = kWireMagic;
   h.version = kWireVersion;
   h.sensor_type = sensorType;
-  h.sample_format = sampleFormat;
+  h.sample_format = sampleFormat_;
   h.axes = 3;
   h.batch_start_us = startUs;
   h.sample_rate_mhz = sampleRateHz * 1000;  // Hz -> milli-Hz
@@ -30,12 +33,18 @@ void Batch::begin(uint64_t startUs, uint8_t sensorType, uint8_t sampleFormat,
   std::memcpy(buf_, &h, sizeof(h));
 }
 
-bool Batch::addSample(int16_t x, int16_t y, int16_t z) {
+bool Batch::addSample(int32_t x, int32_t y, int32_t z) {
   if (isFull()) return false;
-  uint8_t* p = buf_ + kWireHeaderSize + static_cast<size_t>(count_) * kSampleBytes;
-  std::memcpy(p + 0, &x, 2);
-  std::memcpy(p + 2, &y, 2);
-  std::memcpy(p + 4, &z, 2);
+  uint8_t* p = buf_ + kWireHeaderSize + static_cast<size_t>(count_) * sampleBytes_;
+  if (sampleFormat_ == 1) {
+    std::memcpy(p + 0, &x, 4);
+    std::memcpy(p + 4, &y, 4);
+    std::memcpy(p + 8, &z, 4);
+  } else {
+    int16_t v[3] = {static_cast<int16_t>(x), static_cast<int16_t>(y),
+                    static_cast<int16_t>(z)};
+    std::memcpy(p, v, sizeof(v));
+  }
   ++count_;
   return true;
 }
@@ -56,6 +65,8 @@ Batch* Batch::fromBytes(const uint8_t* data, size_t len) {
   }
   std::memcpy(b->buf_, data, len);
   b->fixedSize_ = len;
+  b->sampleFormat_ = data[6];  // BatchHeader::sample_format
+  b->sampleBytes_ = sampleBytesFor(b->sampleFormat_);
   uint32_t cnt;
   std::memcpy(&cnt, data + 20, sizeof(uint32_t));
   b->count_ = cnt;
