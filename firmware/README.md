@@ -41,8 +41,11 @@ cd tools && ../../.venv/bin/python gen_class_font.py DejaVuSans-Bold.ttf > ../li
 
 ## セットアップ
 
+`secrets.h` は手で書かず `tools/provision_device.py` で払い出す（`tools/devices.json` が
+単一の真実。詳細は [docs/design.md](../docs/design.md)）。
+
 ```bash
-cp src/secrets.h.example src/secrets.h   # WiFi・エンドポイント・HMAC鍵を記入
+python ../tools/provision_device.py secrets-h --id 2 --force
 ```
 
 ## ビルド・書き込み
@@ -51,12 +54,44 @@ cp src/secrets.h.example src/secrets.h   # WiFi・エンドポイント・HMAC�
 # 通常（送信あり）
 pio run -t upload && pio device monitor
 
+# センサ別: IIS3DHHC機は esp32dev(既定)、ADXL355機は adxl355
+pio run -e "$(python ../tools/provision_device.py env --id 2)" -t upload
+
 # Phase1: センサ検証のみ（WiFi/送信なし、シリアルにt_us,x,y,z）
 pio run -e sensortest -t upload            # ADXL355機は -e adxl355-sensortest
 python ../tools/capture_serial.py --sensor iis3dhhc \
     --port /dev/tty.usbserial-XXXX --seconds 60 > cap.csv
 python ../tools/backtest.py cap.csv
 ```
+
+### 書き込めない時
+
+**`Uploading ...` の直後で固まったら、ブートローダに落ちていない。**
+
+このクローンボードの自動リセット回路（DTR/RTS でのブートローダ起動）は当てにならない。
+とくに **`sensortest` 系が載っている時に再発する**。あれは 100Hz でシリアルへ CSV を
+吐き続けるので、esptool の同期パケットと噛み合わない。喋らないファーム同士の
+焼き替えでは起きないため、Phase1 のあと本番ファームを焼く場面で必ず踏む。
+
+手でブートローダに落とす:
+
+1. **GPIO0（左ボタン / BOOT）を押したまま** USB を抜く
+2. 押したまま挿し直す（リセットボタンがある板なら EN を一度押すのでもよい）
+3. **押したまま** `pio run -e <env> -t upload`
+4. `Writing at 0x...` が流れたら離す
+
+要は「起動の瞬間に GPIO0 が LOW」であればよい。リセットでも電源投入でも成立する。
+
+それでも駄目なら:
+
+```bash
+lsof /dev/cu.usbserial-XXXX /dev/tty.usbserial-XXXX   # 他プロセスがポートを掴んでいないか
+PLATFORMIO_UPLOAD_SPEED=115200 pio run -e <env> -t upload
+```
+
+`upload_speed` は一度 921600 で転んで 460800 に落としてある（`c667a20`）。
+**書き始めてから**化けるなら速度、**書き始める前に**固まるならブートローダ側だ。
+症状で切り分けろ。
 
 ## 配線
 
@@ -79,7 +114,9 @@ TTGO T-Display 系ボード（ESP32 + 内蔵ST7789 TFT）向けの割り当て�
 
 - `postBatch` は現状 `setInsecure()` でTLS証明書を検証していない。運用前に
   Function URL のルート証明書をピン留めすること（`config.h` にTODO）。
-- HMAC鍵はデバイスとingest Lambdaで共有。デバイスごとに変えるなら device_id で引く。
+- HMAC鍵はデバイスとingest Lambdaで共有。デバイスごとの鍵は
+  `NAMZ_HMAC_SECRET_<id>`（terraform の `device_hmac_secrets`）で引く。
+  **サーバ側を apply してから焼くこと**。逆順だと新しい鍵の署名を検証できず 401 になる。
 
 ## serial port
 
