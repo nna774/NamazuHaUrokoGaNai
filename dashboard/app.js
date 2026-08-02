@@ -153,12 +153,12 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
   ctx.fillText(hi.toFixed(2), 2, Y(hi) + 4);
   ctx.fillText(lo.toFixed(2), 2, Y(lo) + 4);
 
-  // レンジ外は上下端に張り付き、波形が方形波のように見えて「軸が反転した」と誤読する。
-  // 実際の振れ幅を出して、縦軸を上げれば済むと分かるようにする。
+  // レンジ外は上下端に張り付き、波形が方形波のように見える。実際の振れ幅を出して
+  // 縦軸を上げれば済むと分かるようにする。凡例が右上 pad+12 に出るので1行下げる。
   if (clipped) {
     ctx.fillStyle = '#e67e22';
     ctx.textAlign = 'right';
-    ctx.fillText(`レンジ外 実測±${clipped.toFixed(0)} gal`, w - 4, pad + 12);
+    ctx.fillText(`レンジ外 実測±${clipped.toFixed(0)} gal`, w - pad, pad + 28);
     ctx.textAlign = 'left';
   }
 
