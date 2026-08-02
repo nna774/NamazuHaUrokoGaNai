@@ -17,6 +17,7 @@ ESP32-D0WDQ6 (WROOM-32 系) + IIS3DHHC。PlatformIO / Arduino core。
 |-----|------|
 | `AccelSensor` | センサ抽象インターフェイス（差し替え可能に） |
 | `Iis3dhhc`    | IIS3DHHC SPIドライバ（レジスタ直叩き） |
+| `Adxl355`     | ADXL355 SPIドライバ（`-DNAMZ_SENSOR_ADXL355` で選択。[docs/adxl355.md](../docs/adxl355.md)） |
 | `Shindo`      | リアルタイム計測震度（FIR。`tools/jismo/realtime.py` の写経） |
 | `Batch`       | ワイヤフォーマットのエンコード |
 | `Uploader`    | 送信キュー・LittleFS退避・リトライ・HMAC署名 |

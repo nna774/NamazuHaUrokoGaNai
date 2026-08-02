@@ -1,7 +1,10 @@
 # ADXL355 導入作戦
 
 device 0001（IIS3DHHC）のノイズフロアがセンサ律速だと [noise.md](noise.md) で確定したため、
-ADXL355 機を追加する。2026-07-28 時点の検討結果。**未着手**。
+ADXL355 機を追加する。2026-07-28 時点の検討結果。
+
+**進捗**: 2026-08-02 に基板着荷。ファーム側（§5）は実装済み・ビルド通過。
+以降は配線して §6 の検証を通す段階。
 
 ## 1. 動機と期待値
 
@@ -87,9 +90,23 @@ ADI 純正の候補は2つ。価格は Digikey JP 税抜（2026-07-28 時点）:
 ### 4.2 配線
 
 - 電源 2.25–3.6V。3V3直結でよい。
-- SPIピンは現行と同じ割り当てでよい（[config.h](../firmware/src/config.h#L42-L46)）。
-  CS だけ `kPinCsAdxl355` を追加する。無印 WROOM-32 DevKit なら 18/19/23/5 に戻す。
+- SPIピンは現行と同じ割り当て（[config.h](../firmware/src/config.h)）。CS だけ別にした。
+  無印 WROOM-32 DevKit を使うなら 18/19/23/5 に戻す。
 - Pmod 2列目（INT1/INT2/DRDY）は結線しない（§8）。
+
+TTGO T-Display の場合の実配線（Pmod 1列目のみ）:
+
+| Pmod J1 | 信号 | ESP32 |
+|---|---|---|
+| 1 | CS | GPIO32 (`kPinCsAdxl355`) |
+| 2 | MOSI | GPIO26 (`kPinMosi`) |
+| 3 | MISO | GPIO27 (`kPinMiso`) |
+| 4 | SCLK | GPIO25 (`kPinSck`) |
+| 5 | DGND | GND |
+| 6 | VDD | 3V3 |
+
+CS が IIS3DHHC(GPIO33) と別なので、**比較フェーズでは両方を同じバスに挿したまま
+ファームだけ焼き分けられる**。
 
 ## 5. ファーム実装
 
@@ -146,18 +163,25 @@ ADXL355 の生値（3.9 µg/LSB）を素で int16 に入れると **±0.128g = 1
 
 ### 5.4 差し替え箇所
 
-1. `firmware/lib/Adxl355/` 新規
-2. [config.h](../firmware/src/config.h): `kPinCsAdxl355` 追加（`kSensorAdxl355=1` は予約済み）
-3. [main.cpp:25](../firmware/src/main.cpp#L25) の `static Iis3dhhc gSensor(...)` を差し替え、
-   `secrets.h` の `kDeviceId` を2台目の値にする
-4. [Batch](../firmware/lib/Batch/Batch.h) の int32 対応（int32 案を採る場合）
-5. クラウド・ダッシュボード: **変更なし**
+1. ~~`firmware/lib/Adxl355/` 新規~~ 実装済み
+2. ~~[config.h](../firmware/src/config.h): `kPinCsAdxl355` 追加~~ 済み（GPIO32）
+3. ~~main.cpp のセンサ差し替え~~ 済み。`-DNAMZ_SENSOR_ADXL355` で切り替わる
+   （[platformio.ini](../firmware/platformio.ini) の `adxl355` / `adxl355-sensortest` env）。
+   **残: `secrets.h` の `kDeviceId` を2台目の値にする**
+4. ~~[Batch](../firmware/lib/Batch/Batch.h) の int32 対応~~ 済み（int32 案を採用）。
+   サンプル幅はコンストラクタの `sampleFormat` で決まる。
+   併せて `kMaxRamBatches` を ADXL355 ビルドでは 3 に落とした（36KB×6=216KB は
+   WiFiスタックを引いたヒープに入らない）。**起動時の `[mem] free heap` を実機で確認する**
+5. クラウド・ダッシュボード: **変更なし**（[wire.py](../lambda/common/wire.py) が
+   `sample_format=1` に対応済みであることをテストで確認）
 
 ## 6. 検証（[design.md](design.md#L110-L112) の不変条件）
 
 この順に通すまで実戦投入しない。
 
-1. `pio run -e sensortest` でシリアルキャプチャ
+0. `pio run -e adxl355-sensortest -t upload && pio device monitor` で
+   `[sensor] ADXL355 ready` が出るか（出なければ配線かCSを疑う）
+1. `python tools/capture_serial.py` でシリアルキャプチャ
 2. `python tools/backtest.py cap.csv` で `tools/jismo` と**数値照合**
 3. 静穏区間を数時間流し、[noise.md](noise.md) と同じ手順で ASD を出す
 

@@ -15,14 +15,28 @@
 
 #include "Batch.h"
 #include "Display.h"
+#ifdef NAMZ_SENSOR_ADXL355
+#include "Adxl355.h"
+#else
 #include "Iis3dhhc.h"
+#endif
 #include "Shindo.h"
 #include "TimeSync.h"
 #include "Uploader.h"
 #include "config.h"
 
 static SPIClass gSpi(VSPI);
-static Iis3dhhc gSensor(gSpi, kPinCsIis3dhhc, kSpiClockHz);
+// センサはビルド時に選ぶ（-DNAMZ_SENSOR_ADXL355）。CSが別ピンなので、比較のため
+// 両方を同じバスにぶら下げたままファームだけ焼き分けてもよい。
+#ifdef NAMZ_SENSOR_ADXL355
+static constexpr int kPinCsSensor = kPinCsAdxl355;
+static constexpr const char* kSensorName = "ADXL355";
+static Adxl355 gSensor(gSpi, kPinCsSensor, kSpiClockHz);
+#else
+static constexpr int kPinCsSensor = kPinCsIis3dhhc;
+static constexpr const char* kSensorName = "IIS3DHHC";
+static Iis3dhhc gSensor(gSpi, kPinCsSensor, kSpiClockHz);
+#endif
 static Shindo gShindo;
 static Display gDisplay;
 
@@ -98,17 +112,17 @@ static void samplingTask(void*) {
 
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
-      cur = new Batch(kBatchSamples);
+      cur = new Batch(kBatchSamples, gSensor.sampleFormat());
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
         delete cur;
         cur = nullptr;
       } else {
-        cur->begin(ts, gSensor.sensorType(), gSensor.sampleFormat(),
-                   gSensor.scaleMgPerLsb(), kSampleRateHz, kDeviceId);
+        cur->begin(ts, gSensor.sensorType(), gSensor.scaleMgPerLsb(),
+                   kSampleRateHz, kDeviceId);
       }
     }
     if (cur) {
-      cur->addSample((int16_t)raw.x, (int16_t)raw.y, (int16_t)raw.z);
+      cur->addSample(raw.x, raw.y, raw.z);
       if (cur->isFull()) {
         if (xQueueSend(gBatchQueue, &cur, 0) != pdTRUE) {
           // 送信タスクが詰まっている: uploaderに直接渡す代わりに破棄回避のため待たない。
@@ -211,11 +225,11 @@ void setup() {
   gDisplay.begin(kDeviceId);
   pinMode(kPinButtonFlip, INPUT_PULLUP);
 
-  gSpi.begin(kPinSck, kPinMiso, kPinMosi, kPinCsIis3dhhc);
+  gSpi.begin(kPinSck, kPinMiso, kPinMosi, kPinCsSensor);
   if (!gSensor.begin()) {
-    Serial.println("[sensor] IIS3DHHC not found! (WHO_AM_I mismatch)");
+    Serial.printf("[sensor] %s not found! (ID mismatch)\n", kSensorName);
   } else {
-    Serial.println("[sensor] IIS3DHHC ready");
+    Serial.printf("[sensor] %s ready\n", kSensorName);
   }
 
   // watchdog: 10秒。WDT APIは ESP-IDF のメジャーバージョンで異なる。
@@ -235,6 +249,12 @@ void setup() {
   gUploader.begin();
   xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0);
 #endif
+
+  // バッチ1本のRAM量はセンサのサンプル幅で倍違う（int16 18KB / int32 36KB）。
+  // kMaxRamBatches が実機のヒープに収まっているかを起動時に見えるようにしておく。
+  Serial.printf("[mem] free heap %u, batch %u B x %u\n", ESP.getFreeHeap(),
+                (unsigned)(kBatchSamples * (gSensor.sampleFormat() == 1 ? 12 : 6)),
+                (unsigned)kMaxRamBatches);
 
   // 測定タスクは Core1 に高優先度で固定
   xTaskCreatePinnedToCore(samplingTask, "sampling", 8192, nullptr, 10, &gSamplingTask, 1);

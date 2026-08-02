@@ -23,7 +23,13 @@ static constexpr uint32_t kBatchSamples = kSampleRateHz * kBatchSeconds;  // 300
 
 // --- 送信キュー / ローカルバッファ ---
 // RAM上に保持する未送信バッチ数。これを超えたら LittleFS へ退避する。
+// ADXL355 は int32 サンプル(12B/sample = 36KB/batch)なので本数を減らす。
+// 6本だとヒープが持たない（WiFiスタックぶんを引くと 150KB 前後しか空かない）。
+#ifdef NAMZ_SENSOR_ADXL355
+static constexpr uint32_t kMaxRamBatches = 3;
+#else
 static constexpr uint32_t kMaxRamBatches = 6;
+#endif
 static constexpr const char* kSpillDir = "/spill";
 static constexpr uint32_t kMaxSpillBatches = 20000;  // 90日ぶんの上限目安
 
@@ -43,7 +49,9 @@ static constexpr int kPinSck = 25;
 static constexpr int kPinMiso = 27;
 static constexpr int kPinMosi = 26;
 static constexpr int kPinCsIis3dhhc = 33;
-static constexpr uint32_t kSpiClockHz = 8000000;  // 8MHz
+// ADXL355 は別CSにしておく。比較フェーズで同じバスに両方ぶら下げても衝突しない。
+static constexpr int kPinCsAdxl355 = 32;
+static constexpr uint32_t kSpiClockHz = 8000000;  // 8MHz（ADXL355の上限10MHzにも収まる）
 
 // --- ボタン（TTGO T-Display 左ボタン=GPIO0。押すと画面反転）---
 // GPIO0は起動時のストラップだが、起動後の押下ではブートローダに入らない。
