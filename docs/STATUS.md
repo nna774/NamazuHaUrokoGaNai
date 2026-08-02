@@ -160,7 +160,8 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       （削除する / 無効フラグを立てる）。退役後に watchdog が延々と欠測通知しないように、
       台帳から外すか監視対象外にする運用を決める。`tools/flag_event.py` 相当の手元CLIで
       台帳を編集する形が素直か
-- [ ] OTA更新
+- [ ] OTA更新（作戦・工数見積り・落とし穴は [ota.md](ota.md)。土台はできている＝
+      既定パーティションが app0/app1 構成でスロットに余裕あり）
 - [ ] （イベントが数万件規模になったら）DynamoDB時刻レンジGSIで本格ページング
 - [ ] （気が向いたら）ADXL355 への差し替え
 
