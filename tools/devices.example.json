@@ -1,0 +1,18 @@
+{
+  "_comment": "tools/devices.json にコピーして使う。実ファイルはHMAC鍵を含むのでgitignore対象。provision_device.py が唯一の読み手。",
+  "ingest_url": "https://xxxxx.lambda-url.ap-northeast-1.on.aws/",
+  "alert_url": "https://xxxxx.lambda-url.ap-northeast-1.on.aws/alert",
+  "default_wifi_ssid": "your-ssid",
+  "default_wifi_pass": "your-pass",
+  "devices": [
+    {
+      "id": 1,
+      "label": "湯沢-IIS3DHHC",
+      "sensor": "iis3dhhc",
+      "env": "esp32dev",
+      "wifi_ssid": "your-ssid",
+      "wifi_pass": "your-pass",
+      "hmac_secret": "change-me-64-hex-chars"
+    }
+  ]
+}

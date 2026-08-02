@@ -2,6 +2,10 @@
 # apply 前に必ず ./build_lambda.sh を実行すること。
 locals {
   build_dir = "${path.module}/builds"
+  # デバイス個別のHMAC鍵。署名検証をするのは ingest だけなので ingest にしか渡さない。
+  device_secret_env = {
+    for id, secret in var.device_hmac_secrets : "NAMZ_HMAC_SECRET_${id}" => secret
+  }
   common_env = merge(local.lambda_env, {
     NAMZ_HMAC_SECRET        = var.hmac_secret
     NAMZ_SLACK_WEBHOOK_URL  = var.slack_webhook_url
@@ -23,7 +27,7 @@ resource "aws_lambda_function" "ingest" {
   memory_size      = 256
 
   environment {
-    variables = local.common_env
+    variables = merge(local.common_env, local.device_secret_env)
   }
 }
 

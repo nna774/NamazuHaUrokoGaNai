@@ -1,7 +1,14 @@
 # cp terraform.tfvars.example terraform.tfvars して埋める
 region            = "ap-northeast-1"
 project           = "namazu"
-hmac_secret       = "change-me-32bytes-random-secret" # firmware secrets.h と一致させる
+hmac_secret       = "change-me-32bytes-random-secret" # 共通鍵（下に載っていない device_id 用のフォールバック）
+
+# デバイス個別の鍵。`python tools/provision_device.py tfvars` の出力を貼る。
+# tools/devices.json（gitignore対象）が単一の真実で、ここはその写し。
+# device_hmac_secrets = {
+#   "1" = "..."  # 湯沢-IIS3DHHC
+#   "2" = "..."  # 湯沢-ADXL355
+# }
 slack_webhook_url = "https://hooks.slack.com/services/XXX/YYY/ZZZ"
 slack_channel     = "#nona-kanshi" # 通知先(レガシーwebhookのみ上書き可)。空ならwebhook既定先
 gyazo_token       = "" # Gyazoアクセストークン(scope public)。確定報に波形画像を添える。空なら画像なし

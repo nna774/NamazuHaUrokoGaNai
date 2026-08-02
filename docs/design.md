@@ -156,22 +156,34 @@ artificial を立てる）。
 「安くしたい」の答えはCPUを削る（シングルコア化）ことではなく、**LCDを外して無印
 デュアルコアDevKitにすること**。時刻精度を賭けてまでコアを削る価値はない。
 
-### 将来: 多点運用時のデバイス払い出し（予想・未実装）
+### 多点運用時のデバイス払い出し
 
 多点化すると `secrets.h`(必ず個体差) と `config.h`(ボード/センサで変わる) の管理が問題に
-なる。まだ実装していないが、落とし所は以下だろうという予想を残す。
+なる。`tools/provision_device.py` + `tools/devices.json` で解いた。
 
-- **変動軸を混ぜない**。個体差(`kDeviceId`・`kHmacSecret`・場所ごとのWiFi)は *生成* 対象、
-  ボード差(ピン・TFT・単/デュアルコア)は *platformio.ini の `[env:]`*、センサ差は
-  *コンパイル時フラグ/env* と、機構を分ける。`config.h` 全体を生成するのは筋が悪い
-  ——形(定数・閾値)として残し、生成するのは個体差だけに絞る。
-- **HMAC秘密は両面**。`kHmacSecret` は ingest が検証するので、払い出しはファーム側
-  (`secrets.h`)だけでなくサーバ側(`namazu-devices`)への登録と対で行う必要がある。片面だけ
-  だと必ずズレて認証が通らない。
-- **デバイスマニフェストを単一の真実にする**。`devices.yaml` 的な1ファイル(id, board,
-  sensor, wifi, secret)から、(1) `secrets.h` 生成、(2) 焼くべき `[env:]` の選択、
-  (3) サーバ登録、の3本を導出する。Makefile はこれらを `make flash DEVICE=namazu-02`
-  で束ねる薄いオーケストレーション層になる見込み。
+- **変動軸を混ぜない**。個体差(`kDeviceId`・`kHmacSecret`・場所ごとのWiFi)だけを *生成*
+  対象にする。ボード差(ピン・TFT)とセンサ差は `platformio.ini` の `[env:]` が持つので、
+  マニフェストは「どの env で焼くか」だけを覚える。`config.h` は生成しない
+  ——形(定数・閾値)として残す。
+- **HMAC秘密は両面**。`kHmacSecret` は ingest が検証するので、ファーム側(`secrets.h`)と
+  サーバ側(ingest Lambda の環境変数 `NAMZ_HMAC_SECRET_<id>`)への登録を対で行う必要がある。
+  片面だけだと必ずズレて認証が通らない。だから**同じ1ファイルから両方を出す**。
+- **デバイスマニフェストが単一の真実**。`tools/devices.json`（鍵を含むので gitignore 対象。
+  雛形は `devices.example.json`）から、(1) `secrets.h` 生成、(2) 焼くべき `[env:]` の選択、
+  (3) `terraform.tfvars` の `device_hmac_secrets` 生成、の3本を導出する。
+
+```bash
+python tools/provision_device.py add --id 2 --label 2号機 --sensor adxl355  # 鍵を生成
+python tools/provision_device.py secrets-h --id 2 --force                   # ファーム側
+python tools/provision_device.py tfvars                                     # サーバ側
+cd firmware && pio run -e "$(python ../tools/provision_device.py env --id 2)" -t upload
+```
+
+**サーバ側を先に apply してから焼く。** 逆順にすると、新しい鍵を持つデバイスの署名を
+ingest が検証できず 401 になる（未登録の device_id は共通鍵 `hmac_secret` で検証される）。
+
+YAML ではなく JSON にしたのは、`tools/` に PyYAML 依存を持ち込まないため。コメントが
+書けないぶん `label` と `_comment` で補う。
 
 ## 送信の信頼性
 

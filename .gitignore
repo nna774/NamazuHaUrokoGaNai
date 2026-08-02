@@ -5,6 +5,9 @@ firmware/.piolibdeps/
 firmware/.vscode/
 firmware/**/secrets.h
 
+# デバイスマニフェスト（HMAC鍵を含む。雛形は devices.example.json）
+tools/devices.json
+
 # Python
 __pycache__/
 *.py[cod]

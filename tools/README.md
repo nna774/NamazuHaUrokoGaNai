@@ -33,6 +33,13 @@ python backtest.py cap.csv --trace
 # ファーム用のFIR係数ヘッダを生成
 python gen_fir_header.py   # -> firmware/lib/Shindo/JmaFirTaps.h
 
+# デバイス払い出し（devices.json が単一の真実。詳細は docs/design.md）
+python provision_device.py list
+python provision_device.py add --id 2 --label 2号機 --sensor adxl355  # HMAC鍵を生成
+python provision_device.py secrets-h --id 2 --force                   # ファーム側
+python provision_device.py tfvars                                     # サーバ側（tfvarsへ貼る）
+python provision_device.py env --id 2                                 # 焼くenv名
+
 # 確定イベントに人工地震（テスト等）フラグを立てる/降ろす（DynamoDBを直接更新）
 export NAMZ_EVENTS_TABLE=namz-events   # or --table
 python flag_event.py mark   0001-59462454        # このイベントを人工地震に
@@ -48,6 +55,10 @@ python flag_event.py list                        # 立っているものを一�
 （checked かつ未確定）のイベントは一覧の既定フィルタで元々隠れているので、人工地震
 フラグを立てる意味があるのは実質確定済みだけ。非確定まで一律に付けるのは手間のわりに
 効果がない。明示的に「非確定も含めて全部」と言われた時だけ `--confirmed-only` を外す。
+
+`provision_device.py` の `devices.json` は **HMAC鍵を含むので gitignore 対象**（雛形は
+`devices.example.json`）。**サーバ側を apply してから焼くこと。** 逆順だと新しい鍵の
+署名を ingest が検証できず 401 になる。
 
 `flag_event.py` は AWS 認証情報（通常の boto3 の解決）で DynamoDB を直接更新する。
 フラグを立てたイベントはダッシュボードの一覧では隠れ（「全件」表示でのみ薄く出る）、

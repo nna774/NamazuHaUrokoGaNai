@@ -29,7 +29,18 @@ variable "raw_retention_days" {
 variable "hmac_secret" {
   type        = string
   sensitive   = true
-  description = "デバイスと共有する HMAC 鍵。firmware secrets.h と一致させる。"
+  description = "全デバイス共通の HMAC 鍵（フォールバック）。device_hmac_secrets に無い device_id はこれで検証される。"
+}
+
+variable "device_hmac_secrets" {
+  type        = map(string)
+  sensitive   = true
+  default     = {}
+  description = <<-EOT
+    device_id => HMAC 鍵。ingest の環境変数 NAMZ_HMAC_SECRET_<id> になる（lambda/common/auth.py）。
+    キーはファームの kDeviceId を10進文字列にしたもの（X-Namz-Device と同じ表記）。
+    tools/provision_device.py tfvars の出力をそのまま貼る。マニフェストと片面だけ更新すると認証が落ちる。
+  EOT
 }
 
 variable "slack_webhook_url" {

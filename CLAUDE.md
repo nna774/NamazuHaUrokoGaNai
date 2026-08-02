@@ -50,6 +50,9 @@
     落ちている間は `NAMZ_OFFLINE_RENOTIFY_S`(既定1日)ごとに再送、受信再開で復帰通知。
     欠測状態(`offline_notified_at_us`)は watchdog だけが書き、ingestの受信系フィールドとは
     互いに素なのでUpdateItemで分ければ競合しない。状態遷移は `devices.evaluate()` に集約。
+- **デバイスの払い出しは `tools/devices.json` が単一の真実**（gitignore対象・鍵を含む）。
+  `tools/provision_device.py` が `secrets.h` / `terraform.tfvars` の `device_hmac_secrets` /
+  焼く `[env:]` の3本を導出する。**サーバ側を apply してから焼く**（逆順だと 401）。
 - **api Lambda(Function URL)は認証なし・読み取り専用**。書き込み(フラグ操作等)は手元から
   DynamoDBを直接更新する `tools/flag_event.py` で行う。api は `/devices`・`/devices/<id>` で
   デバイス生存も返す。
