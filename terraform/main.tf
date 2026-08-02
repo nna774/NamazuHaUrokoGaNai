@@ -13,7 +13,7 @@ locals {
     NAMZ_OFFLINE_AFTER_S = tostring(var.offline_after_seconds)
     # データ遅延の警告値。watchdog の遅延判定と api の /devices（ダッシュボードの
     # 背景色警告）で揃える。
-    NAMZ_LAG_AFTER_S = tostring(var.lag_after_seconds)
-    NAMZ_DASHBOARD_URL   = local.custom_domain_enabled ? "https://${var.dashboard_domain}" : "https://${aws_cloudfront_distribution.dashboard.domain_name}"
+    NAMZ_LAG_AFTER_S   = tostring(var.lag_after_seconds)
+    NAMZ_DASHBOARD_URL = local.custom_domain_enabled ? "https://${var.dashboard_domain}" : "https://${aws_cloudfront_distribution.dashboard.domain_name}"
   }
 }
