@@ -17,6 +17,7 @@ gyazo_token       = "" # Gyazoアクセストークン(scope public)。確定報
 detect_threshold      = 0.5
 detect_hold_seconds   = 2.0
 detect_window_seconds = 120
+detect_stride_seconds = 30 # 窓の再評価の刻み[秒]。0でバッチ到着ごと。15秒バッチ機を30秒バッチ機と同じ頻度に揃える
 raw_retention_days    = 90
 
 # 通知の閾値（イベント記録とは別。k > l を推奨）

@@ -78,6 +78,12 @@ variable "detect_window_seconds" {
   default = 120
 }
 
+variable "detect_stride_seconds" {
+  type        = number
+  default     = 30
+  description = "detect が窓を再評価する刻み[秒]。0でバッチ到着ごと。既定30は15秒バッチ機(ADXL355)を30秒バッチ機と同じ評価頻度に揃える値。確定報が最大この秒数遅れる。実効窓長(window-10s)に切り詰められる。"
+}
+
 variable "notify_prompt_min" {
   type        = number
   default     = 3.0

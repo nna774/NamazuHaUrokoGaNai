@@ -52,6 +52,7 @@ resource "aws_lambda_function" "detect" {
       NAMZ_DETECT_THRESHOLD = tostring(var.detect_threshold)
       NAMZ_DETECT_HOLD_S    = tostring(var.detect_hold_seconds)
       NAMZ_DETECT_WINDOW_S  = tostring(var.detect_window_seconds)
+      NAMZ_DETECT_STRIDE_S  = tostring(var.detect_stride_seconds)
       # 波形クイックルック画像の配信に使う（画像生成は detect だけ）。
       NAMZ_GYAZO_TOKEN = var.gyazo_token
     })
