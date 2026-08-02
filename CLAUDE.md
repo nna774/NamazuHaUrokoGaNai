@@ -58,6 +58,12 @@
 - **デバイスの払い出しは `tools/devices.json` が単一の真実**（gitignore対象・鍵を含む）。
   `tools/provision_device.py` が `secrets.h` / `terraform.tfvars` の `device_hmac_secrets` /
   焼く `[env:]` の3本を導出する。**サーバ側を apply してから焼く**（逆順だと 401）。
+  - 「単一の真実」は**編集の入口が1つ**という意味で、原本がここにしか無いという意味ではない。
+    HMAC鍵の実体はクラウド側に平文で2箇所ある（S3の terraform state / ingest Lambda の
+    環境変数 `NAMZ_HMAC_SECRET_<id>`。KMS暗号化していない）。マニフェストを失っても
+    `aws lambda get-function-configuration` と `terraform output` から再生成できるので、
+    **鍵のローテートや実機の焼き直しは不要**。復元できないのは WiFi パスワードだけ。
+    Secrets Manager や KMS へ移す改修をする時は、この復元経路が消えることに注意。
 - **api Lambda(Function URL)は認証なし・読み取り専用**。書き込み(フラグ操作等)は手元から
   DynamoDBを直接更新する `tools/flag_event.py` で行う。api は `/devices`・`/devices/<id>` で
   デバイス生存も返す。
