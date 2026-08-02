@@ -182,6 +182,10 @@ static void connectWifi() {
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
     delay(250);
+    // 最大20秒ブロックするので、ウォッチドッグ(10秒)に登録済みのタスクから
+    // 呼ばれると待っているだけで panic する。未登録タスクから呼ばれた場合は
+    // ESP_ERR_NOT_FOUND が返るだけで無害。
+    esp_task_wdt_reset();
     Serial.print('.');
   }
   Serial.printf("\n[wifi] %s\n",
@@ -193,12 +197,18 @@ static void uploaderTask(void*) {
   esp_task_wdt_add(nullptr);
   uint32_t lastResync = 0;
 
+  // このタスクは1周の中でネットワーク待ちを何度もする。TLS接続のタイムアウトは
+  // 1回あたり5秒あり、回線が詰まると「速報送信で5秒＋バッチ送信で5秒」で簡単に
+  // ウォッチドッグの10秒を超える（実機で panic 再起動した）。タスクはハングして
+  // おらず、ソケットを待っているだけなので、ブロックしうる呼び出しの前後で
+  // 明示的に餌をやる。ここを削ると回線が詰まった時に限って再起動する。
   for (;;) {
     esp_task_wdt_reset();
 
     // WiFi再接続
     if (WiFi.status() != WL_CONNECTED) {
       connectWifi();
+      esp_task_wdt_reset();
     }
     // NTP再同期（間接: SNTPが自動pollするので明示不要だが接続回復時に備え）
     if (millis() - lastResync > kNtpResyncSeconds * 1000UL) {
@@ -214,10 +224,12 @@ static void uploaderTask(void*) {
     AlertMsg m;
     while (xQueueReceive(gAlertQueue, &m, 0) == pdTRUE) {
       bool ok = gUploader.sendAlert(m.us, m.intensity, m.peak);
+      esp_task_wdt_reset();
       Serial.printf("[alert] I=%.1f peak=%.2fgal sent=%d\n", m.intensity, m.peak, ok);
     }
 
     gUploader.pump();
+    esp_task_wdt_reset();
     delay(50);
   }
 }
