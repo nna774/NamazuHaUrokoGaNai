@@ -37,13 +37,19 @@ import argparse
 import os
 import re
 import sys
+from pathlib import Path
 
 import boto3
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import awsenv  # noqa: E402
 
 EVENT_ID_RE = re.compile(r"\d{4}-\d{1,16}")
 
 
 def _table(name: str):
+    # 手順書は AWS_REGION、boto3 が見るのは AWS_DEFAULT_REGION。ここで吸収する。
+    awsenv.ensure_region()
     return boto3.resource("dynamodb").Table(name)
 
 

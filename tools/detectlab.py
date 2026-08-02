@@ -94,15 +94,19 @@ def resolve_bucket(explicit: str | None) -> str:
 def load_s3_window(bucket: str, end_us: int, seconds: float,
                    device_id: int) -> tuple[np.ndarray, int, float]:
     from common import store  # 遅延import。CSV経路ではboto3/AWSに触れない。
+    import awsenv
     import boto3
 
+    awsenv.ensure_region()
     return store.load_window(boto3.client("s3"), bucket, end_us, seconds, device_id)
 
 
 def load_s3_event(bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
     from common import store
+    import awsenv
     import boto3
 
+    awsenv.ensure_region()
     return store.load_event(boto3.client("s3"), bucket, eid)
 
 

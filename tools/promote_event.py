@@ -32,6 +32,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))          # jismo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lambda"))  # common
 
+import awsenv  # noqa: E402  上の sys.path 追加が要る
+
 JST = ZoneInfo("Asia/Tokyo")
 
 
@@ -97,9 +99,7 @@ def main(argv=None) -> int:
     if not args.table:
         raise SystemExit("テーブル名が未指定。--table か環境変数 NAMZ_EVENTS_TABLE を設定しろ")
     os.environ["NAMZ_EVENTS_TABLE"] = args.table  # events._table() が参照する
-    # boto3 の resource() は AWS_DEFAULT_REGION を見る。AWS_REGION だけの環境でも通す。
-    if os.environ.get("AWS_REGION") and not os.environ.get("AWS_DEFAULT_REGION"):
-        os.environ["AWS_DEFAULT_REGION"] = os.environ["AWS_REGION"]
+    awsenv.ensure_region()  # 手順書は AWS_REGION、boto3 が見るのは AWS_DEFAULT_REGION
 
     import boto3
     from common import detect_core, events, s3util, store
