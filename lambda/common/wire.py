@@ -24,10 +24,15 @@ TLV_HEADER_SIZE = struct.calcsize(TLV_HEADER_FMT)
 TRAILER_SENSOR_TEMP = 1
 
 # ADXL355 の内蔵温度の換算（データシートの公称値）。
-#   温度[℃] = 25 + (TEMP_AT_25C - raw) / LSB_PER_DEGC
-# 部品ごとのばらつきが大きく**絶対値は当てにならない**。ドリフトとの相関を見る
-# 用途（相対変化）にのみ使うこと。ファームは生値のまま送る。
-ADXL355_TEMP_AT_25C = 1852.0
+#   温度[℃] = 25 + (raw - TEMP_AT_25C) / LSB_PER_DEGC
+# 公称値であって校正値ではない。部品ごとのばらつきがあるので**絶対値は当てにならない**。
+# ドリフトとの相関を見る用途（相対変化）にのみ使うこと。ファームは生値のまま送る。
+#
+# 1885 は ADXL355 の値。**1852 は ADXL359 のもので、混同しやすい**
+# （ADI のデモコード ADuCM360_demo_adxl355_pmdz は 1852 を使っており誤り）。
+# 出典: Linux drivers/iio/accel/adxl355_core.c の adxl35x_chip_info[]。
+# ADXL355 = 1885 / ADXL359 = 1852 とチップ別に書き分けられている。
+ADXL355_TEMP_AT_25C = 1885.0
 ADXL355_TEMP_LSB_PER_DEGC = -9.05
 
 

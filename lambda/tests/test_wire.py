@@ -97,3 +97,12 @@ def test_adxl355_temp_conversion_is_relative():
     assert wire.adxl355_temp_c(wire.ADXL355_TEMP_AT_25C) == pytest.approx(25.0)
     # LSBが増える向きは温度が下がる向き（傾きが負）
     assert wire.adxl355_temp_c(wire.ADXL355_TEMP_AT_25C + 9.05) == pytest.approx(24.0)
+
+
+def test_adxl355_temp_intercept_is_not_the_adxl359_value():
+    """1852 は ADXL359 の切片。取り違えると常時 3.6℃ ずれる。
+
+    出典: Linux drivers/iio/accel/adxl355_core.c（ADXL355=1885 / ADXL359=1852）。
+    ADI のデモコード(ADuCM360_demo_adxl355_pmdz)が 1852 を使っているので混同しやすい。
+    """
+    assert wire.ADXL355_TEMP_AT_25C == 1885.0
