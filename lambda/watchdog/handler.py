@@ -19,7 +19,7 @@ import datetime as dt
 import os
 import time
 
-from common import devices, notify
+from batch_uplink import devices, notify
 
 # 生存とみなす最終受信からの猶予[s]。バッチは30秒間隔なので、既定300秒＝約10バッチ落ち。
 OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))

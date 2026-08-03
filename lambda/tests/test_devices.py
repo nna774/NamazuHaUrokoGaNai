@@ -4,7 +4,7 @@ DynamoDBに触れず、純粋な判定ロジック（オンライン→欠測→
 時刻はすべて us。しきい値 offline=5分, 再送=1日 を基準にする。
 """
 
-from common import devices
+from batch_uplink import devices
 
 OFFLINE = 300_000_000        # 5分[us]
 RENOTIFY = 86_400_000_000    # 1日[us]

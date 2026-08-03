@@ -102,7 +102,8 @@ def main(argv=None) -> int:
     awsenv.ensure_region()  # 手順書は AWS_REGION、boto3 が見るのは AWS_DEFAULT_REGION
 
     import boto3
-    from common import detect_core, events, s3util, store
+    from batch_uplink import s3util
+    from common import detect_core, events, store
     from jismo import jma_fft
     from jismo.rounding import intensity_scale
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from . import s3util, wire
+from batch_uplink import s3util
+
+from . import wire
 
 
 def get_batch(s3, bucket: str, key: str) -> wire.Batch:

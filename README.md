@@ -45,6 +45,13 @@ Qiita記事「地震観測用加速度センサ5種の性能比較」
 detect Lambda はこれを共有する。ファームウェアの C++ 実装(`firmware/lib/Shindo`)は
 これに対して数値照合してから使う。
 
+送信基盤（バッチのバッファ・HMAC署名POST・LittleFS退避とバックフィル・NTP同期・
+デバイス生存台帳・通知）は地震に依存しないので
+[batch-uplink](https://github.com/nna774/batch-uplink) に切り出し、周波数モニタ
+[Electabuzz](https://github.com/nna774/Electabuzz) と共有している。C++ は
+`firmware/platformio.ini` の `lib_deps`、Python は `terraform/build_lambda.sh` の
+`UPLINK_VERSION` で、いずれも**タグで pin する**。
+
 ## 実装フェーズ
 
 1. **センサ検証** — SPIドライバ + 100Hzサンプリング + シリアル出力。静置ノイズが計測震度0近傍か確認 (`tools/`)

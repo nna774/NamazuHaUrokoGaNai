@@ -16,7 +16,9 @@ from urllib.parse import unquote_plus
 
 import boto3
 
-from common import detect_core, events, imagehost, notify, quicklook, s3util, store
+from batch_uplink import notify, s3util
+
+from common import detect_core, events, imagehost, quicklook, store
 from jismo.rounding import intensity_scale, scale_ordinal
 
 s3 = boto3.client("s3")

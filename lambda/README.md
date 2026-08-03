@@ -16,15 +16,31 @@ Python。計測震度は `tools/jismo`（FFT版・numpyのみ）を共有する�
 | module | 内容 |
 |--------|------|
 | `wire.py`        | バッチのバイナリ形式パース（firmware `lib/NamzWire/WireFormat.h` と一致） |
-| `auth.py`        | HMAC-SHA256 検証 |
-| `s3util.py`      | S3キー組み立て・時間範囲の列挙 |
 | `store.py`       | raw/ からバッチを読み時間窓を連結 |
 | `detect_core.py` | 検知の純関数（jismo使用・副作用なし・バックテスト可能） |
 | `events.py`      | DynamoDBイベント管理（デバイス速報とクラウド確定報の突合・重複排除） |
-| `devices.py`     | デバイス生存台帳（ingestが最終受信をupsert・watchdogが欠測判定・apiが読む） |
-| `notify.py`      | Notifier差し替え（Slack初期実装。Discord等を足すなら from_env に分岐追加） |
 | `quicklook.py`   | 確定報に添える波形クイックルックPNGの描画（detectのみ・Pillow使用） |
 | `imagehost.py`   | PNGを公開URLに載せる配信層（Gyazo初期実装。S3等に替えるならここに分岐追加） |
+
+## 共有ライブラリ (`batch_uplink`)
+
+地震に依存しない部分は [batch-uplink](https://github.com/nna774/batch-uplink) に切り出して
+周波数モニタ [Electabuzz](https://github.com/nna774/Electabuzz) と共有している。
+`from batch_uplink import ...` で使う。**タグで pin する**（版は
+[terraform/build_lambda.sh](../terraform/build_lambda.sh) の `UPLINK_VERSION`）。
+
+| module | 内容 |
+|--------|------|
+| `auth.py`        | HMAC-SHA256 検証 |
+| `s3util.py`      | S3キー組み立て・時間範囲の列挙 |
+| `devices.py`     | デバイス生存台帳（ingestが最終受信をupsert・watchdogが欠測判定・apiが読む） |
+| `notify.py`      | Notifier差し替え（Slack初期実装。Discord等を足すなら from_env に分岐追加） |
+
+手元でテストを回すには venv に入れておくこと。
+
+```bash
+.venv/bin/pip install --no-deps "git+https://github.com/nna774/batch-uplink@v1.0.0"
+```
 
 ## 環境変数
 

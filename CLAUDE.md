@@ -33,6 +33,21 @@
 
 ## 知っておくべき不変条件
 
+- **送信基盤は [batch-uplink](https://github.com/nna774/batch-uplink) に切り出してある**。
+  C++ の `Batch`/`Uploader`/`TimeSync`、Python の `auth`/`devices`/`notify`/`s3util` は
+  このレポには**もう無い**。周波数モニタ [Electabuzz](https://github.com/nna774/Electabuzz)
+  と共有している。
+  - **必ずタグで pin しろ。`#master` や `@master` にするな。** 向こうのために入れた変更が
+    こちらの次回ビルドで黙って混入し、「何も変えていないのに再ビルドで壊れる」という
+    最悪の壊れ方をする。版は `firmware/platformio.ini` の `lib_deps` と
+    `terraform/build_lambda.sh` の `UPLINK_VERSION` の**2箇所。上げるなら揃えろ**。
+  - **ワイヤ形式は共有しない。** `Batch` は「ヘッダ領域 + 固定長レコード列 + tail」しか
+    知らない。magic・32バイトヘッダ・TLVトレイラーを知っているのは `firmware/lib/NamzWire`
+    だけで、ヘッダを書くのは**サンプルを積み終えた後**（`sample_count` が確定するのが
+    そこだから）。`firmware/test/run.sh` がバイト等価を守る（golden は切り出し前の実出力）。
+  - Lambda の zip は pip を**2回に分けて**呼ぶ。`--platform` は `--only-binary=:all:` を
+    要求するが `git+` はソースツリーなので同一呼び出しに混ぜると失敗する。
+  - 手元でテストを回すには `.venv/bin/pip install --no-deps "git+...@<tag>"` が要る。
 - **計測震度ロジックの単一の真実は `tools/jismo/`**。detect Lambda はこれを共有し、
   ファームのC++実装(`firmware/lib/Shindo`)は `tools/backtest.py` で数値照合してから使う。
   - 照合は**合成波か実イベントの波形で行う**。FFT版は記録全体・FIR版は60秒移動窓なので、

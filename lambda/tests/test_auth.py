@@ -3,7 +3,7 @@ import hmac
 
 import pytest
 
-from common import auth
+from batch_uplink import auth
 
 
 def test_verify_ok(monkeypatch):

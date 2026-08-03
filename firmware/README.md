@@ -19,15 +19,21 @@ ESP32-D0WDQ6 (WROOM-32 系) + IIS3DHHC。PlatformIO / Arduino core。
 | `Iis3dhhc`    | IIS3DHHC SPIドライバ（レジスタ直叩き） |
 | `Adxl355`     | ADXL355 SPIドライバ（`-DNAMZ_SENSOR_ADXL355` で選択。[docs/adxl355.md](../docs/adxl355.md)） |
 | `Shindo`      | リアルタイム計測震度（FIR。`tools/jismo/realtime.py` の写経） |
-| `Batch`       | 送信バッファ（ヘッダ領域 + 固定長レコード列 + tail）。**ワイヤ形式を知らない** |
 | `NamzWire`    | NAMZ形式を `Batch` に載せる薄い層（32Bヘッダ・3軸サンプル・TLVトレイラー） |
-| `Uploader`    | 送信キュー・LittleFS退避・リトライ・HMAC署名 |
-| `TimeSync`    | NTP(smooth同期) |
 | `Display`     | 内蔵TFTへの表示（震度階級・ステート・WiFi等） |
 
-`Batch`・`Uploader`・`TimeSync` は地震計固有の知識を持たない。周波数モニタ
-[Electabuzz](https://github.com/nna774/Electabuzz) と共有ライブラリ `batch-uplink`
-として切り出す前提で、ワイヤ形式の知識を `NamzWire` 側へ寄せてある。この分離が
+## 共有ライブラリ (`batch-uplink`)
+
+`Batch`（送信バッファ）・`Uploader`（キュー/LittleFS退避/リトライ/HMAC署名）・
+`TimeSync`（NTP）は地震計固有の知識を持たないので、
+[batch-uplink](https://github.com/nna774/batch-uplink) に切り出して周波数モニタ
+[Electabuzz](https://github.com/nna774/Electabuzz) と共有している。
+
+`platformio.ini` の `lib_deps` で**タグを指して pin する**。`#master` にすると
+向こうのために入れた変更がこちらの次回ビルドで黙って混入し、「何も変えていないのに
+再ビルドで壊れる」という最悪の壊れ方をする。
+
+ワイヤ形式（magic・ヘッダ・TLV）を知っているのは `NamzWire` だけ。この分離が
 崩れていないことは `test/run.sh` が守る。
 
 ## テスト (`test/`)

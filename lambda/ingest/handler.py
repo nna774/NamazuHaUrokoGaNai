@@ -14,7 +14,9 @@ import time
 
 import boto3
 
-from common import auth, devices, events, notify, s3util, wire
+from batch_uplink import auth, devices, notify, s3util
+
+from common import events, wire
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")

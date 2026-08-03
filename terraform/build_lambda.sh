@@ -12,6 +12,10 @@ BUILD="$HERE/builds"
 
 PY="${PYTHON:-python3}"
 
+# 共有ライブラリ batch-uplink のバージョン。ここを上げるときは firmware/platformio.ini
+# の lib_deps も揃えること（同じコードの両面なので、片方だけ動かすと食い違う）。
+UPLINK_VERSION="v1.0.0"
+
 rm -rf "$BUILD"
 mkdir -p "$BUILD"
 
@@ -31,6 +35,12 @@ build_one() {
     --implementation cp --python-version 3.12 --abi cp312 \
     --only-binary=:all: \
     --target "$stage" numpy $extra_pkgs >/dev/null
+  # 送信基盤の共通部分(auth/devices/notify/s3util)。**必ず pip を分けて呼ぶこと。**
+  # --platform は --only-binary=:all: を要求するが git+ はソースツリーなので
+  # 両立しない。共通部分が numpy に依存しないおかげでこの分離が成立している。
+  # **タグで pin する。** #master にすると周波数モニタ側の変更が黙って混入する。
+  "$PY" -m pip install --quiet --no-deps \
+    --target "$stage" "git+https://github.com/nna774/batch-uplink@$UPLINK_VERSION" >/dev/null
   # __pycache__ 除去
   find "$stage" -name '__pycache__' -type d -prune -exec rm -rf {} +
   (cd "$stage" && zip -qr "$BUILD/$fn.zip" .)
