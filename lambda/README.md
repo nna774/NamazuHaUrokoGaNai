@@ -15,7 +15,7 @@ Python。計測震度は `tools/jismo`（FFT版・numpyのみ）を共有する�
 
 | module | 内容 |
 |--------|------|
-| `wire.py`        | バッチのバイナリ形式パース（firmware WireFormat.h と一致） |
+| `wire.py`        | バッチのバイナリ形式パース（firmware `lib/NamzWire/WireFormat.h` と一致） |
 | `auth.py`        | HMAC-SHA256 検証 |
 | `s3util.py`      | S3キー組み立て・時間範囲の列挙 |
 | `store.py`       | raw/ からバッチを読み時間窓を連結 |

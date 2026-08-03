@@ -24,8 +24,10 @@ class Uploader {
   // 送信を1歩進める（送信タスクから周期的に呼ぶ）。送れたら true。
   bool pump();
 
-  // デバイス速報を即時POST。失敗は握りつぶす（速報は best-effort）。
-  bool sendAlert(uint64_t detectedAtUs, float intensity, float peakGal);
+  // 速報を即時POST。失敗は握りつぶす（速報は best-effort）。
+  // 本文はプロジェクト固有なので呼び出し側が組む（震度・最大加速度といった
+  // 中身をここに置くと、この層が地震計専用になり他プロジェクトと共有できない）。
+  bool sendAlert(const char* json, size_t len);
 
   size_t ramQueued() const { return ram_.size(); }
   size_t spillCount() const { return spillCount_; }

@@ -148,8 +148,8 @@ ADXL355 の生値（3.9 µg/LSB）を素で int16 に入れると **±0.128g = 1
 
 - `sample_format=1`（int32）は **[wire.py](../lambda/common/wire.py#L60-L65) が既に対応済み・
   クラウド側の変更はゼロ**。ヘッダが感度もビット幅も運ぶ設計のため。
-- 要る改修は firmware だけ: [Batch](../firmware/lib/Batch/Batch.h#L26) が `kSampleBytes=6`・
-  `addSample(int16_t...)` の int16 固定。12B/int32 に対応させる。
+- 要る改修は firmware だけ: 当時の `Batch` は `kSampleBytes=6`・`addSample(int16_t...)` の
+  int16 固定だった。12B/int32 に対応させる。
 - **RAM注意**: 36KB × `kMaxRamBatches=6` = **216KB**。実機のヒープで要確認。
   足りなければ `kMaxRamBatches` を落とすか、`>>3` に逃げる。
 - どちらでも丸め（量子化）は律速にならない。間引き後RMSは int32 で ≈26 LSB、
@@ -170,7 +170,8 @@ ADXL355 の生値（3.9 µg/LSB）を素で int16 に入れると **±0.128g = 1
    （[platformio.ini](../firmware/platformio.ini) の `adxl355` / `adxl355-sensortest` env）。
    **残: `secrets.h` の `kDeviceId` を2台目の値にする**
 4. ~~[Batch](../firmware/lib/Batch/Batch.h) の int32 対応~~ 済み（int32 案を採用）。
-   サンプル幅はコンストラクタの `sampleFormat` で決まる。
+   サンプル幅は [namzwire::newBatch()](../firmware/lib/NamzWire/NamzWire.h) に渡す
+   `sampleFormat` で決まる（`Batch` 自体はレコード幅しか知らない）。
    併せて `kMaxRamBatches` を ADXL355 ビルドでは 3 に落とした（36KB×6=216KB は
    WiFiスタックを引いたヒープに入らない）。**起動時の `[mem] free heap` を実機で確認する**
 5. クラウド・ダッシュボード: **変更なし**（[wire.py](../lambda/common/wire.py) が

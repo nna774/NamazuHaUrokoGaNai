@@ -15,6 +15,7 @@
 
 #include "Batch.h"
 #include "Display.h"
+#include "NamzWire.h"
 #ifdef NAMZ_SENSOR_ADXL355
 #include "Adxl355.h"
 #else
@@ -112,24 +113,27 @@ static void samplingTask(void*) {
 
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
-      cur = new Batch(kBatchSamples, gSensor.sampleFormat());
+      cur = namzwire::newBatch(kBatchSamples, gSensor.sampleFormat());
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
         delete cur;
         cur = nullptr;
       } else {
-        cur->begin(ts, gSensor.sensorType(), gSensor.scaleMgPerLsb(),
-                   kSampleRateHz, kDeviceId);
+        cur->begin(ts);
         // 温度はバッチ先頭の1点だけ載せる。架台の熱ドリフトは分〜時間の時定数で
         // 動くので、30秒に1点あれば傾きは追える。
         uint16_t temp = 0;
         if (gSensor.readTemperatureRaw(temp)) {
-          cur->addTrailer(kTrailerSensorTemp, &temp, sizeof(temp));
+          namzwire::addTrailer(*cur, kTrailerSensorTemp, &temp, sizeof(temp));
         }
       }
     }
     if (cur) {
-      cur->addSample(raw.x, raw.y, raw.z);
+      namzwire::addSample(*cur, raw.x, raw.y, raw.z);
       if (cur->isFull()) {
+        // ヘッダはここで書く。sample_count が確定するのが「積み終えた後」だから。
+        // Batch はワイヤ形式を知らないので、この一手だけがNAMZ形式を作っている。
+        namzwire::fillHeader(*cur, gSensor.sensorType(), gSensor.scaleMgPerLsb(),
+                             kSampleRateHz, kDeviceId);
         if (xQueueSend(gBatchQueue, &cur, 0) != pdTRUE) {
           // 送信タスクが詰まっている: uploaderに直接渡す代わりに破棄回避のため待たない。
           // batchQueueは十分な深さを持たせている前提。溢れたら最古を諦める。
@@ -223,7 +227,15 @@ static void uploaderTask(void*) {
     // alertQueue -> 即時送信
     AlertMsg m;
     while (xQueueReceive(gAlertQueue, &m, 0) == pdTRUE) {
-      bool ok = gUploader.sendAlert(m.us, m.intensity, m.peak);
+      // 速報の本文は地震計固有なのでここで組む（Uploader は運びかたしか知らない）。
+      char json[256];
+      int n = snprintf(json, sizeof(json),
+                       "{\"device_id\":%u,\"detected_at_us\":%llu,"
+                       "\"realtime_intensity\":%.2f,\"peak_gal\":%.3f,"
+                       "\"kind\":\"device_prompt\"}",
+                       (unsigned)kDeviceId, (unsigned long long)m.us,
+                       m.intensity, m.peak);
+      bool ok = gUploader.sendAlert(json, n);
       esp_task_wdt_reset();
       Serial.printf("[alert] I=%.1f peak=%.2fgal sent=%d\n", m.intensity, m.peak, ok);
     }

@@ -2,6 +2,7 @@
 // バッチのバイナリ形式 v1。docs/wire_format.md と一致させること。
 // ESP32・Lambda(Python) ともリトルエンディアン前提。
 
+#include <cstddef>
 #include <cstdint>
 
 static constexpr uint32_t kWireMagic = 0x4E414D5A;  // "NAMZ"

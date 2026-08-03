@@ -19,10 +19,27 @@ ESP32-D0WDQ6 (WROOM-32 系) + IIS3DHHC。PlatformIO / Arduino core。
 | `Iis3dhhc`    | IIS3DHHC SPIドライバ（レジスタ直叩き） |
 | `Adxl355`     | ADXL355 SPIドライバ（`-DNAMZ_SENSOR_ADXL355` で選択。[docs/adxl355.md](../docs/adxl355.md)） |
 | `Shindo`      | リアルタイム計測震度（FIR。`tools/jismo/realtime.py` の写経） |
-| `Batch`       | ワイヤフォーマットのエンコード |
+| `Batch`       | 送信バッファ（ヘッダ領域 + 固定長レコード列 + tail）。**ワイヤ形式を知らない** |
+| `NamzWire`    | NAMZ形式を `Batch` に載せる薄い層（32Bヘッダ・3軸サンプル・TLVトレイラー） |
 | `Uploader`    | 送信キュー・LittleFS退避・リトライ・HMAC署名 |
 | `TimeSync`    | NTP(smooth同期) |
 | `Display`     | 内蔵TFTへの表示（震度階級・ステート・WiFi等） |
+
+`Batch`・`Uploader`・`TimeSync` は地震計固有の知識を持たない。周波数モニタ
+[Electabuzz](https://github.com/nna774/Electabuzz) と共有ライブラリ `batch-uplink`
+として切り出す前提で、ワイヤ形式の知識を `NamzWire` 側へ寄せてある。この分離が
+崩れていないことは `test/run.sh` が守る。
+
+## テスト (`test/`)
+
+`Batch`・`NamzWire` は Arduino に依存しないのでホストで走る。実機もPlatformIOも要らない。
+
+```bash
+firmware/test/run.sh
+```
+
+`test_batch_bytes.cpp` は **`Batch` を一般化する前の実装から採取した実出力**を golden に
+持っている。送出バイト列が1バイトも変わっていないことを、焼かずに確かめるためのもの。
 
 `lib/Shindo/JmaFirTaps.h` は生成物。係数を変えたら:
 

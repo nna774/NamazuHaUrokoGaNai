@@ -118,14 +118,8 @@ bool Uploader::postBatch(const uint8_t* body, size_t len) {
   return ok;
 }
 
-bool Uploader::sendAlert(uint64_t detectedAtUs, float intensity, float peakGal) {
+bool Uploader::sendAlert(const char* json, size_t len) {
   if (WiFi.status() != WL_CONNECTED) return false;
-  char json[256];
-  int n = snprintf(json, sizeof(json),
-                   "{\"device_id\":%u,\"detected_at_us\":%llu,"
-                   "\"realtime_intensity\":%.2f,\"peak_gal\":%.3f,"
-                   "\"kind\":\"device_prompt\"}",
-                   (unsigned)deviceId_, (unsigned long long)detectedAtUs, intensity, peakGal);
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
@@ -133,8 +127,8 @@ bool Uploader::sendAlert(uint64_t detectedAtUs, float intensity, float peakGal) 
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Namz-Device", String(deviceId_));
   http.addHeader("X-Namz-Signature",
-                 hmacSha256Hex(hmacSecret_, (const uint8_t*)json, n).c_str());
-  int code = http.POST((uint8_t*)json, n);
+                 hmacSha256Hex(hmacSecret_, (const uint8_t*)json, len).c_str());
+  int code = http.POST((uint8_t*)const_cast<char*>(json), len);
   http.end();
   return code >= 200 && code < 300;
 }
