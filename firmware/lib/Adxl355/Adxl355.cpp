@@ -50,6 +50,11 @@ bool Adxl355::read(AccelSample& out) {
   out.x = decode(buf + 0);
   out.y = decode(buf + 3);
   out.z = decode(buf + 6);
+  // 3軸すべてが厳密に0になるのは重力がある限り物理的にありえない
+  // （必ずどれかの軸に1g前後が乗る）。SPI配線の接触不良でMISOが読めていない時に
+  // 出るパターンで、実機のADXL355機で観測済み（配線を触っていないのに自然回復した）。
+  // 疑わしい読みはこのサンプルだけ捨て、オーバーサンプリング平均を汚さない。
+  if (out.x == 0 && out.y == 0 && out.z == 0) return false;
   return true;
 }
 
