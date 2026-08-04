@@ -32,6 +32,9 @@ LAG_RENOTIFY_S = float(os.environ.get("NAMZ_LAG_RENOTIFY_S", "86400"))
 
 JST = dt.timezone(dt.timedelta(hours=9))
 
+# watchdog の通知は見落とすと実害が大きいのでメンションを付ける。
+SLACK_MENTION = "<@U0323ESK6> "
+
 
 def _humanize(seconds: float) -> str:
     s = int(seconds)
@@ -73,14 +76,14 @@ def handler(event, context):
                 title = "デバイス欠測" if action == "offline" else "デバイス欠測（継続）"
                 n.notify(
                     title,
-                    f"device *{did:04d}* から *{age}* データが来ていない。落ちているかもしれない。",
+                    f"{SLACK_MENTION}device *{did:04d}* から *{age}* データが来ていない。落ちているかもしれない。",
                     {"最終受信": _fmt_time(last), "経過": age},
                 )
                 devices.mark_offline_notified(did, now_us)
             elif action == "recovery":
                 n.notify(
                     "デバイス復帰",
-                    f"device *{did:04d}* がデータ送信を再開した。",
+                    f"{SLACK_MENTION}device *{did:04d}* がデータ送信を再開した。",
                     {"最終受信": _fmt_time(last)},
                 )
                 devices.clear_offline(did)
@@ -95,7 +98,7 @@ def handler(event, context):
                 title = "データ遅延" if lag_action == "lag" else "データ遅延（継続）"
                 n.notify(
                     title,
-                    f"device *{did:04d}* のデータが *{lag}* 遅れている。"
+                    f"{SLACK_MENTION}device *{did:04d}* のデータが *{lag}* 遅れている。"
                     "受信は続いているが測定時刻が追いついていない（時計ずれか追いつき中）。",
                     {"最新データ時刻": _fmt_time(last_batch), "遅延": lag},
                 )
@@ -103,7 +106,7 @@ def handler(event, context):
             elif lag_action == "lag_recovery":
                 n.notify(
                     "データ遅延解消",
-                    f"device *{did:04d}* のデータ遅延が解消した。",
+                    f"{SLACK_MENTION}device *{did:04d}* のデータ遅延が解消した。",
                     {"最新データ時刻": _fmt_time(last_batch)},
                 )
                 devices.clear_lag(did)
