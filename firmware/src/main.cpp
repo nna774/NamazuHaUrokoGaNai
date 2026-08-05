@@ -1,12 +1,13 @@
 // NamazuHaUrokoGaNai ファームウェア本体。
 //
 // Core1: 測定タスク（100Hzサンプリング + リアルタイム震度 + 検知）
-// Core0: 送信タスク（バッチPOST / NTP / リトライ・バックフィル / WiFi再接続）
+// Core0: 送信タスク（バッチPOST / NTP / リトライ・バックフィル / WiFi再接続 / OTA更新）
 //
 // NAMZ_SENSOR_TEST を定義してビルドすると WiFi/送信を行わず
 // シリアルに "t_us,x,y,z" を出すだけ（tools/capture_serial.py 用・Phase1）。
 
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
@@ -63,6 +64,8 @@ struct AlertMsg {
 
 static QueueHandle_t gBatchQueue;  // Batch*
 static QueueHandle_t gAlertQueue;  // AlertMsg
+
+static char gOtaHostname[16];  // "namazu-<id>"
 #endif
 
 static TaskHandle_t gSamplingTask;
@@ -201,6 +204,43 @@ static void connectWifi() {
                 WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "FAILED");
 }
 
+// --- OTA更新（ArduinoOTA、LAN内push。docs/ota.md）---
+// フラッシュ書き込み中はキャッシュが無効になり両コアの命令フェッチが止まるため、
+// 100Hzの測定タイマーは転送中に確実に取りこぼす。転送開始時点で一旦止め、RAMキュー
+// のバッチはLittleFSへ退避してから焼く（電源断・パニックでも失わないようにする）。
+static void otaOnStart() {
+  Serial.println("[ota] start: pausing sampling, flushing queue to spill");
+  esp_timer_stop(gSampleTimer);
+  // タイマーを止めるとsamplingTaskへの通知も止まり、自分でesp_task_wdt_reset()を
+  // 呼べなくなる。転送が終わる（成功時は再起動、失敗時はotaOnErrorで再開）まで
+  // ウォッチドッグの監視対象から一時的に外す。
+  esp_task_wdt_delete(gSamplingTask);
+  Batch* b = nullptr;
+  while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) gUploader.enqueue(b);
+  size_t flushed = gUploader.flushToSpill();
+  Serial.printf("[ota] flushed %u batch(es) to spill\n", (unsigned)flushed);
+}
+
+static void otaOnProgress(unsigned int done, unsigned int total) {
+  // 転送は呼び出し元(uploaderTask)のループ内で丸ごとブロックするので、ここで
+  // 都度リセットしないとタスクウォッチドッグ(10秒)に落ちる。
+  esp_task_wdt_reset();
+  static uint8_t lastPct = 255;
+  uint8_t pct = total ? (uint8_t)(done * 100U / total) : 0;
+  if (pct != lastPct) {
+    Serial.printf("[ota] progress %u%%\n", pct);
+    lastPct = pct;
+  }
+}
+
+static void otaOnError(ota_error_t error) {
+  // 成功時はArduinoOTAが自分でESP.restart()するのでここには来ない。
+  // 失敗時は測定を止めたままにしないよう再開する。
+  Serial.printf("[ota] error %u: resuming sampling\n", (unsigned)error);
+  esp_task_wdt_add(gSamplingTask);
+  esp_timer_start_periodic(gSampleTimer, kReadPeriodUs);
+}
+
 // --- 送信タスク（Core0）---
 static void uploaderTask(void*) {
   esp_task_wdt_add(nullptr);
@@ -224,6 +264,10 @@ static void uploaderTask(void*) {
     if (millis() - lastResync > kNtpResyncSeconds * 1000UL) {
       lastResync = millis();
     }
+
+    // OTA更新の待ち受け。通常は着信確認だけの軽い呼び出しだが、実際に転送が
+    // 始まると完了までこの呼び出し内でブロックする（otaOnProgressでWDTを養う）。
+    ArduinoOTA.handle();
 
     // batchQueue -> uploader
     Batch* b = nullptr;
@@ -249,19 +293,24 @@ static void uploaderTask(void*) {
     gUploader.pump();
     esp_task_wdt_reset();
 
-    // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、未送信キュー
-    // （RAM＋LittleFS退避）を出し切ってから再起動する。Uploaderの不変条件
-    // 「2xxが返るまでバッチを捨てない」を再起動要求でも破らないため。
+    // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、RAMキューを
+    // LittleFSへ退避してからすぐ再起動する（OTAのotaOnStartと同じ安全策。
+    // 通信を待たないので数秒で落とせる）。退避済みデータはUploaderの不変条件
+    // 「2xxが返るまで捨てない」どおり、再起動後の通常のバックフィルで送信が続く。
     if (!restartRequested && gUploader.lastResponseHeaderValue() == "1") {
       restartRequested = true;
-      Serial.println("[uploader] restart requested by server, draining queue first");
+      Serial.println("[uploader] restart requested by server, flushing queue to spill");
     }
-    if (restartRequested && gUploader.ramQueued() == 0 && gUploader.spillCount() == 0) {
-      Serial.println("[uploader] queue drained, restarting now");
-      Serial.flush();
-      esp_task_wdt_reset();
-      delay(200);
-      ESP.restart();
+    if (restartRequested) {
+      // gBatchQueueはこの周のループ冒頭で既にuploaderへ吸い出し済み。
+      gUploader.flushToSpill();
+      if (gUploader.ramQueued() == 0) {
+        Serial.println("[uploader] queue flushed to spill, restarting now");
+        Serial.flush();
+        esp_task_wdt_reset();
+        delay(200);
+        ESP.restart();
+      }
     }
 
     delay(50);
@@ -299,6 +348,17 @@ void setup() {
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
   gUploader.begin();
+
+  // OTA更新（docs/ota.md）。ArduinoOTA.handle()はuploaderTask（Core0）で回す。
+  snprintf(gOtaHostname, sizeof(gOtaHostname), "namazu-%u", (unsigned)kDeviceId);
+  ArduinoOTA.setHostname(gOtaHostname);
+  ArduinoOTA.setPassword(kOtaPassword);
+  ArduinoOTA.onStart(otaOnStart);
+  ArduinoOTA.onProgress(otaOnProgress);
+  ArduinoOTA.onError(otaOnError);
+  ArduinoOTA.begin();
+  Serial.printf("[ota] ready as %s.local\n", gOtaHostname);
+
   xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0);
 #endif
 
