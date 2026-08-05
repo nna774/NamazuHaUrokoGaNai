@@ -59,9 +59,14 @@ RAMキューへ無制限に積み増す）とし、Electabuzz 側の挙動は変
   Manufacturer 85 / Device 2018、Detected flash size = 16MB**（MAC `5c:01:3b:07:b3:f8`）。
   想定していた既定4MBの4倍あり、littlefs領域を大きく確保してもOTA用の2アプリ枠を
   削らずに済む容量があると分かった。
-  `large_spiffs_16MB.csv`（app0/app1 各4.5MB、spiffs 約6.875MB）を採用すると、
-  spill満杯までは 7,208,960 / 18,432 ≈ 391本 × 15秒 ≈ **約98分**まで伸ばせる
-  （現状の4MB前提・約19.5分から約5倍）。この変更は `adxl355` env にのみ適用する。
+- 現在のファームのビルドサイズは約994KB（4MB版パーティションでFlash使用21.6%）。
+  最初は framework 既定の `large_spiffs_16MB.csv`（app0/app1 各4.5MB）で試して
+  ビルドが通ることを確認したが、994KBのビルドに4.5MB枠は過大と分かり、
+  `firmware/partitions_adxl355_16mb.csv`（app0/app1 各2MB＝現状の約2倍の余裕、
+  spiffs 約11.88MB）へ**切り替えた**。この構成でも `pio run -e adxl355` は成功する
+  （Flash使用48.6%）。spill満杯までは 12,451,840 / 18,432 ≈ 675本 × 15秒 ≈
+  **約168.8分（約2時間49分）**まで伸びる（現状の4MB前提・約19.5分から約8.7倍）。
+  この変更は `adxl355` env にのみ適用する。
 
 ## 次に何が可能になったか
 
@@ -69,5 +74,10 @@ batch-uplink 側での実装（spill満杯時に古いデータから捨てる�
 Namazu側でのdevice2向けパーティション拡張（16MB・`large_spiffs_16MB`ベース）の
 両方に着手できる。Namazu 側の `firmware/platformio.ini` のタグpinと
 `terraform/build_lambda.sh` の `UPLINK_VERSION` は、batch-uplink 側のPRがマージされ
-タグが切られてから追従する。device1（`esp32dev` env）のパーティション拡張は、
-実チップ容量を物理確認してから判断する。
+タグが切られてから追従する。
+
+**TODO: device1（`esp32dev` env）も同じボードのはずなので、いずれ現物を
+`esptool.py --port <port> flash_id` で物理確認する。** 16MBだった場合は、
+device2と同じ `firmware/partitions_adxl355_16mb.csv` 相当の拡張パーティション
+（`large_spiffs_16MB`ベース）を焼き直す時に当てられる（ファイル名は
+device1用に切り出すか汎用名にリネームするか、その時に判断する）。

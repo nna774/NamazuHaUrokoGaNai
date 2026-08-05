@@ -1,0 +1,15 @@
+# device2実機（ADXL355機）向け。esptool flash_idで実チップが16MBと物理確認済み
+# （docs/log/2026-08-05-device2-spill-overflow.md）。既定は4MB用テーブルしか無く、
+# spiffs(=littlefsのspill領域)が約1.4MBしか取れないため専用に用意する。
+#
+# OTA用の app0/app1 は各2MB（現在のビルドサイズ約994KB＝Flash使用21.6%の約2倍の余裕）。
+# framework既定の large_spiffs_16MB.csv は app0/app1 が各4.5MBもあり、この機体には
+# 過大（OTAは今のところ未実装でもある）なので、そのぶんをspillに回す。
+#
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x200000,
+app1,     app,  ota_1,   0x210000,0x200000,
+spiffs,   data, spiffs,  0x410000,0xBE0000,
+coredump, data, coredump,0xFF0000,0x10000,

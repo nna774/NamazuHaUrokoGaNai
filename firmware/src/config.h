@@ -42,7 +42,6 @@ static constexpr uint32_t kMaxRamBatches = 3;
 static constexpr uint32_t kMaxRamBatches = 6;
 #endif
 static constexpr const char* kSpillDir = "/spill";
-static constexpr uint32_t kMaxSpillBatches = 20000;  // 90日ぶんの上限目安
 
 // --- リアルタイム検知 ---
 // リアルタイム震度がこの値以上の状態が kAlertHoldSeconds 続いたらデバイス速報を出す。
