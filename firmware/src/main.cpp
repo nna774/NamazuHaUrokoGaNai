@@ -351,11 +351,19 @@ void loop() {
       clock = "--/-- --:--:--";
     }
 #ifdef NAMZ_SENSOR_TEST
-    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, status, bg, clock);
+    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, 0, status, bg, clock);
 #else
     bool wifi = WiFi.status() == WL_CONNECTED;
     String ip = wifi ? WiFi.localIP().toString() : String("");
-    gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, gUploader.spillCount(),
+    uint32_t backlog = gUploader.spillCount() + gUploader.ramQueued();
+    uint32_t backlogAgeS = 0;
+    uint64_t oldestUs;
+    if (backlog > 0 && timesync::isSynced() &&
+        gUploader.oldestQueuedStartUs(oldestUs)) {
+      uint64_t nowUs = timesync::nowUs();
+      backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
+    }
+    gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, backlog, backlogAgeS,
                     status, bg, clock);
 #endif
   }
