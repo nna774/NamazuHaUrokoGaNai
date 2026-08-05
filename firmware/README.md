@@ -7,7 +7,7 @@ ESP32-D0WDQ6 (WROOM-32 系) + IIS3DHHC。PlatformIO / Arduino core。
 | task | core | 役割 |
 |------|------|------|
 | `sampling` | 1 | esp_timerで100Hz起床 → SPI読み → バッチ蓄積 → リアルタイム震度 → 検知 |
-| `uploader` | 0 | バッチのHTTPS POST / NTP / リトライ・バックフィル / WiFi再接続 |
+| `uploader` | 0 | バッチのHTTPS POST / NTP / リトライ・バックフィル / WiFi再接続 / OTA更新の待ち受け |
 
 測定と送信を別コアに分けているので、送信でブロックしても測定は止まらない。
 
@@ -85,6 +85,16 @@ pio run -e sensortest -t upload            # ADXL355機は -e adxl355-sensortest
 python ../tools/capture_serial.py --sensor iis3dhhc \
     --port /dev/tty.usbserial-XXXX --seconds 60 > cap.csv
 python ../tools/backtest.py cap.csv
+```
+
+### OTA更新（USBを繋がず無線で焼く）
+
+詳細は [docs/ota.md](../docs/ota.md)。ArduinoOTA(LAN内push)。
+
+```bash
+NAMZ_OTA_PASSWORD="$(python ../tools/provision_device.py ota-password --id 2)" \
+    pio run -e "$(python ../tools/provision_device.py env --id 2)-ota" -t upload \
+    --upload-port namazu-2.local     # or IPアドレス直指定
 ```
 
 ### 書き込めない時

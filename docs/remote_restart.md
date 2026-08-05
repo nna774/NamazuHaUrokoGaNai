@@ -19,10 +19,10 @@ python tools/request_restart.py list        # 要求が立っているデバイ�
 ```
 
 要求を立てると、そのデバイスが次にバッチを送信した時（既定30秒周期）に気づき、
-未送信キューを出し切ってから自分で再起動する。正常なら30〜40秒（次のバッチ送信＋
-ブート）で復帰するので、watchdog Lambda の欠測通知（既定300秒）は鳴らない。鳴ったら
-再起動シーケンス自体が失敗しているということ（OTAの落とし穴と同じ考え方、
-[ota.md](ota.md) §3参照）。
+RAMキューをLittleFSへ退避してからすぐ自分で再起動する（通信を待たないので数秒で
+落ちる）。正常なら次のバッチ送信＋ブートの30〜40秒程度で復帰するので、watchdog
+Lambda の欠測通知（既定300秒）は鳴らない。鳴ったら再起動シーケンス自体が失敗して
+いるということ（OTAの落とし穴と同じ考え方、[ota.md](ota.md) §5参照）。
 
 ## 採用した経路: バッチ送信レスポンスへの便乗
 
@@ -57,12 +57,21 @@ python tools/request_restart.py list        # 要求が立っているデバイ�
 ### firmware側の安全な再起動シーケンス
 
 `Uploader` の不変条件は「**2xxが返るまでバッチを捨てない**」
-（`Uploader.h` 冒頭コメント）。再起動要求を受け取っても即 `ESP.restart()` せず、
-送信タスク（Core0, `uploaderTask`）内で:
+（`Uploader.h` 冒頭コメント）。RAM上のバッチは再起動で消えるので、まず
+LittleFSへ退避してから初めて捨ててよい状態になる。再起動要求を受け取っても即
+`ESP.restart()` せず、送信タスク（Core0, `uploaderTask`）内で:
 
-1. `restartRequested` フラグを立てるだけで、通常どおり `pump()` を回し続ける
-2. 毎周のループで `Uploader::ramQueued()` / `spillCount()` が両方 0 になったのを
-   確認したら（未送信分を出し切ったら）`esp_task_wdt_reset()` を挟みつつ `ESP.restart()`
+1. `restartRequested` フラグを立てる
+2. 毎周のループで `Uploader::flushToSpill()`（[ota.md](ota.md) §4で追加した
+   batch-uplink [v1.4.0](https://github.com/nna774/batch-uplink/releases/tag/v1.4.0)
+   のAPI）を呼びRAMキューを即座にLittleFSへ退避する
+3. `Uploader::ramQueued() == 0` になったら（退避し切ったら）`esp_task_wdt_reset()`
+   を挟みつつ `ESP.restart()`
+
+**通信の完了(2xx)は待たない。** 退避済みデータは再起動後、通常のバックフィルで
+送信が続くので不変条件は破らない。当初は「実際に送り切るまで待つ」設計だったが、
+OTA向けに `flushToSpill()` を作った際、同じ安全策をリモート再起動にも使うよう
+配線し直した（通信状況に関わらず数秒で再起動できるようになった）。
 
 測定タスク（Core1, 優先度10, `samplingTask`）は特別扱いしない。プロセス全体が
 再起動するので最終的に一緒に落ちる。
