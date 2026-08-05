@@ -47,8 +47,9 @@ static volatile float gDispPeakGal = 0.0f;
 static volatile uint32_t gLastShakeMs = 0;  // 瞬時合成加速度がしきい値を超えた最終時刻
 
 #ifndef NAMZ_SENSOR_TEST
+// spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 static Uploader gUploader(kIngestUrl, kAlertUrl, kHmacSecret, kDeviceId,
-                          kMaxRamBatches, kSpillDir);
+                          kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true);
 
 struct AlertMsg {
   uint64_t us;
