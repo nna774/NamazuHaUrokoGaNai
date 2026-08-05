@@ -12,9 +12,11 @@ def manifest(**over):
         "alert_url": "https://ingest.example/alert",
         "devices": [
             {"id": 1, "label": "湯沢-IIS3DHHC", "sensor": "iis3dhhc", "env": "esp32dev",
-             "wifi_ssid": "ssid1", "wifi_pass": "pass1", "hmac_secret": "aa" * 32},
+             "wifi_ssid": "ssid1", "wifi_pass": "pass1", "hmac_secret": "aa" * 32,
+             "ota_password": "cc" * 16},
             {"id": 2, "label": "湯沢-ADXL355", "sensor": "adxl355", "env": "adxl355",
-             "wifi_ssid": "ssid2", "wifi_pass": "pass2", "hmac_secret": "bb" * 32},
+             "wifi_ssid": "ssid2", "wifi_pass": "pass2", "hmac_secret": "bb" * 32,
+             "ota_password": "dd" * 16},
         ],
     }
     m.update(over)
@@ -25,6 +27,12 @@ def test_new_secret_is_64_hex_chars():
     s = pd.new_secret()
     assert re.fullmatch(r"[0-9a-f]{64}", s)
     assert pd.new_secret() != s
+
+
+def test_new_ota_password_is_32_hex_chars():
+    s = pd.new_ota_password()
+    assert re.fullmatch(r"[0-9a-f]{32}", s)
+    assert pd.new_ota_password() != s
 
 
 def test_validate_rejects_duplicate_id():
@@ -41,14 +49,22 @@ def test_validate_rejects_missing_secret():
         pd.validate(m)
 
 
+def test_validate_rejects_missing_ota_password():
+    m = manifest()
+    m["devices"][1]["ota_password"] = ""
+    with pytest.raises(ValueError, match="足りない"):
+        pd.validate(m)
+
+
 def test_secrets_h_has_every_field_the_firmware_needs():
     """secrets.h.example と同じ定数が全部出ること。欠けるとビルドが落ちる。"""
     text = pd.render_secrets_h(manifest(), manifest()["devices"][1])
     for name in ("kWifiSsid", "kWifiPass", "kIngestUrl", "kAlertUrl",
-                 "kDeviceId", "kHmacSecret"):
+                 "kDeviceId", "kHmacSecret", "kOtaPassword"):
         assert name in text, name
     assert "kDeviceId = 2;" in text
     assert "bb" * 32 in text
+    assert "dd" * 16 in text
     assert "ssid2" in text
 
 

@@ -39,6 +39,7 @@ python provision_device.py add --id 2 --label 2号機 --sensor adxl355  # HMAC�
 python provision_device.py secrets-h --id 2 --force                   # ファーム側
 python provision_device.py tfvars                                     # サーバ側（tfvarsへ貼る）
 python provision_device.py env --id 2                                 # 焼くenv名
+python provision_device.py ota-password --id 2                        # OTA(espota)認証パスワード
 
 # 確定イベントに人工地震（テスト等）フラグを立てる/降ろす（DynamoDBを直接更新）
 export NAMZ_EVENTS_TABLE=namz-events   # or --table
