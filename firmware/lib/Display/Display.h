@@ -19,7 +19,8 @@ class Display {
   //  peakGal   : 直近のフィルタ後合成加速度[gal]
   //  wifi      : WiFi接続済みか
   //  ip        : IPアドレス文字列（未接続なら空）
-  //  backlog   : 未送信の退避バッチ数（0が正常）
+  //  backlog   : 未送信バッチ数（RAMキュー+退避ファイル、0が正常）
+  //  backlogAgeS : 未送信キューの最古バッチの経過秒（backlog=0なら意味を持たない）
   //  status    : 継続ステート文字列（"ACTIVE 12s" 等）
   //  bgColor   : 画面全体の背景色。継続ステートを遠目でも判別できるよう、
   //              idle/closing/active で色を変えて渡す。文字色は背景の輝度から
@@ -27,8 +28,8 @@ class Display {
   //  clock     : 上中央に出す日時文字列（"07/14 12:34:56" 等）。毎フレーム
   //              更新されるので、フリーズしていないことの目視確認にもなる。
   void render(float intensity, float peakGal, bool wifi, const String& ip,
-              uint32_t backlog, const String& status, uint16_t bgColor,
-              const String& clock);
+              uint32_t backlog, uint32_t backlogAgeS, const String& status,
+              uint16_t bgColor, const String& clock);
 
   // 震度階級のASCII表記（"0".."4","5-","5+","6-","6+","7"）。
   static const char* scaleAscii(float intensity);

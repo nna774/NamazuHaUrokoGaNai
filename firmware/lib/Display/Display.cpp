@@ -62,8 +62,8 @@ const char* Display::scaleAscii(float i) {
 }
 
 void Display::render(float intensity, float peakGal, bool wifi, const String& ip,
-                     uint32_t backlog, const String& status, uint16_t bgColor,
-                     const String& clock) {
+                     uint32_t backlog, uint32_t backlogAgeS, const String& status,
+                     uint16_t bgColor, const String& clock) {
   if (!ready_) return;
   const int w = tft_.width();
   const int h = tft_.height();
@@ -74,7 +74,7 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
   const uint16_t bg = bg_;
   const uint16_t fg = contrastText(bg);  // 背景に応じた基準文字色
 
-  char buf[24];
+  char buf[32];
 
   // 日時（上中央）。毎フレーム更新されるのでフリーズ検知にもなる。
   // NAMAZU(左)とWiFi(右)の間に収めるため font1 を使う。
@@ -144,7 +144,13 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
   tft_.setTextDatum(BR_DATUM);
   tft_.setTextPadding(90);
   if (backlog > 0) {
-    snprintf(buf, sizeof(buf), "buf:%lu", (unsigned long)backlog);
+    if (backlogAgeS < 60) {
+      snprintf(buf, sizeof(buf), "buf:%lu %lus", (unsigned long)backlog,
+               (unsigned long)backlogAgeS);
+    } else {
+      snprintf(buf, sizeof(buf), "buf:%lu %lum", (unsigned long)backlog,
+               (unsigned long)(backlogAgeS / 60));
+    }
   } else if (wifi && ip.length()) {
     snprintf(buf, sizeof(buf), "%s", ip.c_str());
   } else {
