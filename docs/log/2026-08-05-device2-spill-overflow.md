@@ -28,13 +28,14 @@ RAMキューへ無制限に積み増す）とし、Electabuzz 側の挙動は変
 
 ## 却下した代替案
 
-- **OTA用アプリ枠（`app1`, 1.25MB）を削ってlittlefsに回す案は、今は採らない。**
+- **OTA用アプリ枠（`app1`）を削ってlittlefsに回す案は、今は採らない。**
   OTA は未実装（[docs/ota.md](../ota.md)）だが将来やる計画があり、OTA用の2アプリ枠は
-  容量に余裕があれば残しておきたいとユーザーが明示したため。
-- **実フラッシュチップがesp32dev既定の4MBより大きい前提でのパーティション拡張は、今は着手しない。**
-  TTGO T-Display系クローンは4MB以外の容量の個体も流通しており、実容量は
-  `esptool.py --port <port> flash_id` で物理確認しないと分からない。誤って大きい値を
-  宣言すると起動が壊れるため、確認できるまでは踏み込まない。
+  容量に余裕があれば残しておきたいとユーザーが明示したため。16MB確定後もこの方針は
+  変えていない（後述の通り両方成立する容量があるので、削る理由自体が消えた）。
+- **device1（`esp32dev` env）にも device2 と同じ16MB前提のパーティションを適用する案は、
+  今は採らない。** device1の実チップ容量は今回まだ物理確認していない。TTGO T-Display系
+  クローンは個体差があり、同じ型番でも同じ容量とは限らないため、`esp32dev` 共通部には
+  手を出さず `adxl355` env（＝device2専用）だけに閉じて変更する。
 
 ## 発見された制約
 
@@ -42,6 +43,8 @@ RAMキューへ無制限に積み増す）とし、Electabuzz 側の挙動は変
   `Uploader` の挙動変更はデフォルト値を変えない形でしか入れられない。
 - OTA未実装のため、パーティションテーブルの変更はファーム再ビルド＋物理再書き込みが要る。
   稼働中の device2 には次に現物を触れるタイミングでしか反映できない（リモートでは直せない）。
+- フラッシュ容量は個体ごとに実測が要る。**esp32dev既定=4MBという思い込みは、device2の
+  実チップでは外れていた**（後述）。同型番のクローンでも device1 が同じとは限らない。
 
 ## 新たに確認できた事実
 
@@ -52,9 +55,19 @@ RAMキューへ無制限に積み増す）とし、Electabuzz 側の挙動は変
 - device1(IIS3DHHC, int16, 30秒/バッチ)と device2(ADXL355, int32, 15秒/バッチ)は
   バッチサイズがどちらも約18KB/本に揃うよう `kBatchSeconds` が調整済み
   （`firmware/src/config.h` のコメント参照）。
+- **device2の実機を `esptool.py flash_id` で物理確認した。ESP32-D0WDQ6 v1.1、
+  Manufacturer 85 / Device 2018、Detected flash size = 16MB**（MAC `5c:01:3b:07:b3:f8`）。
+  想定していた既定4MBの4倍あり、littlefs領域を大きく確保してもOTA用の2アプリ枠を
+  削らずに済む容量があると分かった。
+  `large_spiffs_16MB.csv`（app0/app1 各4.5MB、spiffs 約6.875MB）を採用すると、
+  spill満杯までは 7,208,960 / 18,432 ≈ 391本 × 15秒 ≈ **約98分**まで伸ばせる
+  （現状の4MB前提・約19.5分から約5倍）。この変更は `adxl355` env にのみ適用する。
 
 ## 次に何が可能になったか
 
-batch-uplink 側での実装に着手できる。Namazu 側の `firmware/platformio.ini` のタグpinと
+batch-uplink 側での実装（spill満杯時に古いデータから捨てるオプトイン動作）と、
+Namazu側でのdevice2向けパーティション拡張（16MB・`large_spiffs_16MB`ベース）の
+両方に着手できる。Namazu 側の `firmware/platformio.ini` のタグpinと
 `terraform/build_lambda.sh` の `UPLINK_VERSION` は、batch-uplink 側のPRがマージされ
-タグが切られてから追従する。
+タグが切られてから追従する。device1（`esp32dev` env）のパーティション拡張は、
+実チップ容量を物理確認してから判断する。

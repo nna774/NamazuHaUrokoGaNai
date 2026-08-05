@@ -5,4 +5,4 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
-| 2026-08-05 | **device2のspill(LittleFS退避)実容量を計算し直し、`config.h`の「90日ぶんの上限目安」コメントが物理パーティションと合っていないと判明。実容量は約19.5分。** `Uploader::enqueue()`が満杯時にRAMへ無制限に積み増す実装だとクラッシュしうるため、**batch-uplinkに「spill満杯なら古いデータから捨てる」動作をオプトインで追加する方針に決めた**（Electabuzzの既定動作は変えない）。**OTA用アプリ枠を削ってlittlefsを広げる案は今は採らない**（OTAを将来使う計画があるため、実フラッシュ容量をesptoolで物理確認するまで保留） | [log/2026-08-05-device2-spill-overflow.md](log/2026-08-05-device2-spill-overflow.md) |
+| 2026-08-05 | **device2のspill(LittleFS退避)実容量を計算し直し、`config.h`の「90日ぶんの上限目安」コメントが物理パーティション(既定4MB前提)と合っていないと判明。esptool flash_idで実機を物理確認したところ device2 のフラッシュは実は16MBあった。** `large_spiffs_16MB`ベースのパーティション(`adxl355` envのみに適用、OTA用2アプリ枠は維持)に拡張すれば spill実容量は約19.5分→**約98分**まで伸ばせる。それでも溢れる場合に備え、**batch-uplinkに「spill満杯なら古いデータから捨てる」動作をオプトインで追加する方針**（Electabuzzの既定動作は変えない） | [log/2026-08-05-device2-spill-overflow.md](log/2026-08-05-device2-spill-overflow.md) |
