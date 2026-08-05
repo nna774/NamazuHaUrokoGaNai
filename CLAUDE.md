@@ -18,7 +18,7 @@
 | 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
 | ADXL355機の追加計画（未着手） | [docs/adxl355.md](docs/adxl355.md) |
 | ファームのOTA更新の作戦（未着手） | [docs/ota.md](docs/ota.md) |
-| コマンドラインからのリモート再起動要求の作戦（未着手） | [docs/remote_restart.md](docs/remote_restart.md) |
+| コマンドラインからのリモート再起動要求（実装済み・実機確認待ち） | [docs/remote_restart.md](docs/remote_restart.md) |
 | 複数機の波形を重ねる（姿勢・方位・震度ビュー） | [docs/device_overlay.md](docs/device_overlay.md) |
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
