@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-06 | **リモート再起動を実装した。** batch-uplinkに`devices.request_restart`/`Uploader.watchResponseHeader`を追加してv1.3.0を切り、ingest/tools(`request_restart.py`)/firmware(`main.cpp`)を実装した。firmwareビルド(esp32dev/adxl355両env)・`pytest`(111件)は確認済み。**実機での動作確認はまだ** | [log/2026-08-06-remote-restart-implementation.md](log/2026-08-06-remote-restart-implementation.md) |
 | 2026-08-06 | **リモート再起動（コマンドラインから要求→デバイスがバッチ送信時に検知して自分で再起動）の設計をまとめた（実装は未着手）。** 伝達経路はバッチ送信レスポンスへの便乗を採用。batch-uplinkの`Uploader::postBatch`にレスポンスヘッダ読み取りを追加する必要があるが、`dropOldestWhenFull`と同じくオプトイン方式にしてElectabuzz側の挙動は変えない設計にした | [log/2026-08-06-remote-restart-design.md](log/2026-08-06-remote-restart-design.md) |
 | 2026-08-05 | **TFT画面右下のbacklog表示を「件数+経過時間」(`buf:12 18m`)に拡張した。** 件数は`spillCount()`だけでなく`spillCount()+ramQueued()`の合計に修正（従来RAM分が抜けていた）。経過時間はbatch-uplinkに追加した`Uploader::oldestQueuedStartUs()`([batch-uplink#2](https://github.com/nna774/batch-uplink/pull/2)、マージ済み・`v1.2.0`)を使う。`lib_deps`/`UPLINK_VERSION`をv1.2.0に上げてビルド確認済み。**実機での目視確認はまだ** | [log/2026-08-05-display-backlog-age.md](log/2026-08-05-display-backlog-age.md) |
 | 2026-08-05 | **batch-uplinkに`v1.1.0`タグを切ってNamazu側(`lib_deps`/`UPLINK_VERSION`)を追従させ、`main.cpp`に`dropOldestWhenFull=true`を配線した。** その過程で、直前にマージしたPR#4に本来含まれるはずのflash_size修正コミットが1本漏れていた（マージ後にpushしたため）と判明し、cherry-pickで直接masterに修正を入れた。マージ操作は「ボタンを押した時点のHEAD」しか取り込まないという教訓 | [log/2026-08-05-uplink-v1.1.0-and-merge-gap.md](log/2026-08-05-uplink-v1.1.0-and-merge-gap.md) |

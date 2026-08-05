@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""デバイスに再起動要求を立てる/取り消す手元用CLI。
+
+デバイスは次にバッチを送信した時、そのレスポンスヘッダ(X-Namz-Restart)で
+要求を受け取り、未送信キューを出し切ってから自分で再起動する
+（docs/remote_restart.md 参照）。要求は一度伝えたら消える一回性のもの。
+
+使い方（AWS認証情報とリージョンは通常のboto3の解決に従う）:
+
+    export NAMZ_DEVICES_TABLE=namz-devices   # or pass --table
+
+    python request_restart.py request 1          # device 1 に再起動要求を立てる
+    python request_restart.py request 1 --yes    # 確認プロンプトを省略
+    python request_restart.py cancel 1           # 要求を取り消す（まだ反映されていなければ）
+    python request_restart.py list               # 現在要求が立っているデバイスを一覧
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import awsenv  # noqa: E402
+
+from batch_uplink import devices  # noqa: E402
+
+
+def _confirm(prompt: str) -> bool:
+    try:
+        return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def cmd_request(args):
+    item = devices.get_device(args.device_id)
+    if item is None:
+        sys.exit(f"デバイスが見つからない（一度も送信していない?）: device {args.device_id}")
+    if not args.yes and not _confirm(f"device {args.device_id} に再起動要求を立てるか?"):
+        sys.exit("中止した")
+    devices.request_restart(args.device_id, int(time.time() * 1e6))
+    print(f"再起動要求を立てた: device {args.device_id}（次のバッチ送信時に反映される）")
+
+
+def cmd_cancel(args):
+    devices.clear_restart_request(args.device_id)
+    print(f"再起動要求を取り消した: device {args.device_id}")
+
+
+def cmd_list(_args):
+    items = [it for it in devices.list_devices() if it.get("pending_restart_requested_at_us")]
+    if not items:
+        print("再起動要求の立っているデバイスはない")
+        return
+    print(f"再起動要求: {len(items)} 件")
+    for it in items:
+        did = int(it.get("device_id", 0))
+        requested_us = int(it["pending_restart_requested_at_us"])
+        print(f"  device {did}  requested_at_us={requested_us}")
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description="デバイスへの再起動要求の操作")
+    default_table = os.environ.get("NAMZ_DEVICES_TABLE")
+    p.add_argument("--table", default=default_table,
+                   help="デバイスのDynamoDBテーブル名（既定: 環境変数 NAMZ_DEVICES_TABLE）")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("request", help="再起動要求を立てる")
+    s.add_argument("device_id", type=int, help="対象デバイスID")
+    s.add_argument("--yes", "-y", action="store_true", help="確認プロンプトを省略する")
+
+    s = sub.add_parser("cancel", help="再起動要求を取り消す")
+    s.add_argument("device_id", type=int, help="対象デバイスID")
+
+    sub.add_parser("list", help="再起動要求の立っているデバイスを一覧")
+
+    args = p.parse_args(argv)
+    if not args.table:
+        sys.exit("テーブル名が未指定。--table か環境変数 NAMZ_DEVICES_TABLE を設定しろ")
+    # devices.py の _table() は環境変数からしかテーブル名を取らないので、
+    # --table 指定時はここで環境変数に反映してから呼ぶ。
+    os.environ["NAMZ_DEVICES_TABLE"] = args.table
+    awsenv.ensure_region()
+
+    if args.cmd == "request":
+        cmd_request(args)
+    elif args.cmd == "cancel":
+        cmd_cancel(args)
+    elif args.cmd == "list":
+        cmd_list(args)
+
+
+if __name__ == "__main__":
+    main()
