@@ -160,12 +160,16 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       （削除する / 無効フラグを立てる）。退役後に watchdog が延々と欠測通知しないように、
       台帳から外すか監視対象外にする運用を決める。`tools/flag_event.py` 相当の手元CLIで
       台帳を編集する形が素直か
-- [ ] OTA更新（作戦・工数見積り・落とし穴は [ota.md](ota.md)。土台はできている＝
-      既定パーティションが app0/app1 構成でスロットに余裕あり）
+- [ ] OTA更新（詳細は [ota.md](ota.md)）: **実装済み・実機での動作確認はまだ**。
+      ArduinoOTA（LAN内push）を採用。batch-uplink v1.4.0で追加した
+      `Uploader::flushToSpill()`でOTA開始前に測定を止めてRAMキューをLittleFSへ退避
+      してから焼く。`tools/provision_device.py ota-password --id N` でデバイス別の
+      認証パスワードを引き `pio run -e <env>-ota -t upload --upload-port namazu-N.local`
 - [ ] リモート再起動要求（詳細は [remote_restart.md](remote_restart.md)）: **実装済み・
       実機での動作確認はまだ**。batch-uplink v1.3.0でUploaderにレスポンスヘッダ読み取りを
       追加し、`tools/request_restart.py` で要求を立てるとデバイスが次回バッチ送信時に
-      検知して安全に再起動する
+      検知して安全に再起動する（v1.4.0の`flushToSpill()`で通信完了を待たず数秒で
+      再起動できるようになった）
 - [ ] （イベントが数万件規模になったら）DynamoDB時刻レンジGSIで本格ページング
 - [ ] ADXL355 2号機（device 0002）のセンサ検証・設置（進行中。2026-08-02基板着荷、ファーム/配線/初期確認済み。2026-08-03設置材料調達、エポキシ硬化待ち。next: [§6検証フロー](adxl355.md#6-検証-designmd-の不変条件)）
 
