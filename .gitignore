@@ -37,6 +37,7 @@ dashboard/config.js
 # Captured data / scratch
 *.csv
 !tools/**/sample_*.csv
+!firmware/partitions_*.csv
 data/
 *.bin
 !firmware/**/*.bin.example

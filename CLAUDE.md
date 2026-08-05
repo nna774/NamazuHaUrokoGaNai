@@ -18,9 +18,11 @@
 | 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
 | ADXL355機の追加計画（未着手） | [docs/adxl355.md](docs/adxl355.md) |
 | ファームのOTA更新の作戦（未着手） | [docs/ota.md](docs/ota.md) |
+| コマンドラインからのリモート再起動要求（実装済み・実機確認待ち） | [docs/remote_restart.md](docs/remote_restart.md) |
 | 複数機の波形を重ねる（姿勢・方位・震度ビュー） | [docs/device_overlay.md](docs/device_overlay.md) |
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
+| 決定の経緯・作業ログ索引（**新しいものから読む**） | [docs/progress.md](docs/progress.md) → `docs/log/` |
 | 各領域の詳細 | `firmware/` `lambda/` `terraform/` `dashboard/` `tools/` の各 `README.md` |
 
 `memo.md` はユーザーの作業メモ（TODO・思いつき）。要件の出所になることがあるが、
@@ -114,3 +116,16 @@ aws cloudfront create-invalidation \
 
 - コミットは日本語・意味単位。rebaseせず master を merge。テストは `.venv` で
   `pytest lambda/tests` / `pytest tools/tests`。
+
+## 作業したらログを1本足す
+
+**このレポの進捗は `docs/log/` に日付ファイルを追記する形で記録する。**
+既存ファイルを書き換えて履歴を消すな。
+
+1. `docs/log/YYYY-MM-DD-<slug>.md` を新規作成する（1セッション・1トピックで1本）
+2. **[docs/progress.md](docs/progress.md) の表に1行追記する**（新しいものが上。1〜3文の要約 + ログへのリンク）
+3. 設計判断が変わったなら、**該当する `docs/*.md`（または `CLAUDE.md`）本体も同じコミットで直す。**
+   ログは経緯、本体は現在の結論。**両者が食い違ったら本体を正とする**
+
+ログに書くこと: **何を決めたか、なぜそう決めたか、何が覆ったか、次に何が可能になったか。**
+作業の実況中継は要らない。**判断とその理由だけ残せ。**

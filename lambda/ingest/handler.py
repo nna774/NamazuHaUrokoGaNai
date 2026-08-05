@@ -26,8 +26,11 @@ BUCKET = os.environ["NAMZ_BUCKET"]
 NOTIFY_PROMPT_MIN = float(os.environ.get("NAMZ_NOTIFY_PROMPT_MIN", "3.0"))
 
 
-def _resp(code: int, msg: str):
-    return {"statusCode": code, "headers": {"content-type": "text/plain"}, "body": msg}
+def _resp(code: int, msg: str, extra_headers: dict[str, str] | None = None):
+    headers = {"content-type": "text/plain"}
+    if extra_headers:
+        headers.update(extra_headers)
+    return {"statusCode": code, "headers": headers, "body": msg}
 
 
 def handler(event, context):
@@ -68,7 +71,20 @@ def _handle_batch(raw: bytes, auth_device: str):
                              int(time.time() * 1e6), last_batch_key=key)
     except Exception as e:  # noqa: BLE001
         print(f"devices.record_batch failed: {e!r}")
-    return _resp(200, f"stored {key}")
+
+    # リモート再起動要求（tools/request_restart.py が立てる）をレスポンスへ反映。
+    # 一度伝えたら消す一回性の要求なので、ヘッダを付けた直後にクリアする。
+    # ここも主経路ではないので、失敗してもバッチ保存自体は成功扱いにする。
+    extra_headers = None
+    try:
+        item = devices.get_device(b.meta.device_id)
+        if item and item.get("pending_restart_requested_at_us"):
+            extra_headers = {"X-Namz-Restart": "1"}
+            devices.clear_restart_request(b.meta.device_id)
+    except Exception as e:  # noqa: BLE001
+        print(f"restart request check failed: {e!r}")
+
+    return _resp(200, f"stored {key}", extra_headers)
 
 
 def _handle_alert(raw: bytes, auth_device: str):

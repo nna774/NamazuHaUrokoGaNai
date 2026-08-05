@@ -47,8 +47,13 @@ static volatile float gDispPeakGal = 0.0f;
 static volatile uint32_t gLastShakeMs = 0;  // 瞬時合成加速度がしきい値を超えた最終時刻
 
 #ifndef NAMZ_SENSOR_TEST
+// spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
+// バッチ送信のレスポンスヘッダ X-Namz-Restart を監視する（リモート再起動要求、
+// docs/remote_restart.md 参照）。ingest がこのヘッダを立てるのは
+// tools/request_restart.py で要求した直後の1回だけ。
 static Uploader gUploader(kIngestUrl, kAlertUrl, kHmacSecret, kDeviceId,
-                          kMaxRamBatches, kSpillDir);
+                          kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
+                          /*watchResponseHeader=*/"X-Namz-Restart");
 
 struct AlertMsg {
   uint64_t us;
@@ -200,6 +205,7 @@ static void connectWifi() {
 static void uploaderTask(void*) {
   esp_task_wdt_add(nullptr);
   uint32_t lastResync = 0;
+  bool restartRequested = false;  // サーバからのリモート再起動要求（docs/remote_restart.md）
 
   // このタスクは1周の中でネットワーク待ちを何度もする。TLS接続のタイムアウトは
   // 1回あたり5秒あり、回線が詰まると「速報送信で5秒＋バッチ送信で5秒」で簡単に
@@ -242,6 +248,22 @@ static void uploaderTask(void*) {
 
     gUploader.pump();
     esp_task_wdt_reset();
+
+    // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、未送信キュー
+    // （RAM＋LittleFS退避）を出し切ってから再起動する。Uploaderの不変条件
+    // 「2xxが返るまでバッチを捨てない」を再起動要求でも破らないため。
+    if (!restartRequested && gUploader.lastResponseHeaderValue() == "1") {
+      restartRequested = true;
+      Serial.println("[uploader] restart requested by server, draining queue first");
+    }
+    if (restartRequested && gUploader.ramQueued() == 0 && gUploader.spillCount() == 0) {
+      Serial.println("[uploader] queue drained, restarting now");
+      Serial.flush();
+      esp_task_wdt_reset();
+      delay(200);
+      ESP.restart();
+    }
+
     delay(50);
   }
 }
@@ -350,11 +372,19 @@ void loop() {
       clock = "--/-- --:--:--";
     }
 #ifdef NAMZ_SENSOR_TEST
-    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, status, bg, clock);
+    gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, 0, status, bg, clock);
 #else
     bool wifi = WiFi.status() == WL_CONNECTED;
     String ip = wifi ? WiFi.localIP().toString() : String("");
-    gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, gUploader.spillCount(),
+    uint32_t backlog = gUploader.spillCount() + gUploader.ramQueued();
+    uint32_t backlogAgeS = 0;
+    uint64_t oldestUs;
+    if (backlog > 0 && timesync::isSynced() &&
+        gUploader.oldestQueuedStartUs(oldestUs)) {
+      uint64_t nowUs = timesync::nowUs();
+      backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
+    }
+    gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, backlog, backlogAgeS,
                     status, bg, clock);
 #endif
   }
