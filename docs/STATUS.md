@@ -162,6 +162,9 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       台帳を編集する形が素直か
 - [ ] OTA更新（作戦・工数見積り・落とし穴は [ota.md](ota.md)。土台はできている＝
       既定パーティションが app0/app1 構成でスロットに余裕あり）
+- [ ] リモート再起動要求（作戦は [remote_restart.md](remote_restart.md)。コマンドラインから
+      要求を立て、デバイスがバッチ送信時に検知して自分で再起動する。device 1 が
+      watchdog timer に殺される問題への遠隔対応・OTA運用の足場になる想定）
 - [ ] （イベントが数万件規模になったら）DynamoDB時刻レンジGSIで本格ページング
 - [ ] ADXL355 2号機（device 0002）のセンサ検証・設置（進行中。2026-08-02基板着荷、ファーム/配線/初期確認済み。2026-08-03設置材料調達、エポキシ硬化待ち。next: [§6検証フロー](adxl355.md#6-検証-designmd-の不変条件)）
 
