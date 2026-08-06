@@ -1,22 +1,33 @@
-"""デバイス払い出し。マニフェスト1枚から secrets.h / terraform / 焼くenv を導出する。
+"""デバイス払い出し。マニフェスト1枚からNVSプロビジョニング用ヘッダ/terraform/
+焼くenv を導出する。
 
 docs/design.md「多点運用時のデバイス払い出し」の実装。設計の要点は2つ。
 
 - **変動軸を混ぜない**。個体差(device_id・HMAC鍵・WiFi)だけを生成対象にする。
   ボード差とセンサ差は platformio の `[env:]` が持つので、マニフェストは
   「どの env で焼くか」だけを覚える。config.h は生成しない。
-- **HMAC鍵は両面**。ファーム(secrets.h)とサーバ(ingest Lambda の環境変数)の両方に
+- **HMAC鍵は両面**。ファーム(NVS)とサーバ(ingest Lambda の環境変数)の両方に
   同じ値が要る。片面だけ更新すると必ず認証が落ちるので、同じ1ファイルから両方を出す。
 
 マニフェスト `tools/devices.json` は**鍵を含むので gitignore 対象**。
 雛形は `tools/devices.example.json`。
 
+デバイス識別情報・秘密・エンドポイントURLはコンパイル時定数(旧secrets.h)ではなく
+NVSに持つ（docs/ota.md §7「バイナリの秘密情報を分離しないと成立しない」——pull型OTAで
+envごとに1本のバイナリを公開URLへ置くと、コンパイル時に焼き込んだ秘密がそのまま
+世界に漏れる）。`provision-h`が生成する`secrets_provision.h`は書き込み専用の
+`[env:provision]`ビルドだけが読み、NVSへ書いて役目を終える。
+
     # 2台目を作る（鍵は自動生成）
     python tools/provision_device.py add --id 2 --label 湯沢-ADXL355 --sensor adxl355
 
-    # 焼く前に secrets.h を差し替える
-    python tools/provision_device.py secrets-h --id 2
-    cd firmware && pio run -e "$(python ../tools/provision_device.py env --id 2)" -t upload
+    # NVS書き込み用ヘッダを生成し、provisionビルドで焼く（1回だけ）
+    python tools/provision_device.py provision-h --id 2
+    cd firmware && pio run -e adxl355-provision -t upload --upload-port <USBポート>
+
+    # 続けて通常のfirmwareを焼く（NVSはOTAでも保持されるので以降は不要）
+    pio run -e "$(python ../tools/provision_device.py env --id 2)" -t upload \\
+        --upload-port <USBポート>
 
     # サーバ側へ登録（出力を terraform/terraform.tfvars に貼って apply）
     python tools/provision_device.py tfvars
@@ -37,7 +48,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "tools" / "devices.json"
-SECRETS_H = ROOT / "firmware" / "src" / "secrets.h"
+SECRETS_PROVISION_H = ROOT / "firmware" / "src" / "secrets_provision.h"
 
 # センサ種別 -> 既定の platformio env。ボードも変えるなら env を直接指定する。
 SENSOR_ENV = {
@@ -89,29 +100,38 @@ def find(m: dict, device_id: int) -> dict:
     raise SystemExit(f"device {device_id} がマニフェストに無い")
 
 
-def render_secrets_h(m: dict, d: dict) -> str:
-    """firmware/src/secrets.h の中身。secrets.h.example と項目を揃えること。"""
+def render_provision_h(m: dict, d: dict) -> str:
+    """firmware/src/secrets_provision.h の中身。secrets_provision.h.example と項目を揃えること。
+
+    書き込み専用の[env:provision]/[env:adxl355-provision]ビルドだけが読み、
+    NVSへ書いて役目を終える（通常のfirmwareはNVSから読む。docs/ota.md §7）。
+    """
     ingest = d.get("ingest_url") or m["ingest_url"]
     alert = d.get("alert_url") or m["alert_url"]
+    api = d.get("api_url") or m["api_url"]
+    ota_base = d.get("ota_base_url") or m["ota_base_url"]
     label = d.get("label", "")
     return f"""#pragma once
 // provision_device.py が tools/devices.json から生成した。直接編集するな。
 // device {d['id']}{f" ({label})" if label else ""} / env={d['env']}
+// [env:provision]/[env:adxl355-provision] だけがこれを読みNVSへ書く。焼いたら
+// このファイルは用済み（通常のfirmwareはNVSから読む。docs/ota.md §7）。
 
 #include <cstdint>
 
-static constexpr const char* kWifiSsid = "{d['wifi_ssid']}";
-static constexpr const char* kWifiPass = "{d['wifi_pass']}";
+static constexpr uint32_t kProvDeviceId = {d['id']};
 
-static constexpr const char* kIngestUrl = "{ingest}";
-static constexpr const char* kAlertUrl = "{alert}";
+static constexpr const char* kProvWifiSsid = "{d['wifi_ssid']}";
+static constexpr const char* kProvWifiPass = "{d['wifi_pass']}";
 
-static constexpr uint32_t kDeviceId = {d['id']};
+static constexpr const char* kProvHmacSecret = "{d['hmac_secret']}";
+// ArduinoOTA(espota、LAN内push)認証パスワード。サーバ側とは無関係のLAN内専用鍵。
+static constexpr const char* kProvOtaPassword = "{d['ota_password']}";
 
-static constexpr const char* kHmacSecret = "{d['hmac_secret']}";
-
-// ArduinoOTA(espota)認証パスワード。サーバ側とは無関係のLAN内専用鍵。
-static constexpr const char* kOtaPassword = "{d['ota_password']}";
+static constexpr const char* kProvIngestUrl = "{ingest}";
+static constexpr const char* kProvAlertUrl = "{alert}";
+static constexpr const char* kProvApiUrl = "{api}";
+static constexpr const char* kProvOtaBaseUrl = "{ota_base}";
 """
 
 
@@ -162,14 +182,14 @@ def cmd_add(args) -> int:
     return 0
 
 
-def cmd_secrets_h(args) -> int:
+def cmd_provision_h(args) -> int:
     m = load()
     d = find(m, args.id)
-    text = render_secrets_h(m, d)
+    text = render_provision_h(m, d)
     if args.stdout:
         print(text, end="")
         return 0
-    out = Path(args.out) if args.out else SECRETS_H
+    out = Path(args.out) if args.out else SECRETS_PROVISION_H
     if out.exists() and not args.force:
         raise SystemExit(f"{out} が既にある。上書きするなら --force")
     out.write_text(text)
@@ -208,12 +228,13 @@ def main() -> int:
     a.add_argument("--wifi-pass", dest="wifi_pass")
     a.set_defaults(func=cmd_add)
 
-    s = sub.add_parser("secrets-h", help="firmware/src/secrets.h を生成")
+    s = sub.add_parser("provision-h",
+                       help="firmware/src/secrets_provision.h を生成（[env:provision]用）")
     s.add_argument("--id", type=int, required=True)
-    s.add_argument("--out", help="出力先（既定 firmware/src/secrets.h）")
+    s.add_argument("--out", help="出力先（既定 firmware/src/secrets_provision.h）")
     s.add_argument("--stdout", action="store_true", help="書かずに標準出力へ")
     s.add_argument("--force", action="store_true", help="既存を上書きする")
-    s.set_defaults(func=cmd_secrets_h)
+    s.set_defaults(func=cmd_provision_h)
 
     sub.add_parser("tfvars", help="terraform.tfvars 用の device_hmac_secrets を出す") \
         .set_defaults(func=cmd_tfvars)

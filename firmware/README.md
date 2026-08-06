@@ -64,14 +64,22 @@ cd tools && ../../.venv/bin/python gen_class_font.py DejaVuSans-Bold.ttf > ../li
 
 ## セットアップ
 
-`secrets.h` は手で書かず `tools/provision_device.py` で払い出す（`tools/devices.json` が
-単一の真実。詳細は [docs/design.md](../docs/design.md)）。
+デバイス識別情報・秘密・エンドポイントURLはコンパイル時定数(旧`secrets.h`)ではなく
+NVSに持つ（[docs/ota.md](../docs/ota.md) §7「バイナリの秘密情報を分離しないと成立
+しない」——pull型OTAでenvごとに1本のバイナリを公開URLへ置くと、コンパイル時に
+焼き込んだ秘密がそのまま世界に漏れる）。`tools/provision_device.py`で払い出し
+（`tools/devices.json` が単一の真実。詳細は [docs/design.md](../docs/design.md)）、
+書き込み専用ビルドで焼いてNVSへ書く。
 
 ```bash
-python ../tools/provision_device.py secrets-h --id 2 --force
+# NVSへ書く値を生成 → 書き込み専用ビルドで焼く（1回だけ）
+python ../tools/provision_device.py provision-h --id 2 --force
+pio run -e adxl355-provision -t upload --upload-port <USBポート>   # IIS3DHHC機は -e provision
 ```
 
 ## ビルド・書き込み
+
+続けて通常のfirmwareを焼く（NVSはOTAをまたいで保持されるので以降は不要）。
 
 ```bash
 # 通常（送信あり）

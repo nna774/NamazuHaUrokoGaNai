@@ -72,19 +72,29 @@ def _handle_batch(raw: bytes, auth_device: str):
     except Exception as e:  # noqa: BLE001
         print(f"devices.record_batch failed: {e!r}")
 
-    # リモート再起動要求（tools/request_restart.py が立てる）をレスポンスへ反映。
-    # 一度伝えたら消す一回性の要求なので、ヘッダを付けた直後にクリアする。
-    # ここも主経路ではないので、失敗してもバッチ保存自体は成功扱いにする。
-    extra_headers = None
+    # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。ここも主経路では
+    # ないので、失敗してもバッチ保存自体は成功扱いにする。
+    extra_headers: dict[str, str] = {}
     try:
         item = devices.get_device(b.meta.device_id)
-        if item and item.get("pending_restart_requested_at_us"):
-            extra_headers = {"X-Namz-Restart": "1"}
-            devices.clear_restart_request(b.meta.device_id)
+        if item:
+            # リモート再起動要求（tools/request_restart.py が立てる）は一度伝えたら
+            # 消す一回性の要求なので、ヘッダを付けた直後にクリアする。
+            if item.get("pending_restart_requested_at_us"):
+                extra_headers["X-Namz-Restart"] = "1"
+                devices.clear_restart_request(b.meta.device_id)
+            # pull型OTA（tools/request_ota.py が立てる、docs/ota.md §7）の許可
+            # バージョンは「あるべき状態」なので、再起動要求と違いここではクリア
+            # しない——デバイスが実際にそのバージョンで起動する（次にNAMZ_FW_VERSION
+            # が一致したバッチを送ってくる）までヘッダを返し続ける。ダウンロード・
+            # 書き込み失敗時の自然なリトライにもなる。
+            pending_ota = item.get("pending_ota_version")
+            if pending_ota:
+                extra_headers["X-Namz-Ota-Version"] = str(pending_ota)
     except Exception as e:  # noqa: BLE001
-        print(f"restart request check failed: {e!r}")
+        print(f"restart/ota request check failed: {e!r}")
 
-    return _resp(200, f"stored {key}", extra_headers)
+    return _resp(200, f"stored {key}", extra_headers or None)
 
 
 def _handle_alert(raw: bytes, auth_device: str):
