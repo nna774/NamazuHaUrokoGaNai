@@ -103,7 +103,7 @@ cd terraform && AWS_REGION=ap-northeast-1 terraform apply
 
 # ダッシュボード（app.js/index.html を触ったら）
 cd dashboard && aws s3 sync . "s3://$(cd ../terraform && terraform output -raw dashboard_bucket)/" \
-  --exclude 'config.example.js' --exclude 'README.md' --cache-control 'no-cache'
+  --exclude 'config.example.js' --exclude 'README.md'
 aws cloudfront create-invalidation \
   --distribution-id "$(cd ../terraform && terraform output -raw dashboard_distribution_id)" \
   --paths '/app.js' '/index.html'
@@ -112,13 +112,17 @@ aws cloudfront create-invalidation \
 `config.js` は本番APIのURL(`https://api.namazu.dark-kuins.net`)が入る。sync対象なので消すな。
 カスタムドメインまわりの順序は [terraform/README.md](terraform/README.md) を参照。
 
-**`--cache-control 'no-cache'` を忘れるな。** 付けないとS3オブジェクトにCache-Controlが
-一切乗らず、ブラウザがヒューリスティックキャッシュ（Last-Modifiedベースの独自判断）で
-`app.js`だけ古いキャッシュを使い続けることがある。CloudFrontのinvalidationはCDNエッジの
-キャッシュしか消せず、ブラウザ側のキャッシュには効かない——`index.html`（新しいマークアップ）
-と`app.js`（古いロジック）が食い違ったまま表示され、「新しい列のヘッダーは出るが中身も
-罫線も途中で切れる」という壊れ方をする（2026-08-06、実際に踏んだ）。`no-cache`は「保存はする
-がETag/Last-Modifiedで毎回サーバへ再検証してから使う」指定で、無効化ではない。
+**S3オブジェクトに`--cache-control`は付けるな（意図的に付けていない）。** ブラウザの
+キャッシュ制御は`terraform/dashboard.tf`の`aws_cloudfront_response_headers_policy`
+（`Cache-Control: no-cache`をビューワー応答へ強制的に付与）で行う。CloudFront自体の
+エッジキャッシュTTLは`cache_policy_id`（Managed-CachingOptimized、既定1日）任せで、
+デプロイのたびのinvalidationで鮮度を保証する。**この2つはレイヤーが違う**——
+S3オブジェクト側に`Cache-Control: no-cache`を付けてしまうと、CloudFrontは
+Cache PolicyのDefaultTTLより「オリジンが明示した鮮度ヘッダー」を優先するため、
+エッジ↔S3間の再検証が毎回発生してしまう（実際に踏んで直した、2026-08-06）。
+ブラウザが`app.js`だけ古いキャッシュを使い続けて`index.html`と食い違う元々の
+不具合（「新しい列のヘッダーは出るが中身も罫線も途中で切れる」）は、Response
+Headers Policy側のno-cacheで別途防げている。
 
 ## 開発の約束（グローバル設定に加えて）
 
