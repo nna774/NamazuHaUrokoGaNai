@@ -21,6 +21,30 @@ resource "aws_cloudfront_origin_access_control" "dashboard" {
   signing_protocol                  = "sigv4"
 }
 
+# ビューワー(ブラウザ)へは常に Cache-Control: no-cache を付ける。ブラウザに
+# 「使う前に毎回再検証しろ」と伝える指示で、CloudFrontのエッジキャッシュTTLとは
+# 別レイヤー。エッジ↔S3間の再検証は cache_policy_id 側（CachingOptimizedの
+# DefaultTTL）に任せ、ここではビューワー向けの応答ヘッダーだけを差し替える。
+#
+# 試した順序と教訓: 当初S3オブジェクト自体にCache-Control: no-cacheを付けたが、
+# CloudFrontはCache PolicyのDefaultTTLより「オリジンが明示した鮮度ヘッダー」を
+# 優先するため、CachingOptimized(DefaultTTL=1日)に切り替えてもオリジンの
+# no-cacheがそのまま効いてしまい、エッジ↔S3間の再検証が毎回発生し続けていた
+# （実測: MinTTLが0→1に上がっただけで実質変化なし）。Response Headers Policyは
+# キャッシュ判断が終わった後にビューワーへの応答へヘッダーを足す仕組みなので、
+# エッジのキャッシュ可否には影響しない——これで初めて「エッジは長くキャッシュ・
+# ブラウザは毎回再検証」の分離が成立する。
+resource "aws_cloudfront_response_headers_policy" "dashboard_no_cache" {
+  name = "${local.name}-dashboard-no-cache"
+  custom_headers_config {
+    items {
+      header   = "Cache-Control"
+      value    = "no-cache"
+      override = true
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "dashboard" {
   enabled             = true
   default_root_object = "index.html"
@@ -37,12 +61,11 @@ resource "aws_cloudfront_distribution" "dashboard" {
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
+    # Managed-CachingOptimized: エッジのTTL(既定1日)はここで管理する。デプロイの
+    # たびにinvalidationしているので、通常時のビューワーリクエストではエッジ↔S3間の
+    # 再検証は起きない。
+    cache_policy_id            = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.dashboard_no_cache.id
   }
 
   restrictions {
