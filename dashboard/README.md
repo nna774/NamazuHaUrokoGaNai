@@ -20,14 +20,14 @@
 ```bash
 cp config.example.js config.js   # terraform output の api_url を記入
 BUCKET=$(cd ../terraform && terraform output -raw dashboard_bucket)
-aws s3 sync . "s3://$BUCKET/" --exclude 'config.example.js' --exclude 'README.md' \
-  --cache-control 'no-cache'
+aws s3 sync . "s3://$BUCKET/" --exclude 'config.example.js' --exclude 'README.md'
 ```
 
-`terraform output dashboard_url` の CloudFront URL で開く。**`--cache-control 'no-cache'`
-を忘れると**、Cache-Controlの乗らないオブジェクトをブラウザがヒューリスティックキャッシュで
-長く抱え込みうる。CloudFrontのinvalidationはCDNエッジのキャッシュしか消せずブラウザには
-効かないので、`index.html`だけ新しく`app.js`は古いまま、という食い違いが起きうる
+`terraform output dashboard_url` の CloudFront URL で開く。**S3オブジェクトに
+`--cache-control` は付けない**（意図的）。ブラウザ向けの`Cache-Control: no-cache`は
+CloudFront側の`aws_cloudfront_response_headers_policy`が付与し、エッジのキャッシュ
+TTLとは別レイヤーで制御している（`terraform/dashboard.tf`参照）。S3側に付けると
+CloudFrontのエッジ↔S3間の再検証まで毎回発生してしまうので、混ぜるな
 （実際に踏んだ、2026-08-06）。
 
 ## ローカル確認
