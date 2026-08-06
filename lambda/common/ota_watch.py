@@ -1,14 +1,22 @@
-"""pull型OTAの停滞検知（docs/ota.md §7）。
+"""pull型OTAの停滞検知・達成検知（docs/ota.md §7）。
 
 `pending_ota_version` は一度伝えたら消す一回性の値ではなく、デバイスが実際に
 そのバージョンで起動するまでサーバが持ち続ける「あるべき状態」。そのため、
 サーバ側からは「デバイスが取得に成功したか」を直接は観測できない
-（NVSの秘密情報と同じ理由でデバイスは自分の状態をpushしてこない）。
+——というのが元々の前提だったが、firmwareが毎バッチ`X-Namz-Fw-Version`で
+現在版数を送るようになったことで、「達成したか」はingestが受信するバッチ
+から分かるようになった（`fw_version`と`pending_ota_version`の一致）。
+達成したら`reached_target()`でこの一致を判定し、ingest側で
+`clear_ota_target()`を呼んでサーバ側の状態を解放する
+（さもないと`pending_ota_version`が達成後も残り続け、時間経過だけを見る
+`evaluate_ota_stuck()`が成功後も「停滞」を誤検知する）。
 
-代わりに「要求してから長時間経っても解消しない」ことを watchdog Lambda が
-外側から検知してSlack通知する。証明書検証の失敗・ネットワーク不調・配布物の
-取り違えなど原因は問わない（原因はデバイスのシリアルログでしか分からないが、
-「何かがおかしい」こと自体は気づけるようにする）。
+それでも「達成前に何が起きているか」（証明書検証失敗か・ネットワーク不調か等）
+はデバイスのシリアルログでしか分からないので、停滞検知（時間経過ベース）は
+引き続き必要。代わりに「要求してから長時間経っても解消しない」ことを
+watchdog Lambda が外側から検知してSlack通知する。原因は問わない（原因は
+デバイスのシリアルログでしか分からないが、「何かがおかしい」こと自体は
+気づけるようにする）。
 
 書き込み関数はNamazu固有の概念なのでbatch-uplink(共有ライブラリ)には置かず、
 このリポジトリのlambda/common側に持つ。
@@ -57,3 +65,28 @@ def mark_ota_stuck_notified(device_id: int, at_us: int) -> None:
         UpdateExpression="SET ota_stuck_notified_at_us = :t",
         ExpressionAttributeValues={":t": at_us},
     )
+
+
+def reached_target(item: dict) -> bool:
+    """このバッチの`fw_version`が`pending_ota_version`に追いついたか。"""
+    pending = item.get("pending_ota_version")
+    return bool(pending) and item.get("fw_version") == pending
+
+
+def clear_ota_target(device_id: int, matched_version: str) -> None:
+    """達成済みの`pending_ota_version`をサーバ側から解放する。
+
+    要求してからここまでの間に別バージョンが新たに要求されているかも
+    しれないので、読んだ時の値のまま変わっていない場合だけ消す
+    （condition不成立はレースで新しい要求が割り込んだだけなので無視してよい）。
+    """
+    try:
+        _table().update_item(
+            Key={"device_id": device_id},
+            UpdateExpression="REMOVE pending_ota_version, pending_ota_requested_at_us, "
+                              "ota_stuck_notified_at_us",
+            ConditionExpression="pending_ota_version = :v",
+            ExpressionAttributeValues={":v": matched_version},
+        )
+    except _table().meta.client.exceptions.ConditionalCheckFailedException:
+        pass
