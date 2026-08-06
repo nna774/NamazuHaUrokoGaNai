@@ -1,7 +1,8 @@
 # OTA更新
 
-ファームの無線更新。2026-08-06 に §2-A（ArduinoOTA、LAN内push）を実装した。
-**実機での動作確認はまだ**（firmwareビルド[esp32dev/adxl355/両-ota env]・
+ファームの無線更新。2026-08-06 に §2-A（ArduinoOTA、LAN内push）と
+§7（HTTPSプル型、外出先からの更新・無人運用向け）の両方を実装した。
+**どちらも実機での動作確認はまだ**（firmwareビルド全env・
 `firmware/test/run.sh`・`pytest lambda/tests tools/tests` は確認済み）。
 関連: [リモート再起動](remote_restart.md)（コマンドラインから再起動要求を送る作戦。
 更新後に確認してから確定させる運用の足場になる。今回の実装で使う `flushToSpill()`
@@ -96,139 +97,144 @@ IPアドレス直指定でもよい（デバイスのTFTに表示されている
 
 ## 6. 未着手
 
-- 実機での動作確認（次回訪問時）。
-- HTTPSプル型（外出先からの更新・無人運用が必要になった時点で検討。作戦は§7）。
+- 実機での動作確認（次回訪問時。§7のプル型も含む）。
+- HTTPSプル型のロールバック（§7「今回は見送った」参照）。
 
-## 7. 将来: HTTPSプル型（作戦、実装は未着手）
+## 7. HTTPSプル型（外出先からの更新・無人運用向け）
 
-2026-08-06、作戦のみ検討した。前提: LAN内push（§2）は運用者が対象デバイスと同じ
-LANにいる必要がある。外出先からの更新・無人運用にはデバイス自身がHTTPSで取得
-（pull）する方式が要る。
+2026-08-06に実装した。**実機での動作確認はまだ**（firmwareビルド全env・
+`firmware/test/run.sh`・`pytest lambda/tests tools/tests`は確認済み）。前提:
+LAN内push（§2）は運用者が対象デバイスと同じLANにいる必要がある。外出先からの
+更新・無人運用にはデバイス自身がHTTPSで取得（pull）する方式が要る。
 
-### 前提条件（重要な訂正）: バイナリの秘密情報を分離しないと成立しない
+### 前提として先に片付けた: バイナリの秘密情報の分離（NVS化）
 
 当初「`ota/<env>/<version>.bin`を1本、CloudFrontで公開する」という配布物の作戦を
-立てたが、これは**現状のファーム構成のままでは成立しない**と判明した。
+立てたが、**現状のファーム構成のままでは成立しない**と判明した。
 
-`tools/provision_device.py`の`render_secrets_h`が生成する`firmware/src/secrets.h`は、
-WiFi SSID/パスワード・デバイス固有のHMAC鍵(`kHmacSecret`、バッチ投稿の認証に使う)・
-ArduinoOTA認証パスワード(`kOtaPassword`)を`static constexpr const char*`の文字列
-リテラルとして持つ。コンパイラはこれを暗号化も難読化もしないので、焼いた
-`firmware.bin`には平文のまま入る（`strings firmware.bin`で読める水準）。
+旧`secrets.h`（`tools/provision_device.py`が生成）は、WiFi SSID/パスワード・
+デバイス固有のHMAC鍵（バッチ投稿の認証に使う）・ArduinoOTA認証パスワードを
+`static constexpr const char*`の文字列リテラルとして持っていた。コンパイラは
+これを暗号化も難読化もしないので、焼いた`firmware.bin`には平文のまま入る。
+push型（LAN内espota）は送り返す相手が秘密の持ち主自身なので問題にならなかったが、
+pull型で「envごとに1本を不特定多数が読めるURLに置く」設計は、公開した瞬間その
+1台の家WiFiとなりすまし投稿の鍵を世界に漏らすことになる。
 
-push型（LAN内espota）でこれが問題にならなかったのは、**送り返す相手が秘密の
-持ち主自身**だからだ（自分の鍵を自分に書き戻すだけで、LAN内の盗聴以外に新規の
-露出が無い）。pull型で「envごとに1本を不特定多数が読めるURLに置く」設計は話が
-違う。そのバイナリには**特定の1台の**WiFiパスワード・投稿用HMAC鍵・OTAパスワード
-が生で入っており、公開した瞬間その1台の家WiFiとなりすまし投稿の鍵を世界に
-漏らすことになる。
+対策としてデバイス識別情報・秘密・エンドポイントURLをコンパイル時定数から
+**NVS(Preferences)**へ移した（`firmware/lib/DeviceIdentity/`）。OTAはapp
+パーティションのみを書き換えNVSには触らないため、identity/secretsはOTAを
+またいで保持される。書き込みは初回USB書き込み時、専用の`[env:provision]`/
+`[env:adxl355-provision]`ビルド（`firmware/src/provision_main.cpp`）で1回だけ
+行う。通常のfirmware(`main.cpp`)は起動時にNVSから読み、空なら（未
+プロビジョニング）**測定・送信を一切開始せず起動時ログを出し続けて停止する**
+（不定な状態で動かさない）。
 
-**対策方針（pull型実装の前提として先に片付けるタスク）**: アプリコード（env共通・
-公開して良い）とデバイス識別・秘密（デバイス固有・非公開）を分離する。
-secrets.hのコンパイル時埋め込みをやめ、初回USB書き込み時にNVSへ別途書き込む方式に
-変える。OTAはappパーティションのみを書き換えNVSには触らないので、identity/secrets
-はOTAをまたいで保持される。これにより`ota/<env>/<version>.bin`は本当にenv共通の
-中身になり、公開して問題なくなる。
+```bash
+python tools/provision_device.py provision-h --id N        # secrets_provision.h を生成
+pio run -e provision -t upload --upload-port <USBポート>    # NVSへ書く（ADXL355機は adxl355-provision）
+pio run -e esp32dev -t upload --upload-port <USBポート>     # 続けて通常のfirmwareを焼く
+```
 
-影響範囲: `tools/provision_device.py`（secrets-h生成をNVS書き込みコマンドへ置き換え
-または追加）、`firmware/src/secrets.h`の役割変更（あるいは廃止）、`main.cpp`の
-初期化コード（起動時にNVSから読む）。**pull型固有の作業ではなく、pull型を作る前に
-先に終わらせておくべき前提**として切り出す。push型は現状のままでも実害は無いが
-（上記の理由）、同じNVS化をしておけば一貫性が高く、将来secrets.h自体を廃止できる。
+これで`ota/<env>/<version>.bin`は本当にenv共通の中身になり、公開して問題なく
+なった。旧`secrets.h`/`secrets.h.example`は削除し、`tools/provision_device.py`の
+`secrets-h`コマンドは`provision-h`に置き換えた。
 
-### トリガー: リモート再起動と同型だが、値は「消費しない」
+### トリガー: 手元から明示許可（自律ポーリングは不採用）
 
-[リモート再起動](remote_restart.md)（手元から明示要求→バッチ送信レスポンスへの
-便乗で気づく）と同じ設計を踏襲する。**デバイスが定期的に外部を自律ポーリングして
-黙って最新へ追従する方式は採らない**——配布物（S3/CloudFront上のbin）の書き込み
-権限が万一侵害された場合、無人運用中の全機へ運用者の操作なしにコードが流し込める
-経路になり、pushより一段階ブラスト半径が大きい。「運用者が明示的に許可した時だけ
-取得する」段を挟み、push型と同じ「意図した時にだけ書き換わる」信頼モデルを保つ。
+配布物（S3/CloudFront上のbin）の書き込み権限が万一侵害された場合、無人運用中の
+全機へ運用者の操作なしにコードが流し込める経路になるとpushより一段階ブラスト
+半径が大きい。そこで「運用者が明示的に許可した時だけ取得する」設計にした。
 
-- 手元: `tools/request_ota.py request <device_id> <version>` で `namazu-devices` に
-  `pending_ota_version`（文字列）をセット。`cancel`/`list`も`request_restart.py`と同型。
-- ingest `_handle_batch` が `pending_ota_version` を見て、あればレスポンスヘッダ
-  `X-Namz-Ota-Version: <version>` を返す。
-- **再起動要求と違い、返した直後にクリアしない。** 再起動要求は「一度実行したら
-  意味を失うイベント」だが、OTAターゲットは「あるべき状態」なので照合し続けてよい。
-  デバイスは埋め込みビルドバージョン（後述）と一致するまで、バッチ送信のたびに
-  同じ指示を受け取り続ける。これは同時に**自然なリトライ機構**になる——ダウンロード
-  失敗や書き込み失敗で古いバージョンのまま再起動しても、次のバッチ送信で再び気づいて
-  再試行する。
-- `Uploader::watchResponseHeader` は現状**単一ヘッダしか監視できない**
-  （remote_restart.md）。再起動要求(`X-Namz-Restart`)と共存させるには、batch-uplinkの
-  `Uploader`を複数ヘッダ監視に拡張する必要がある。
+- 手元: `tools/request_ota.py request <device_id> <version>` で `namazu-devices`
+  DynamoDBテーブルに`pending_ota_version`（文字列）を直接セットする
+  （`request_restart.py`と同型のCLI。`cancel`/`list`もある）。
+- デバイスは`uploaderTask`（Core0）のループで**5分に1回**、api Lambdaの
+  `GET /devices/<id>`（既存の読み取り専用エンドポイント。ダッシュボードの
+  デバイスタブと同じもの）に問い合わせ、レスポンスの`pending_ota_version`を
+  自分のビルドバージョン(`NAMZ_FW_VERSION`)と比較する。
+- **リモート再起動要求と違い、値は一度伝えたら消える一回性のものではない。**
+  OTAターゲットは「あるべき状態」なので、デバイスが実際にそのバージョンで
+  起動する（＝`NAMZ_FW_VERSION`が一致する）まで照合し続けてよい。これは
+  同時に**自然なリトライ機構**になる——ダウンロード失敗や書き込み失敗で古い
+  バージョンのまま再起動しても、5分後にまた気づいて再試行する。
+
+当初は[リモート再起動](remote_restart.md)と同じ「バッチ送信レスポンスへの
+便乗」（`Uploader::watchResponseHeader`）を踏襲する案だったが、そのAPIは
+**単一ヘッダしか監視できず**、再起動要求(`X-Namz-Restart`)と共存させるには
+batch-uplinkの拡張（別リポジトリのリリースを挟む）が要った。OTAの確認頻度
+（5分に1回で十分）はバッチ送信頻度（30秒/15秒ごと）と揃える必要が無いため、
+**api Lambdaへの独立したGETに変更してbatch-uplinkには一切手を入れない**
+設計にした。ingest/`Uploader`は無変更。
 
 ### 配布物: 既存CloudFrontに相乗り
 
 新規ドメイン/ACM証明書を作らず、ダッシュボード配信で使っている既存の
-CloudFront + S3に `ota/` プレフィックスで相乗りする。
+S3バケット（`aws_s3_bucket_policy`が`${bucket.arn}/*`とバケット全体を対象に
+しているため、追加の権限設定は不要）+ CloudFrontに`ota/`プレフィックスで
+相乗りする。ファイル名にバージョン(gitの短縮hash)を含むため公開後に内容が
+変わることはなく、CloudFrontの invalidation も不要。
 
 ```
-ota/<env>/<version>.bin       # 例: ota/esp32dev-ota/<gitshorthash>.bin
-ota/<env>/<version>.sha256    # 整合性チェック用
+ota/<env>/<version>.bin      # 例: ota/esp32dev/a1b2c3d.bin
+ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファームは未検証。後述）
 ```
 
-`env`はビルドターゲット（`esp32dev-ota`/`adxl355-ota`、将来16MB版等）。デバイスは
-自分のenv名をビルド時定数として埋め込み済み（後述）にするので、サーバ側に
-device_id→envの対応表を新設する必要はない（**変動軸を混ぜない**という
-`tools/devices.json`の設計方針([design.md](design.md)「多点運用時のデバイス払い出し」)
-をここでも踏襲。envはfirmware自身が知っていれば足りる）。
-
-公開読み取り自体はapi/dashboardと同じ「認証なし公開」の割り切りに乗る
-（バイナリ自体は秘密ではない）。書き込み（`aws s3 cp`）側の権限がそのまま信頼の
-根っこになる点は、terraform stateやHMAC鍵と同じ扱い。
+`env`は`esp32dev`/`adxl355`（センサ・ボードの組。espota用の`-ota` envは
+アップロード方式が違うだけで中身は同じビルドなのでここには出てこない）。
+`tools/publish_ota.sh esp32dev`でビルド〜アップロードまで行う（作業ツリーが
+汚れていたら既定で拒否、`--allow-dirty`で強制可）。
 
 ### バージョン識別: ビルド時にgit短縮hashを埋め込む
 
-現状ファームにバージョン埋め込みが無い。`platformio.ini`にextra_script（Python）を
-足し、`git rev-parse --short HEAD`を`-DNAMZ_FW_VERSION="..."`として注入する。作業
-ツリーが汚れていたら`-dirty`サフィックスを付け、「未コミット状態を配布版として
-掴む」事故を防ぐ。起動シリアルログにも出す（[memo.md](../memo.md)の残タスク
-「起動時のログにバージョン/hash」がこれで一緒に片付く）。
+`firmware/get_fw_version.py`（extra_script）が`git rev-parse --short HEAD`を
+`NAMZ_FW_VERSION`へ、env名から`NAMZ_OTA_ENV`（esp32dev/adxl355）を注入する。
+作業ツリーが汚れていたら`-dirty`サフィックスを付け、未コミット状態を配布版として
+掴む事故に気付けるようにする。起動シリアルログにも出す
+（[memo.md](../memo.md)の残タスク「起動時のログにバージョン/hash」を解消）。
 
 ### ダウンロード: esp_https_ota + push型と同じ安全停止シーケンス
 
-- トリガーを検知したら、push型（§4）と同じ手順でRAMキューを退避する:
-  測定タイマー停止→測定タスクをWDT監視から外す→`flushToSpill()`。
-- `esp_https_ota`（ESP-IDF、Arduino coreから呼べる）で
-  `https://<CloudFrontドメイン>/ota/<env>/<version>.bin`を取得。ブロッキングAPIの
-  ままだと進行中にWDTリセットを挟めないので、低レベルAPI
+- 更新対象を見つけたら、push型（§4）と同じ手順でRAMキューを退避する
+  （`pauseSamplingForOta()`に共通化: 測定タイマー停止→測定タスクをWDT監視から
+  外す→`flushToSpill()`）。
+- `esp_https_ota`（ESP-IDFのAPI、Arduino coreから呼べる）の低レベルAPI
   (`esp_https_ota_begin`/`perform`/`finish`)でループを回し、毎周
-  `esp_task_wdt_reset()`を呼ぶ（ArduinoOTAの`onProgress`と同じ役割）。
-- ダウンロード完了後、`.sha256`と突き合わせてから確定する。不一致なら
-  `esp_https_ota_abort`し、測定を復旧して次バッチ送信でのリトライに任せる
-  （上記のリトライ機構がそのまま効く）。
+  `esp_task_wdt_reset()`を呼ぶ（ArduinoOTAの`onProgress`と同じ役割。ブロッキング
+  APIそのままだと進行中にWDTを養えない）。
+- TLS証明書はArduino-ESP32同梱のルートCAバンドル(`arduino_esp_crt_bundle_attach`)
+  で検証する。`Uploader`は`setInsecure()`（検証省略、既知のTODO）だが、OTA取得は
+  そのまま実行されるコードの取得でありUploaderより一段厳しく扱うべきと判断し、
+  ここだけ正規のTLS検証にした。
 - 成功なら`ESP.restart()`。失敗系は測定タイマー・WDT登録を復旧して測定続行
-  （push型`onError`と同じ）。
+  （push型`onError`と同じ）し、次回（5分後）のチェックで自然にリトライする。
 
-### ロールバック: pull型で初めて価値が出る
+**`.sha256`との突き合わせはファーム側では実装していない**（`esp_https_ota`
+自身がESP32イメージのマジック・チェックサムを検証するのと、上記のTLS検証で
+「正規のCloudFrontから来た完全なデータ」であることは担保できる。バージョン
+文字列を取り違えて誤った版を公開する運用ミス対策としては、`.sha256`は
+`publish_ota.sh`が生成し運用者が手元で目視確認する用途に留めた）。
 
-push型（§5）では「ロールバックは期待しない、最後の砦は物理アクセス」と割り切った。
-pull型は**無人運用中の無人トリガー**なので、焼き損じた時に現地対応できない期間が
-長くなりうる——ここで初めて自動ロールバックの価値が上回る。
+### ロールバック: 今回は見送った
 
-`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`を有効化し、新イメージ起動後に「WiFi接続+
-初回バッチ送信成功」を健全性の条件として`esp_ota_mark_app_valid_cancel_rollback()`
-を呼ぶ。タイムアウト内に呼ばれなければブートローダが前スロットへ自動的に戻る。
-**この変更はパーティションではなくbootloader設定なので、push型にも同時に効く**
-（むしろ両方に恩恵がある）。実装するときは push型の§5「ロールバックは期待しない」
-の記述もここで更新する。
+push型（§5）で書いた「ロールバックは期待しない、最後の砦は物理アクセス」は
+pull型でも変わっていない。無人トリガーで焼き損じた場合に自動で前スロットへ
+戻れる`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`は本来pull型でこそ価値が出るが、
+これはbootloaderのsdkconfig変更を伴い、**実機で実際にロールバックが発動する
+ところまで確認しないと安全側に効いているか判断できない**（設定を間違えると
+起動そのものが壊れうる）。今回のセッションでは実機を触れないため見送った。
+次に実機を触る機会に、push型の実機確認（§6の残タスク）と合わせて検討する。
 
-### 未決事項（実装前に決めること）
+### 未決事項・既知の割り切り
 
-0. **秘密情報のNVS化が前提条件（上記）。** これを先に片付けないと配布物を公開できない。
-   NVS書き込みを既存の`tools/provision_device.py`の払い出しフローにどう組み込むか
-   （USB経由の専用コマンドを足す、初回焼き込み時に一緒に流す、等）を決める。
-1. **サーバがデバイスの現在バージョンを知る手段が無い。** ingestの
-   `pending_ota_version`と実際に動いているバージョンの一致判定ができないと、
-   「もう最新なのに毎バッチヘッダを返し続ける」（実害はないが無駄）状態になる。
-   再起動要求のACK設計を参考に、焼き終わって再起動後の最初のバッチ送信で
-   `X-Namz-Fw-Version`のような自己申告ヘッダをデバイス側から載せ、ingestが
-   `pending_ota_version`と比較して一致したらクリアする経路を足すのが筋が良さそう。
-2. **複数ヘッダ監視への`Uploader`拡張**が要る（再起動要求と共存させる場合）。
-3. **段階的ロールアウト**（1台だけ先に上げて様子見）は`pending_ota_version`を
-   デバイス単位で持てば自然に表現できる（`request_ota.py`はdevice_id必須なので
-   既にそうなっている）。
-4. 16MB機（`partitions_adxl355_16mb.csv`）のパーティションサイズ差はビルドenv差に
-   吸収されるので、pull型固有の対応は不要（push型と同じ扱い）。
+- **ロールバック未実装**（上記）。実機確認のタイミングでやる。
+- **段階的ロールアウト**（1台だけ先に上げて様子見）は`pending_ota_version`を
+  デバイス単位で持つ設計なので自然に表現できる（`request_ota.py`はdevice_id
+  必須）。運用手順としては既に可能。
+- **確認間隔は5分固定**（`kOtaCheckIntervalMs`）。バッチ送信より確認が遅れる
+  ぶん、更新の反映は最大5分遅れる。無人運用の速報性より確認頻度（＝api
+  Lambda呼び出し回数）を抑える方を優先した。
+- 16MB機（`partitions_adxl355_16mb.csv`）のパーティションサイズ差はビルドenv差に
+  吸収されるので、pull型固有の対応は不要（push型と同じ扱い）。NVSプロビジョニング
+  も対象機と同じbase env(`adxl355-provision`)からextendsしてパーティション表を
+  揃えている（provision専用ビルドで誤って4MB既定に巻き戻すとspill容量が壊れる
+  ため）。

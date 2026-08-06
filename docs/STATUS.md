@@ -165,8 +165,13 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       `Uploader::flushToSpill()`でOTA開始前に測定を止めてRAMキューをLittleFSへ退避
       してから焼く。`tools/provision_device.py ota-password --id N` でデバイス別の
       認証パスワードを引き `pio run -e <env>-ota -t upload --upload-port namazu-N.local`。
-      外出先からの更新・無人運用に要るHTTPSプル型は**作戦のみ検討済み**
-      （[ota.md §7](ota.md#7-将来-httpsプル型作戦実装は未着手)、実装は未着手）
+      外出先からの更新・無人運用に要るHTTPSプル型も**実装済み・実機での動作確認は
+      まだ**（[ota.md §7](ota.md#7-httpsプル型外出先からの更新無人運用向け)）。
+      前提としてデバイス識別情報・秘密をコンパイル時定数(旧secrets.h)からNVSへ
+      移した（`tools/provision_device.py provision-h` → `[env:provision]`で焼く）。
+      手元の`tools/request_ota.py request <id> <version>`で許可すると、デバイスが
+      5分ごとのapi Lambda問い合わせで気づき`esp_https_ota`で取得する。ロールバック
+      （`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`）は実機無しでは安全に検証できず見送り
 - [ ] リモート再起動要求（詳細は [remote_restart.md](remote_restart.md)）: **実装済み・
       実機での動作確認はまだ**。batch-uplink v1.3.0でUploaderにレスポンスヘッダ読み取りを
       追加し、`tools/request_restart.py` で要求を立てるとデバイスが次回バッチ送信時に

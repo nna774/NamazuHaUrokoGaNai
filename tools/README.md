@@ -36,7 +36,7 @@ python gen_fir_header.py   # -> firmware/lib/Shindo/JmaFirTaps.h
 # デバイス払い出し（devices.json が単一の真実。詳細は docs/design.md）
 python provision_device.py list
 python provision_device.py add --id 2 --label 2号機 --sensor adxl355  # HMAC鍵を生成
-python provision_device.py secrets-h --id 2 --force                   # ファーム側
+python provision_device.py provision-h --id 2 --force                 # NVS書き込み用(secrets_provision.h)
 python provision_device.py tfvars                                     # サーバ側（tfvarsへ貼る）
 python provision_device.py env --id 2                                 # 焼くenv名
 python provision_device.py ota-password --id 2                        # OTA(espota)認証パスワード

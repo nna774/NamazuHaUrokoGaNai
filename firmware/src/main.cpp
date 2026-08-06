@@ -6,15 +6,21 @@
 // NAMZ_SENSOR_TEST を定義してビルドすると WiFi/送信を行わず
 // シリアルに "t_us,x,y,z" を出すだけ（tools/capture_serial.py 用・Phase1）。
 
+#include <ArduinoJson.h>
 #include <Arduino.h>
 #include <ArduinoOTA.h>
+#include <HTTPClient.h>
 #include <SPI.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <esp_crt_bundle.h>
+#include <esp_https_ota.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
 #include <time.h>
 
 #include "Batch.h"
+#include "DeviceIdentity.h"
 #include "Display.h"
 #include "NamzWire.h"
 #ifdef NAMZ_SENSOR_ADXL355
@@ -47,14 +53,17 @@ static volatile float gDispIntensity = 0.0f;
 static volatile float gDispPeakGal = 0.0f;
 static volatile uint32_t gLastShakeMs = 0;  // 瞬時合成加速度がしきい値を超えた最終時刻
 
+// デバイス識別情報・秘密・エンドポイントURL。setup()の先頭でNVSからロードする
+// （旧secrets.h。コンパイル時に埋め込まない理由はdocs/ota.md §7参照）。
+static DeviceIdentity gIdentity;
+
 #ifndef NAMZ_SENSOR_TEST
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // バッチ送信のレスポンスヘッダ X-Namz-Restart を監視する（リモート再起動要求、
 // docs/remote_restart.md 参照）。ingest がこのヘッダを立てるのは
 // tools/request_restart.py で要求した直後の1回だけ。
-static Uploader gUploader(kIngestUrl, kAlertUrl, kHmacSecret, kDeviceId,
-                          kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
-                          /*watchResponseHeader=*/"X-Namz-Restart");
+// gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
+static Uploader* gUploader = nullptr;
 
 struct AlertMsg {
   uint64_t us;
@@ -141,7 +150,7 @@ static void samplingTask(void*) {
         // ヘッダはここで書く。sample_count が確定するのが「積み終えた後」だから。
         // Batch はワイヤ形式を知らないので、この一手だけがNAMZ形式を作っている。
         namzwire::fillHeader(*cur, gSensor.sensorType(), gSensor.scaleMgPerLsb(),
-                             kSampleRateHz, kDeviceId);
+                             kSampleRateHz, gIdentity.deviceId);
         if (xQueueSend(gBatchQueue, &cur, 0) != pdTRUE) {
           // 送信タスクが詰まっている: uploaderに直接渡す代わりに破棄回避のため待たない。
           // batchQueueは十分な深さを持たせている前提。溢れたら最古を諦める。
@@ -189,7 +198,7 @@ static void samplingTask(void*) {
 static void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(kWifiSsid, kWifiPass);
+  WiFi.begin(gIdentity.wifiSsid.c_str(), gIdentity.wifiPass.c_str());
   Serial.print("[wifi] connecting");
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
@@ -204,22 +213,32 @@ static void connectWifi() {
                 WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "FAILED");
 }
 
-// --- OTA更新（ArduinoOTA、LAN内push。docs/ota.md）---
+// --- OTA更新の安全な停止・再開（push/pull共通。docs/ota.md）---
 // フラッシュ書き込み中はキャッシュが無効になり両コアの命令フェッチが止まるため、
 // 100Hzの測定タイマーは転送中に確実に取りこぼす。転送開始時点で一旦止め、RAMキュー
 // のバッチはLittleFSへ退避してから焼く（電源断・パニックでも失わないようにする）。
-static void otaOnStart() {
+static void pauseSamplingForOta() {
   Serial.println("[ota] start: pausing sampling, flushing queue to spill");
   esp_timer_stop(gSampleTimer);
   // タイマーを止めるとsamplingTaskへの通知も止まり、自分でesp_task_wdt_reset()を
-  // 呼べなくなる。転送が終わる（成功時は再起動、失敗時はotaOnErrorで再開）まで
+  // 呼べなくなる。転送が終わる（成功時は再起動、失敗時はresumeSamplingで再開）まで
   // ウォッチドッグの監視対象から一時的に外す。
   esp_task_wdt_delete(gSamplingTask);
   Batch* b = nullptr;
-  while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) gUploader.enqueue(b);
-  size_t flushed = gUploader.flushToSpill();
+  while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) gUploader->enqueue(b);
+  size_t flushed = gUploader->flushToSpill();
   Serial.printf("[ota] flushed %u batch(es) to spill\n", (unsigned)flushed);
 }
+
+// 成功時はESP.restart()するのでここは通らない。失敗時は測定を止めたままに
+// しないよう再開する。
+static void resumeSamplingAfterOtaFailure(const char* reason) {
+  Serial.printf("[ota] %s: resuming sampling\n", reason);
+  esp_task_wdt_add(gSamplingTask);
+  esp_timer_start_periodic(gSampleTimer, kReadPeriodUs);
+}
+
+static void otaOnStart() { pauseSamplingForOta(); }
 
 static void otaOnProgress(unsigned int done, unsigned int total) {
   // 転送は呼び出し元(uploaderTask)のループ内で丸ごとブロックするので、ここで
@@ -234,17 +253,110 @@ static void otaOnProgress(unsigned int done, unsigned int total) {
 }
 
 static void otaOnError(ota_error_t error) {
-  // 成功時はArduinoOTAが自分でESP.restart()するのでここには来ない。
-  // 失敗時は測定を止めたままにしないよう再開する。
-  Serial.printf("[ota] error %u: resuming sampling\n", (unsigned)error);
-  esp_task_wdt_add(gSamplingTask);
-  esp_timer_start_periodic(gSampleTimer, kReadPeriodUs);
+  char reason[32];
+  snprintf(reason, sizeof(reason), "push error %u", (unsigned)error);
+  resumeSamplingAfterOtaFailure(reason);
+}
+
+// --- OTA更新の待ち受け（HTTPS pull、外出先からの更新・無人運用向け。docs/ota.md §7）---
+// 手元から tools/request_ota.py で許可したバージョンを、api Lambda(/devices/<id>)への
+// 定期的な問い合わせで知る（トリガーはリモート再起動と同型だが「消費しない」——
+// ターゲットは「あるべき状態」なので、デバイスが実際にそのバージョンで起動するまで
+// 照合し続けてよい。取得・書き込み失敗時の自然なリトライにもなる）。
+static constexpr uint32_t kOtaCheckIntervalMs = 5UL * 60UL * 1000UL;  // 5分
+
+// pending_ota_versionを読む。取得できなければ空文字列。
+static String fetchPendingOtaVersion() {
+  WiFiClientSecure client;
+  client.setInsecure();  // docs/ota.md §7: api自体はUploaderと同じ割り切り
+  HTTPClient http;
+  char url[192];
+  snprintf(url, sizeof(url), "%s/devices/%u", gIdentity.apiUrl.c_str(),
+           (unsigned)gIdentity.deviceId);
+  if (!http.begin(client, url)) return "";
+  http.setTimeout(8000);
+  int code = http.GET();
+  String result;
+  if (code == 200) {
+    JsonDocument doc;  // ArduinoJson v7: ヒープ確保、サイズ指定不要
+    if (deserializeJson(doc, http.getString()) == DeserializationError::Ok) {
+      const char* v = doc["device"]["pending_ota_version"] | (const char*)nullptr;
+      if (v) result = v;
+    }
+  }
+  http.end();
+  return result;
+}
+
+// OTA本体を取得して書き込む。安全停止(pauseSamplingForOta)は呼び出し側の責務。
+// 成功時はESP.restart()するので戻らない。失敗時はfalseを返す（呼び出し側が
+// resumeSamplingAfterOtaFailureを呼ぶ）。
+static bool performPullOta(const String& targetVersion) {
+  char url[256];
+  snprintf(url, sizeof(url), "%s/ota/%s/%s.bin", gIdentity.otaBaseUrl.c_str(), kOtaEnv,
+           targetVersion.c_str());
+  Serial.printf("[ota-pull] fetching %s\n", url);
+
+  esp_http_client_config_t httpConfig = {};
+  httpConfig.url = url;
+  httpConfig.timeout_ms = 15000;
+  // TLS証明書はArduino-ESP32同梱のルートCAバンドルで検証する。コード実行に
+  // 直結する取得なので、Uploaderのsetinsecure()割り切りより厳しくする。
+  httpConfig.crt_bundle_attach = arduino_esp_crt_bundle_attach;
+
+  esp_https_ota_config_t otaConfig = {};
+  otaConfig.http_config = &httpConfig;
+
+  esp_https_ota_handle_t handle = nullptr;
+  esp_err_t err = esp_https_ota_begin(&otaConfig, &handle);
+  if (err != ESP_OK) {
+    Serial.printf("[ota-pull] begin failed: %d\n", (int)err);
+    return false;
+  }
+
+  esp_err_t performErr;
+  do {
+    performErr = esp_https_ota_perform(handle);
+    esp_task_wdt_reset();  // 転送はここでブロックする(otaOnProgressと同じ理由)
+  } while (performErr == ESP_ERR_HTTPS_OTA_IN_PROGRESS);
+
+  if (performErr != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
+    Serial.printf("[ota-pull] perform failed: %d\n", (int)performErr);
+    esp_https_ota_abort(handle);
+    return false;
+  }
+
+  esp_err_t finishErr = esp_https_ota_finish(handle);
+  if (finishErr != ESP_OK) {
+    Serial.printf("[ota-pull] finish failed: %d\n", (int)finishErr);
+    return false;
+  }
+  Serial.println("[ota-pull] write OK, restarting");
+  Serial.flush();
+  return true;
+}
+
+// バージョン不一致を見つけたら、安全停止→取得→(成功なら再起動/失敗なら復旧)まで
+// 一息に行う。uploaderTaskのループから定期的に呼ぶ。
+static void checkAndPerformPullOta() {
+  String target = fetchPendingOtaVersion();
+  if (target.length() == 0 || target == kFwVersion) return;
+  Serial.printf("[ota-pull] update available: %s -> %s\n", kFwVersion, target.c_str());
+  pauseSamplingForOta();
+  if (performPullOta(target)) {
+    esp_task_wdt_reset();
+    delay(200);
+    ESP.restart();
+  } else {
+    resumeSamplingAfterOtaFailure("pull failed");
+  }
 }
 
 // --- 送信タスク（Core0）---
 static void uploaderTask(void*) {
   esp_task_wdt_add(nullptr);
   uint32_t lastResync = 0;
+  uint32_t lastOtaCheck = 0;
   bool restartRequested = false;  // サーバからのリモート再起動要求（docs/remote_restart.md）
 
   // このタスクは1周の中でネットワーク待ちを何度もする。TLS接続のタイムアウトは
@@ -265,14 +377,25 @@ static void uploaderTask(void*) {
       lastResync = millis();
     }
 
-    // OTA更新の待ち受け。通常は着信確認だけの軽い呼び出しだが、実際に転送が
-    // 始まると完了までこの呼び出し内でブロックする（otaOnProgressでWDTを養う）。
+    // OTA更新の待ち受け（LAN内push）。通常は着信確認だけの軽い呼び出しだが、
+    // 実際に転送が始まると完了までこの呼び出し内でブロックする
+    // （otaOnProgressでWDTを養う）。
     ArduinoOTA.handle();
+
+    // OTA更新の確認（HTTPS pull、docs/ota.md §7）。5分に1回、手元で許可した
+    // バージョンと自分のビルドバージョンを突き合わせる。不一致なら取得〜書き込み
+    // まで一息に行い、完了までこの呼び出し内でブロックする（performPullOta内で
+    // WDTを養う）。
+    if (millis() - lastOtaCheck > kOtaCheckIntervalMs) {
+      lastOtaCheck = millis();
+      checkAndPerformPullOta();
+      esp_task_wdt_reset();
+    }
 
     // batchQueue -> uploader
     Batch* b = nullptr;
     while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) {
-      gUploader.enqueue(b);
+      gUploader->enqueue(b);
     }
     // alertQueue -> 即時送信
     AlertMsg m;
@@ -283,28 +406,28 @@ static void uploaderTask(void*) {
                        "{\"device_id\":%u,\"detected_at_us\":%llu,"
                        "\"realtime_intensity\":%.2f,\"peak_gal\":%.3f,"
                        "\"kind\":\"device_prompt\"}",
-                       (unsigned)kDeviceId, (unsigned long long)m.us,
+                       (unsigned)gIdentity.deviceId, (unsigned long long)m.us,
                        m.intensity, m.peak);
-      bool ok = gUploader.sendAlert(json, n);
+      bool ok = gUploader->sendAlert(json, n);
       esp_task_wdt_reset();
       Serial.printf("[alert] I=%.1f peak=%.2fgal sent=%d\n", m.intensity, m.peak, ok);
     }
 
-    gUploader.pump();
+    gUploader->pump();
     esp_task_wdt_reset();
 
     // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、RAMキューを
     // LittleFSへ退避してからすぐ再起動する（OTAのotaOnStartと同じ安全策。
     // 通信を待たないので数秒で落とせる）。退避済みデータはUploaderの不変条件
     // 「2xxが返るまで捨てない」どおり、再起動後の通常のバックフィルで送信が続く。
-    if (!restartRequested && gUploader.lastResponseHeaderValue() == "1") {
+    if (!restartRequested && gUploader->lastResponseHeaderValue() == "1") {
       restartRequested = true;
       Serial.println("[uploader] restart requested by server, flushing queue to spill");
     }
     if (restartRequested) {
       // gBatchQueueはこの周のループ冒頭で既にuploaderへ吸い出し済み。
-      gUploader.flushToSpill();
-      if (gUploader.ramQueued() == 0) {
+      gUploader->flushToSpill();
+      if (gUploader->ramQueued() == 0) {
         Serial.println("[uploader] queue flushed to spill, restarting now");
         Serial.flush();
         esp_task_wdt_reset();
@@ -321,9 +444,13 @@ static void uploaderTask(void*) {
 void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
-  Serial.println("\n[boot] NamazuHaUrokoGaNai");
+  Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
 
-  gDisplay.begin(kDeviceId);
+  // デバイス識別情報・秘密・エンドポイントURLをNVSからロードする（docs/ota.md §7）。
+  // 失敗時はdeviceId=0のまま返る。表示のIDだけはこの時点で使うが、実際に
+  // 空のまま進めてよいかは下のガード（NAMZ_SENSOR_TEST以外）でチェックする。
+  loadDeviceIdentity(gIdentity);
+  gDisplay.begin(gIdentity.deviceId);
   pinMode(kPinButtonFlip, INPUT_PULLUP);
 
   gSpi.begin(kPinSck, kPinMiso, kPinMosi, kPinCsSensor);
@@ -342,17 +469,32 @@ void setup() {
 #endif
 
 #ifndef NAMZ_SENSOR_TEST
+  // WiFi/HMAC/送信先が空のまま進むと不定動作になる（未プロビジョニング）。
+  // tools/provision_device.py provision-h --id N → pio run -e provision -t upload
+  // を先にやれ（docs/ota.md §7）。
+  if (gIdentity.deviceId == 0 || gIdentity.wifiSsid.length() == 0 ||
+      gIdentity.hmacSecret.length() == 0 || gIdentity.ingestUrl.length() == 0) {
+    for (;;) {
+      Serial.println("[boot] device identity not provisioned in NVS. halting.");
+      delay(5000);
+    }
+  }
+
   gBatchQueue = xQueueCreate(4, sizeof(Batch*));
   gAlertQueue = xQueueCreate(4, sizeof(AlertMsg));
   connectWifi();
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
-  gUploader.begin();
+  gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
+                           gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
+                           kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
+                           /*watchResponseHeader=*/"X-Namz-Restart");
+  gUploader->begin();
 
   // OTA更新（docs/ota.md）。ArduinoOTA.handle()はuploaderTask（Core0）で回す。
-  snprintf(gOtaHostname, sizeof(gOtaHostname), "namazu-%u", (unsigned)kDeviceId);
+  snprintf(gOtaHostname, sizeof(gOtaHostname), "namazu-%u", (unsigned)gIdentity.deviceId);
   ArduinoOTA.setHostname(gOtaHostname);
-  ArduinoOTA.setPassword(kOtaPassword);
+  ArduinoOTA.setPassword(gIdentity.otaPassword.c_str());
   ArduinoOTA.onStart(otaOnStart);
   ArduinoOTA.onProgress(otaOnProgress);
   ArduinoOTA.onError(otaOnError);
@@ -436,11 +578,11 @@ void loop() {
 #else
     bool wifi = WiFi.status() == WL_CONNECTED;
     String ip = wifi ? WiFi.localIP().toString() : String("");
-    uint32_t backlog = gUploader.spillCount() + gUploader.ramQueued();
+    uint32_t backlog = gUploader->spillCount() + gUploader->ramQueued();
     uint32_t backlogAgeS = 0;
     uint64_t oldestUs;
     if (backlog > 0 && timesync::isSynced() &&
-        gUploader.oldestQueuedStartUs(oldestUs)) {
+        gUploader->oldestQueuedStartUs(oldestUs)) {
       uint64_t nowUs = timesync::nowUs();
       backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
     }

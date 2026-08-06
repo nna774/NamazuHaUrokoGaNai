@@ -3,7 +3,7 @@ firmware/.pio/
 firmware/.pioenvs/
 firmware/.piolibdeps/
 firmware/.vscode/
-firmware/**/secrets.h
+firmware/**/secrets_provision.h
 
 # デバイスマニフェスト（HMAC鍵を含む。雛形は devices.example.json）
 tools/devices.json
