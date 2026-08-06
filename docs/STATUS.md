@@ -168,15 +168,19 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       device 2へのUSB書き込み・起動・OTAリスナー起動は実機確認済みだが、母艦(別VLAN)
       からのpush転送はネットワーク分離で届かなかった（ota.md §5）。
       `unnamed_network_g` に実際に繋がった端末から試す必要がある。
-      外出先からの更新・無人運用に要るHTTPSプル型も**実装済み・実機での動作確認は
-      まだ**（[ota.md §7](ota.md#7-httpsプル型外出先からの更新無人運用向け)。デバイス
+      外出先からの更新・無人運用に要るHTTPSプル型は**実装済み・device2実機で
+      取得〜書き込み〜再起動〜新バージョン起動まで成功確認済み**
+      （[ota.md §7](ota.md#7-httpsプル型外出先からの更新無人運用向け)。デバイス
       発信の経路なので上記のネットワーク分離の影響を受けない）。前提としてデバイス
       識別情報・秘密をコンパイル時定数(旧secrets.h)からNVSへ移した
       （`tools/provision_device.py provision-h` → `[env:provision]`で焼く）。手元の
       `tools/request_ota.py request <id> <version>`で許可すると、デバイスが
       バッチ送信レスポンスヘッダ（リモート再起動要求と同じ経路。batch-uplink
-      v1.5.0で複数ヘッダ監視に対応）で気づき`esp_https_ota`で取得する。ロールバック
-      （`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`）は実機無しでは安全に検証できず見送り
+      v1.5.0で複数ヘッダ監視に対応）で気づき`HTTPUpdate`で取得する。TLS検証は
+      Amazon Root CA 1を埋め込んで`setCACert()`（既定CAバンドルは実機で機能せず、
+      実際の証明書チェーンを確認して1本だけ明示指定した）。失敗時は1分バックオフ
+      でリトライし、30分（既定）解消しなければwatchdogがSlack通知する。ロールバック
+      （`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`）は今回も見送り
 - [ ] リモート再起動要求（詳細は [remote_restart.md](remote_restart.md)）: **実装済み・
       実機での動作確認はまだ**。batch-uplink v1.3.0でUploaderにレスポンスヘッダ読み取りを
       追加し、`tools/request_restart.py` で要求を立てるとデバイスが次回バッチ送信時に

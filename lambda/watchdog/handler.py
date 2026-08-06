@@ -21,6 +21,8 @@ import time
 
 from batch_uplink import devices, notify
 
+from common import ota_watch
+
 # 生存とみなす最終受信からの猶予[s]。バッチは30秒間隔なので、既定300秒＝約10バッチ落ち。
 OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))
 # 落ちている間の再送間隔[s]。既定1日。
@@ -29,6 +31,12 @@ OFFLINE_RENOTIFY_S = float(os.environ.get("NAMZ_OFFLINE_RENOTIFY_S", "86400"))
 LAG_AFTER_S = float(os.environ.get("NAMZ_LAG_AFTER_S", "600"))
 # 遅延が続いている間の再送間隔[s]。既定1日。
 LAG_RENOTIFY_S = float(os.environ.get("NAMZ_LAG_RENOTIFY_S", "86400"))
+# pull型OTA(docs/ota.md §7)。要求してからこの秒数を超えて解消しなければ「停滞」と
+# みなす。1分バックオフでの再試行を何度か経てもなお解決しない状況を想定し、
+# 数分程度の一時的な通信不調では鳴らないよう余裕を持たせる。既定1800秒＝30分。
+OTA_STUCK_AFTER_S = float(os.environ.get("NAMZ_OTA_STUCK_AFTER_S", "1800"))
+# 停滞が続いている間の再送間隔[s]。既定1日。
+OTA_STUCK_RENOTIFY_S = float(os.environ.get("NAMZ_OTA_STUCK_RENOTIFY_S", "86400"))
 
 JST = dt.timezone(dt.timedelta(hours=9))
 
@@ -61,6 +69,8 @@ def handler(event, context):
     renotify_after = int(OFFLINE_RENOTIFY_S * 1e6)
     lag_after = int(LAG_AFTER_S * 1e6)
     lag_renotify = int(LAG_RENOTIFY_S * 1e6)
+    ota_stuck_after = int(OTA_STUCK_AFTER_S * 1e6)
+    ota_stuck_renotify = int(OTA_STUCK_RENOTIFY_S * 1e6)
     n = notify.from_env()
     actions = []
 
@@ -110,5 +120,24 @@ def handler(event, context):
                     {"最新データ時刻": _fmt_time(last_batch)},
                 )
                 devices.clear_lag(did)
+
+        # pull型OTA(docs/ota.md §7)の停滞。要求してから長時間解消しなければ通知する
+        # （証明書検証失敗・ネットワーク不調・配布物の取り違え等、原因は問わない）。
+        ota_action = ota_watch.evaluate_ota_stuck(item, now_us, ota_stuck_after,
+                                                  ota_stuck_renotify)
+        if ota_action is not None:
+            actions.append({"device_id": did, "action": ota_action})
+            target = item.get("pending_ota_version", "?")
+            requested_at = int(item.get("pending_ota_requested_at_us", 0))
+            elapsed = _humanize((now_us - requested_at) / 1e6) if requested_at else "?"
+            title = "pull型OTAが停滞" if ota_action == "stuck" else "pull型OTAが停滞（継続）"
+            n.notify(
+                title,
+                f"device *{did:04d}* に *{target}* への更新を許可してから *{elapsed}* "
+                "経つが解消していない。証明書検証失敗・ネットワーク不調・配布物の取り違え等、"
+                "実機のシリアルログで原因を確認すること。",
+                {"許可したバージョン": target, "経過": elapsed},
+            )
+            ota_watch.mark_ota_stuck_notified(did, now_us)
 
     return {"ok": True, "actions": actions}

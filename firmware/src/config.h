@@ -105,6 +105,11 @@ static constexpr uint32_t kNtpStepThresholdSeconds = 5;
 static constexpr const char* kFwVersion = NAMZ_FW_VERSION;
 static constexpr const char* kOtaEnv = NAMZ_OTA_ENV;
 
+// OTA配布物(ダッシュボードと共通のCloudFront)のTLS検証用ルートCA。
+// `firmware/certs/amazon_root_ca1.pem`を`platformio.ini`の
+// `board_build.embed_txtfiles`でリンクし、その先頭/終端シンボルを指す
+// （main.cppで`extern`宣言する）。理由はmain.cpp側のコメント参照。
+
 // デバイス識別情報・秘密・エンドポイントURL（旧secrets.h）はコンパイル時定数
 // ではなくNVSに持つ（DeviceIdentity.h）。理由はdocs/ota.md §7「バイナリの
 // 秘密情報を分離しないと成立しない」を参照——pull型OTAでenvごとに1本の
