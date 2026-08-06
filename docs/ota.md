@@ -2,7 +2,11 @@
 
 ファームの無線更新。2026-08-06 に §2-A（ArduinoOTA、LAN内push）と
 §7（HTTPSプル型、外出先からの更新・無人運用向け）の両方を実装した。
-**どちらも実機での動作確認はまだ**（firmwareビルド全env・
+push型はdevice 2へのUSB書き込み・起動・OTAリスナー起動
+（`[ota] ready as namazu-2.local`）までは実機で確認できたが、**push本体
+（`espota`での転送）は自宅ネットワークの構成により母艦から直接は届かなかった**
+（§5「ネットワーク分離」参照）。実装自体の不具合ではなく、試す場所を選ぶ運用上の
+制約。pull型は**実機での動作確認はまだ**（firmwareビルド全env・
 `firmware/test/run.sh`・`pytest lambda/tests tools/tests` は確認済み）。
 関連: [リモート再起動](remote_restart.md)（コマンドラインから再起動要求を送る作戦。
 更新後に確認してから確定させる運用の足場になる。今回の実装で使う `flushToSpill()`
@@ -25,8 +29,9 @@
 送信タスク（Core0, `uploaderTask`）で `ArduinoOTA.handle()` を回す。測定タスク
 （Core1・優先度10）を巻き込まない側に置くのが要点。
 
-将来 HTTPSプル型（`esp_https_ota`）が要る場面（外出先からの更新・無人運用）が
-来たら別途検討する。現状2台とも自宅LAN内にあるのでpush型で足りている。
+HTTPSプル型（`esp_https_ota`。外出先からの更新・無人運用向け）は§7で実装した。
+デバイス発信の経路なので、母艦からのpush転送を阻むネットワーク分離（§5）の
+影響を受けないという利点もある。
 
 ## 3. 使い方
 
@@ -41,8 +46,8 @@ NAMZ_OTA_PASSWORD="$(python tools/provision_device.py ota-password --id 2)" \
 IPアドレス直指定でもよい（デバイスのTFTに表示されている）。
 
 新規デバイスや既存デバイスの鍵払い出しには `ota_password` フィールドが要る
-（`tools/provision_device.py add` が自動生成、`secrets-h` で `kOtaPassword` として
-`firmware/src/secrets.h` に出る）。
+（`tools/provision_device.py add` が自動生成、`provision-h` でNVS書き込み用の
+`secrets_provision.h` に出る。デバイス識別情報のNVS化については§7参照）。
 
 ## 4. 安全な停止シーケンス（実装済み）
 
@@ -92,12 +97,27 @@ IPアドレス直指定でもよい（デバイスのTFTに表示されている
   タスクウォッチドッグに触れるほど長くなる兆候が実機で見えたら、OTA中だけ
   ウォッチドッグ設定を緩める対応を検討する。
 - **`upload_flags` のパスワードは `${sysenv.NAMZ_OTA_PASSWORD}` 経由。** platformio.ini に
-  平文で書かない（secrets.h と同じ扱い）。`upload_port` はデバイスごとに違うので
+  平文で書かない（NVSの秘密情報と同じ扱い）。`upload_port` はデバイスごとに違うので
   `--upload-port` で毎回指定する（platformio.ini には書いていない）。
+- **ネットワーク分離で母艦から push が届かないことがある。** device 2 は
+  `unnamed_network_g`（`10.255.255.0/24`）に居るが、母艦のMacは別セグメント
+  （`10.8.30.0/24`）。2026-08-06に実際に試したところ:
+  - `ping 10.255.255.1`（デバイス側ゲートウェイ）は通る（ttl=63、1ホップ挟んでルーティング
+    はされている）
+  - `namazu-2.local` のmDNS解決は失敗（`Host ... Not Found`）
+  - IP直指定でも `espota` のUDP招待（ポート3232）に**無応答**（`No response from the ESP`）
+
+  ICMPは通るのにUDP往復が通らないのは、SSID名の `_g`（ゲスト回線らしき命名）が示す
+  とおり**VLAN間のクライアント分離**が疑わしい（デバイスの発信＝AWSへのHTTPS送信は
+  素通り、他ホストからの着信だけ塞がれる構成）。デバイス側のOTAサーバ自体は起動ログ
+  で稼働を確認済みなので、ファーム実装の問題ではない。
+  **試す時は `unnamed_network_g` に実際に接続した端末（スマホ・同SSID上のPC）から
+  `espota` を叩くか、ルータ/APの当該SSID設定でクライアント分離を確認すること。**
 
 ## 6. 未着手
 
-- 実機での動作確認（次回訪問時。§7のプル型も含む）。
+- **push OTA転送そのものの実機確認**（次回、`unnamed_network_g` に接続した端末から。§5参照）。
+- **pull型OTAの実機確認**（次回訪問時。手元のWiFiから外れた環境で試すのが理想）。
 - HTTPSプル型のロールバック（§7「今回は見送った」参照）。
 
 ## 7. HTTPSプル型（外出先からの更新・無人運用向け）
@@ -213,7 +233,7 @@ ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファー�
   そのまま実行されるコードの取得でありUploaderより一段厳しく扱うべきと判断し、
   ここだけ正規のTLS検証にした。
 - 成功なら`ESP.restart()`。失敗系は測定タイマー・WDT登録を復旧して測定続行
-  （push型`onError`と同じ）し、次回（5分後）のチェックで自然にリトライする。
+  （push型`onError`と同じ）し、次のバッチ送信時のチェックで自然にリトライする。
 
 **`.sha256`との突き合わせはファーム側では実装していない**（`esp_https_ota`
 自身がESP32イメージのマジック・チェックサムを検証するのと、上記のTLS検証で
