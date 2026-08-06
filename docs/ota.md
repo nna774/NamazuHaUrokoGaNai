@@ -305,11 +305,11 @@ pull型でも変わっていない。無人トリガーで焼き損じた場合�
 - **段階的ロールアウト**（1台だけ先に上げて様子見）は`pending_ota_version`を
   デバイス単位で持つ設計なので自然に表現できる（`request_ota.py`はdevice_id
   必須）。運用手順としては既に可能。
-- 16MB機（`partitions_adxl355_16mb.csv`）のパーティションサイズ差はビルドenv差に
-  吸収されるので、pull型固有の対応は不要（push型と同じ扱い）。NVSプロビジョニング
-  も対象機と同じbase env(`adxl355-provision`)からextendsしてパーティション表を
-  揃えている（provision専用ビルドで誤って4MB既定に巻き戻すとspill容量が壊れる
-  ため）。
+- device1・device2とも実チップは16MB（`partitions_16mb.csv`、`[env:esp32dev]`base側で
+  指定）。パーティションサイズ差はビルドenv差に吸収されるので、pull型固有の対応は
+  不要（push型と同じ扱い）。NVSプロビジョニングも対象機と同じbase env
+  (`provision`/`adxl355-provision`)からextendsしてパーティション表を揃えている
+  （provision専用ビルドで誤って4MB既定に巻き戻すとspill容量が壊れるため）。
 - ~~watchdogの停滞検知はサーバがデバイスの現在バージョンを知らず切り分けできない~~
   → **解消した**（2026-08-06、[docs/log/2026-08-06-device-status-fw-version-header.md](log/2026-08-06-device-status-fw-version-header.md)）。
   firmwareが毎バッチ`X-Namz-Fw-Version`ヘッダで現在版数を送るようになり、
