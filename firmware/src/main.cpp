@@ -271,28 +271,36 @@ static void otaOnError(ota_error_t error) {
 // リトライにもなる。ヘッダは gUploader->lastResponseHeaderValue() 経由で読む
 // （batch-uplink v1.5.0 で複数ヘッダ監視に対応した）。
 
+// firmware/certs/amazon_root_ca1.pem を platformio.ini の board_build.embed_txtfiles
+// でリンクしたバイナリの先頭/終端（config.h参照）。
+extern const uint8_t amazon_root_ca1_pem_start[] asm("_binary_certs_amazon_root_ca1_pem_start");
+extern const uint8_t amazon_root_ca1_pem_end[] asm("_binary_certs_amazon_root_ca1_pem_end");
+
 // OTA本体を取得して書き込む。安全停止(pauseSamplingForOta)は呼び出し側の責務。
 // 成功時はtrueを返す（呼び出し側がESP.restart()する）。失敗時はfalseを返す
 // （呼び出し側がresumeSamplingAfterOtaFailureを呼ぶ）。
 //
-// 当初はESP-IDFの低レベルAPI(esp_https_ota_begin/perform/finish +
-// esp_http_client_config_t.crt_bundle_attach)でルートCAバンドル検証する設計
-// だったが、device2実機で "Failed to attach bundle" のままTLSハンドシェイクが
-// 常に失敗した（PlatformIO Arduinoフレームワークのビルドでは、バンドル実体を
-// 生成するesp-idf側のcmakeステップが走らず空のままリンクされていると見られる）。
-// 代わりにArduino-ESP32の`HTTPUpdate`（`WiFiClientSecure`+`HTTPClient`経由、
-// 内部はUpdate.hでパーティションに書く。ArduinoOTA自体もUpdate.hを使うので
-// 既にリンクされている）に切り替えた。`WiFiClientSecure`は`setInsecure()`を
-// 呼ばなければ既定でArduino-ESP32同梱のCAバンドル検証が入る——`Uploader`が
-// 使っているのと同じクラスで、こちらは実機で正規検証が通ることを確認済み
-// （docs/ota.md §7）。
+// TLS検証の経緯（実機で2段階の失敗を踏んでいる。docs/ota.md §7）:
+// 1. ESP-IDFの低レベルAPI(esp_https_ota_begin/perform/finish +
+//    esp_http_client_config_t.crt_bundle_attach)で試したが、device2実機で
+//    "Failed to attach bundle" のままTLSハンドシェイクが常に失敗した。
+// 2. Arduino-ESP32の`HTTPUpdate`（`WiFiClientSecure`+`HTTPClient`経由）に
+//    切り替えたが、`setInsecure()`を呼ばない既定CAバンドル検証も同じ理由で
+//    失敗した（"start_ssl_client: -1"）——PlatformIO Arduinoフレームワークの
+//    ビルドでは、既定CAバンドルの実体を生成するesp-idf側のcmakeステップが
+//    走らず、空のままリンクされていると見られる。
+// 結論として、`namazu.dark-kuins.net`実機で証明書チェーンを確認
+// (`openssl s_client -showcerts`)し、ルートCA(Amazon Root CA 1)を1本だけ
+// `setCACert()`で明示指定する方式にした。これはUploaderの`setInsecure()`
+// より厳格（正規のTLS検証）。
 static bool performPullOta(const String& targetVersion) {
   char url[256];
   snprintf(url, sizeof(url), "%s/ota/%s/%s.bin", gIdentity.otaBaseUrl.c_str(), kOtaEnv,
            targetVersion.c_str());
   Serial.printf("[ota-pull] fetching %s\n", url);
 
-  WiFiClientSecure client;  // setInsecure()を呼ばない = 既定CAバンドルで検証する
+  WiFiClientSecure client;
+  client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
   httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
   httpUpdate.onProgress([](int, int) {
     esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う(otaOnProgressと同じ理由)
