@@ -166,11 +166,13 @@
       </div>
       <div id="devices-status" class="muted status-line"></div>
       <table id="devices-table">
-        <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th></tr></thead>
+        <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th><th>版数</th><th>再起動要求</th><th>OTA</th></tr></thead>
         <tbody></tbody>
       </table>
       <p class="muted">状態は最終受信からの経過で判定（緑=オンライン / 赤=欠測）。
-        「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。</p>
+        「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。
+        「版数」はデバイスが今動かしているビルド版数。「OTA」は要求中の目標版数
+        （版数と一致すれば適用済み、違えば取得・適用待ち）。</p>
     </section>
   </main>
 

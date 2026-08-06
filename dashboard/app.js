@@ -678,10 +678,23 @@ async function refreshDevices() {
       const last = d.last_ingest_at_us
         ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
         : '—';
+      const fwVersion = d.fw_version || '—';
+      const restart = d.pending_restart_requested_at_us
+        ? '<span class="warn-hi">● 要求中</span>'
+        : '—';
+      let ota = '—';
+      if (d.pending_ota_version) {
+        ota = (d.fw_version && d.fw_version === d.pending_ota_version)
+          ? `<span class="status-ok">適用済み (${d.pending_ota_version})</span>`
+          : `<span class="warn-hi">→ ${d.pending_ota_version}</span>`;
+      }
       tr.innerHTML = `<td>${id}</td><td>${st}</td>`
         + `<td${warnBg(d.age_s, offlineAt)}>${last}</td>`
         + `<td${warnBg(d.lag_s, lagAt)}>${fmtAgo(d.lag_s)}遅れ</td>`
-        + `<td>${d.batches_total ?? 0}</td>`;
+        + `<td>${d.batches_total ?? 0}</td>`
+        + `<td>${fwVersion}</td>`
+        + `<td>${restart}</td>`
+        + `<td>${ota}</td>`;
       tbody.appendChild(tr);
     }
     const n = (data.devices || []).length;

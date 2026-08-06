@@ -255,6 +255,14 @@ def _device_view(item: dict, now_us: int) -> dict:
         # 実際のトリガーはバッチ送信レスポンスヘッダ(X-Namz-Ota-Version)経由で
         # デバイスに伝わる。ここはダッシュボード表示用の参照値。
         "pending_ota_version": item.get("pending_ota_version"),
+        # リモート再起動要求(docs/remote_restart.md)。一回性の要求で、ingestが
+        # 次回バッチ受信時にレスポンスヘッダへ反映した直後に消える。ここに出るのは
+        # 「立てたがまだ次のバッチを受信していない」短い窓だけ。
+        "pending_restart_requested_at_us": item.get("pending_restart_requested_at_us"),
+        # 今このデバイスが動かしている版数(X-Namz-Fw-Version、batch-uplink
+        # v1.6.0のextraRequestHeaders経由で毎バッチ送られてくる)。
+        # pending_ota_versionと比較すればOTAが実際に着地したか外からも分かる。
+        "fw_version": item.get("fw_version", ""),
     }
 
 
