@@ -170,7 +170,8 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       前提としてデバイス識別情報・秘密をコンパイル時定数(旧secrets.h)からNVSへ
       移した（`tools/provision_device.py provision-h` → `[env:provision]`で焼く）。
       手元の`tools/request_ota.py request <id> <version>`で許可すると、デバイスが
-      5分ごとのapi Lambda問い合わせで気づき`esp_https_ota`で取得する。ロールバック
+      バッチ送信レスポンスヘッダ（リモート再起動要求と同じ経路。batch-uplink
+      v1.5.0で複数ヘッダ監視に対応）で気づき`esp_https_ota`で取得する。ロールバック
       （`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`）は実機無しでは安全に検証できず見送り
 - [ ] リモート再起動要求（詳細は [remote_restart.md](remote_restart.md)）: **実装済み・
       実機での動作確認はまだ**。batch-uplink v1.3.0でUploaderにレスポンスヘッダ読み取りを

@@ -252,7 +252,8 @@ def _device_view(item: dict, now_us: int) -> dict:
         "lag_s": ((now_us - last_batch) / 1e6) if last_batch else None,
         "online": age_us is not None and age_us <= int(OFFLINE_AFTER_S * 1e6),
         # pull型OTA(docs/ota.md §7)。手元のtools/request_ota.pyが立てる更新許可。
-        # デバイスは自分のビルドバージョンと比較し、違えば取得しに行く。
+        # 実際のトリガーはバッチ送信レスポンスヘッダ(X-Namz-Ota-Version)経由で
+        # デバイスに伝わる。ここはダッシュボード表示用の参照値。
         "pending_ota_version": item.get("pending_ota_version"),
     }
 

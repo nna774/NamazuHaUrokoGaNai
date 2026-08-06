@@ -139,32 +139,39 @@ pio run -e esp32dev -t upload --upload-port <USBポート>     # 続けて通常
 なった。旧`secrets.h`/`secrets.h.example`は削除し、`tools/provision_device.py`の
 `secrets-h`コマンドは`provision-h`に置き換えた。
 
-### トリガー: 手元から明示許可（自律ポーリングは不採用）
+### トリガー: リモート再起動と同じ「バッチ送信レスポンスへの便乗」（自律ポーリングは不採用）
 
 配布物（S3/CloudFront上のbin）の書き込み権限が万一侵害された場合、無人運用中の
 全機へ運用者の操作なしにコードが流し込める経路になるとpushより一段階ブラスト
 半径が大きい。そこで「運用者が明示的に許可した時だけ取得する」設計にした。
 
+作戦時点の方針どおり、[リモート再起動](remote_restart.md)と同じ「バッチ送信
+レスポンスへの便乗」を踏襲した。
+
 - 手元: `tools/request_ota.py request <device_id> <version>` で `namazu-devices`
   DynamoDBテーブルに`pending_ota_version`（文字列）を直接セットする
   （`request_restart.py`と同型のCLI。`cancel`/`list`もある）。
-- デバイスは`uploaderTask`（Core0）のループで**5分に1回**、api Lambdaの
-  `GET /devices/<id>`（既存の読み取り専用エンドポイント。ダッシュボードの
-  デバイスタブと同じもの）に問い合わせ、レスポンスの`pending_ota_version`を
-  自分のビルドバージョン(`NAMZ_FW_VERSION`)と比較する。
-- **リモート再起動要求と違い、値は一度伝えたら消える一回性のものではない。**
-  OTAターゲットは「あるべき状態」なので、デバイスが実際にそのバージョンで
-  起動する（＝`NAMZ_FW_VERSION`が一致する）まで照合し続けてよい。これは
-  同時に**自然なリトライ機構**になる——ダウンロード失敗や書き込み失敗で古い
-  バージョンのまま再起動しても、5分後にまた気づいて再試行する。
+- ingest `_handle_batch` が `pending_ota_version` を見て、あればレスポンス
+  ヘッダ `X-Namz-Ota-Version: <version>` を返す。
+- **リモート再起動要求と違い、返した直後にクリアしない。** 再起動要求は
+  「一度実行したら意味を失うイベント」だが、OTAターゲットは「あるべき状態」
+  なので照合し続けてよい。デバイスは埋め込みビルドバージョン
+  (`NAMZ_FW_VERSION`)と一致するまで、バッチ送信のたびに同じ指示を受け取り
+  続ける。これは同時に**自然なリトライ機構**になる——ダウンロード失敗や
+  書き込み失敗で古いバージョンのまま再起動しても、次のバッチ送信で再び
+  気づいて再試行する。
 
-当初は[リモート再起動](remote_restart.md)と同じ「バッチ送信レスポンスへの
-便乗」（`Uploader::watchResponseHeader`）を踏襲する案だったが、そのAPIは
-**単一ヘッダしか監視できず**、再起動要求(`X-Namz-Restart`)と共存させるには
-batch-uplinkの拡張（別リポジトリのリリースを挟む）が要った。OTAの確認頻度
-（5分に1回で十分）はバッチ送信頻度（30秒/15秒ごと）と揃える必要が無いため、
-**api Lambdaへの独立したGETに変更してbatch-uplinkには一切手を入れない**
-設計にした。ingest/`Uploader`は無変更。
+実装当初は`Uploader::watchResponseHeader`が**単一ヘッダしか監視できず**、
+再起動要求(`X-Namz-Restart`)と共存させられないという制約にぶつかった。ここで
+batch-uplinkに触れずに済ませようとapi Lambdaへの独立GETに設計変更したが、
+これは「うまくいかなかったら別設計に変える」を無断でやってしまったやり直し
+——**batch-uplinkの拡張は最初から許容範囲**だった。
+[batch-uplink v1.5.0](https://github.com/nna774/batch-uplink/releases/tag/v1.5.0)
+で`Uploader`を複数ヘッダ監視に対応させ（`watchResponseHeaders`配列 + `lastResponseHeaderValue(name)`。
+`kMaxWatchedHeaders=4`まで）、当初案どおりバッチ送信のたびに両方のヘッダを
+一緒に読む設計に作り直した。`firmware/platformio.ini`の`lib_deps`と
+`terraform/build_lambda.sh`の`UPLINK_VERSION`をv1.5.0へ揃えて上げてある
+（CLAUDE.mdの不変条件）。
 
 ### 配布物: 既存CloudFrontに相乗り
 
@@ -230,9 +237,6 @@ pull型でも変わっていない。無人トリガーで焼き損じた場合�
 - **段階的ロールアウト**（1台だけ先に上げて様子見）は`pending_ota_version`を
   デバイス単位で持つ設計なので自然に表現できる（`request_ota.py`はdevice_id
   必須）。運用手順としては既に可能。
-- **確認間隔は5分固定**（`kOtaCheckIntervalMs`）。バッチ送信より確認が遅れる
-  ぶん、更新の反映は最大5分遅れる。無人運用の速報性より確認頻度（＝api
-  Lambda呼び出し回数）を抑える方を優先した。
 - 16MB機（`partitions_adxl355_16mb.csv`）のパーティションサイズ差はビルドenv差に
   吸収されるので、pull型固有の対応は不要（push型と同じ扱い）。NVSプロビジョニング
   も対象機と同じbase env(`adxl355-provision`)からextendsしてパーティション表を
