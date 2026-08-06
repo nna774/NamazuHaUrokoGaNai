@@ -16,7 +16,7 @@ import boto3
 
 from batch_uplink import auth, devices, notify, s3util
 
-from common import events, wire
+from common import events, ota_watch, wire
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
@@ -88,13 +88,18 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
                 extra_headers["X-Namz-Restart"] = "1"
                 devices.clear_restart_request(b.meta.device_id)
             # pull型OTA（tools/request_ota.py が立てる、docs/ota.md §7）の許可
-            # バージョンは「あるべき状態」なので、再起動要求と違いここではクリア
-            # しない——デバイスが実際にそのバージョンで起動する（次にNAMZ_FW_VERSION
-            # が一致したバッチを送ってくる）までヘッダを返し続ける。ダウンロード・
-            # 書き込み失敗時の自然なリトライにもなる。
+            # バージョンは「あるべき状態」なので、再起動要求と違い達成前は
+            # クリアしない——デバイスが実際にそのバージョンで起動する（次に
+            # NAMZ_FW_VERSIONが一致したバッチを送ってくる）までヘッダを返し
+            # 続ける。ダウンロード・書き込み失敗時の自然なリトライにもなる。
+            # 一致した後は解放する。さもないとwatchdogの停滞検知（時間経過
+            # ベース）が達成後も誤検知し続ける。
             pending_ota = item.get("pending_ota_version")
             if pending_ota:
-                extra_headers["X-Namz-Ota-Version"] = str(pending_ota)
+                if ota_watch.reached_target(item):
+                    ota_watch.clear_ota_target(b.meta.device_id, str(pending_ota))
+                else:
+                    extra_headers["X-Namz-Ota-Version"] = str(pending_ota)
     except Exception as e:  # noqa: BLE001
         print(f"restart/ota request check failed: {e!r}")
 

@@ -310,14 +310,17 @@ pull型でも変わっていない。無人トリガーで焼き損じた場合�
   不要（push型と同じ扱い）。NVSプロビジョニングも対象機と同じbase env
   (`provision`/`adxl355-provision`)からextendsしてパーティション表を揃えている
   （provision専用ビルドで誤って4MB既定に巻き戻すとspill容量が壊れるため）。
-- **`pending_ota_version`を「消費しない」方針（取得失敗時の自然なリトライのため。
-  上記）の副作用: 一致を確認した後もサーバ側の値が残り続けるため、後から意図的に
-  USBで別バージョンへ焼き直すと、デバイスが「要求と食い違う」と判断して勝手に元の
-  バージョンへ戻す。**
+- ~~`pending_ota_version`を「消費しない」方針の副作用: 一致を確認した後もサーバ側
+  の値が残り続けるため、後からUSBで別バージョンへ焼き直すと、デバイスが「要求と
+  食い違う」と判断して勝手に元のバージョンへ戻す~~
+  → **解消した**（2026-08-06、[docs/log/2026-08-06-ota-stuck-false-positive.md](log/2026-08-06-ota-stuck-false-positive.md)）。
   [2026-08-06-device1-16mb-confirm.md](log/2026-08-06-device1-16mb-confirm.md)で
-  実際に踏んだ。改善案（ingestが受信した`fw_version`と`pending_ota_version`が
-  一致した時点でサーバ側が自動クリアする。「取得できるまでリトライ」は維持しつつ
-  「達成後は解放する」形にできる）が出ているが未実装。次にOTA周りを触る時に検討する。
+  実際に踏んだのに続けて、同じ未クリア状態がwatchdogの停滞検知の誤検知
+  （達成済みなのに「停滞」通知が出る）としても顕在化した。ingestが受信した
+  バッチの`fw_version`が`pending_ota_version`と一致した時点で
+  （`lambda/common/ota_watch.py`の`reached_target()`/`clear_ota_target()`）
+  サーバ側が自動でクリアするようにした。「取得できるまでリトライ」は維持しつつ
+  「達成後は解放する」形になった。
 - ~~watchdogの停滞検知はサーバがデバイスの現在バージョンを知らず切り分けできない~~
   → **解消した**（2026-08-06、[docs/log/2026-08-06-device-status-fw-version-header.md](log/2026-08-06-device-status-fw-version-header.md)）。
   firmwareが毎バッチ`X-Namz-Fw-Version`ヘッダで現在版数を送るようになり、
