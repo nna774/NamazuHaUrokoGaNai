@@ -2,6 +2,8 @@
   "_comment": "tools/devices.json にコピーして使う。実ファイルはHMAC鍵を含むのでgitignore対象。provision_device.py が唯一の読み手。",
   "ingest_url": "https://xxxxx.lambda-url.ap-northeast-1.on.aws/",
   "alert_url": "https://xxxxx.lambda-url.ap-northeast-1.on.aws/alert",
+  "api_url": "https://xxxxx.lambda-url.ap-northeast-1.on.aws",
+  "ota_base_url": "https://xxxxx.cloudfront.net",
   "default_wifi_ssid": "your-ssid",
   "default_wifi_pass": "your-pass",
   "devices": [

@@ -10,6 +10,8 @@ def manifest(**over):
     m = {
         "ingest_url": "https://ingest.example/",
         "alert_url": "https://ingest.example/alert",
+        "api_url": "https://api.example",
+        "ota_base_url": "https://ota.example",
         "devices": [
             {"id": 1, "label": "湯沢-IIS3DHHC", "sensor": "iis3dhhc", "env": "esp32dev",
              "wifi_ssid": "ssid1", "wifi_pass": "pass1", "hmac_secret": "aa" * 32,
@@ -56,22 +58,23 @@ def test_validate_rejects_missing_ota_password():
         pd.validate(m)
 
 
-def test_secrets_h_has_every_field_the_firmware_needs():
-    """secrets.h.example と同じ定数が全部出ること。欠けるとビルドが落ちる。"""
-    text = pd.render_secrets_h(manifest(), manifest()["devices"][1])
-    for name in ("kWifiSsid", "kWifiPass", "kIngestUrl", "kAlertUrl",
-                 "kDeviceId", "kHmacSecret", "kOtaPassword"):
+def test_provision_h_has_every_field_the_firmware_needs():
+    """secrets_provision.h.example と同じ定数が全部出ること。欠けると書き込みが落ちる。"""
+    text = pd.render_provision_h(manifest(), manifest()["devices"][1])
+    for name in ("kProvWifiSsid", "kProvWifiPass", "kProvIngestUrl", "kProvAlertUrl",
+                 "kProvApiUrl", "kProvOtaBaseUrl", "kProvDeviceId", "kProvHmacSecret",
+                 "kProvOtaPassword"):
         assert name in text, name
-    assert "kDeviceId = 2;" in text
+    assert "kProvDeviceId = 2;" in text
     assert "bb" * 32 in text
     assert "dd" * 16 in text
     assert "ssid2" in text
 
 
-def test_secrets_h_url_override_per_device():
+def test_provision_h_url_override_per_device():
     m = manifest()
     m["devices"][0]["ingest_url"] = "https://other.example/"
-    text = pd.render_secrets_h(m, m["devices"][0])
+    text = pd.render_provision_h(m, m["devices"][0])
     assert "https://other.example/" in text
     assert "https://ingest.example/alert" in text  # 上書きしていない方は共通値
 
@@ -84,11 +87,11 @@ def test_tfvars_keys_are_strings_matching_device_ids():
     assert f'"2" = "{"bb" * 32}"' in out
 
 
-def test_secrets_h_and_tfvars_carry_the_same_key():
+def test_provision_h_and_tfvars_carry_the_same_key():
     """両面に同じ鍵が出ること。ここがずれると必ず認証が落ちる（設計の主眼）。"""
     m = manifest()
     d = pd.find(m, 2)
-    assert d["hmac_secret"] in pd.render_secrets_h(m, d)
+    assert d["hmac_secret"] in pd.render_provision_h(m, d)
     assert d["hmac_secret"] in pd.render_tfvars(m)
 
 

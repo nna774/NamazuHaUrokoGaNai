@@ -91,6 +91,22 @@ static constexpr uint32_t kNtpResyncSeconds = 3600;  // 1時間ごと
 // ppm級(1時間で数ms)なので通常この閾値には掛からない。
 static constexpr uint32_t kNtpStepThresholdSeconds = 5;
 
-// secrets.h（gitignore対象）で定義する:
-//   kWifiSsid, kWifiPass, kIngestUrl, kAlertUrl, kDeviceId, kHmacSecret
-#include "secrets.h"
+// --- ビルド識別（docs/ota.md §7、pull型OTA）---
+// NAMZ_FW_VERSIONはget_fw_version.py(pre extra_script)がgitの短縮hashを注入する。
+// NAMZ_OTA_ENVは platformio.ini の各ハードウェアenv(esp32dev/adxl355)が定義する
+// （env名そのものではなく「センサ・ボードの組」を表す。espota用の"-ota" envは
+// アップロード方式が違うだけで中身は同じビルドなので同じ値になる）。
+#ifndef NAMZ_FW_VERSION
+#define NAMZ_FW_VERSION "unknown"
+#endif
+#ifndef NAMZ_OTA_ENV
+#define NAMZ_OTA_ENV "unknown"
+#endif
+static constexpr const char* kFwVersion = NAMZ_FW_VERSION;
+static constexpr const char* kOtaEnv = NAMZ_OTA_ENV;
+
+// デバイス識別情報・秘密・エンドポイントURL（旧secrets.h）はコンパイル時定数
+// ではなくNVSに持つ（DeviceIdentity.h）。理由はdocs/ota.md §7「バイナリの
+// 秘密情報を分離しないと成立しない」を参照——pull型OTAでenvごとに1本の
+// バイナリを公開URLへ置くと、コンパイル時に焼き込んだWiFiパスワードや
+// 投稿用HMAC鍵がそのまま世界に漏れる。
