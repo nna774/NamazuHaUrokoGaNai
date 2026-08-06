@@ -97,8 +97,9 @@ cd terraform && PYTHON=../.venv/bin/python ./build_lambda.sh
 aws lambda update-function-code --function-name namazu-<fn> --zip-file fileb://builds/<fn>.zip
 #   または terraform apply（環境変数の変更を伴う時。auto-mode分類器がブロックするので手動実行）
 
-# ダッシュボード
-cd dashboard && aws s3 cp app.js s3://namazu-dashboard-486414336274/app.js
+# ダッシュボード（--cache-controlを忘れるとブラウザがapp.jsだけ古いキャッシュを
+# 抱え込み、index.htmlと食い違って表示が壊れることがある。CLAUDE.md参照）
+cd dashboard && aws s3 cp app.js s3://namazu-dashboard-486414336274/app.js --cache-control 'no-cache'
 aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/app.js' '/index.html'
 ```
 
