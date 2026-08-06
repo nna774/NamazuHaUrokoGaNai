@@ -7,8 +7,9 @@
 - **ライブ**: 直近 n分（1/3/5/10/60）の波形。範囲が広いと min/max エンベロープ表示。自動更新
 - **イベント**: 検知イベント一覧（機・震度・計測震度・ピーク・速報/確定フラグ）。クリックで周辺波形。
   「機」セレクタでデバイス絞り込み（既定は全機。絞り込みは `#events?d=<id>` としてURLに載る）
-- **デバイス**: 各デバイスの生存状態（オンライン/欠測・最終受信・データ鮮度・累計バッチ）。
-  `/devices` を定期取得。欠測の能動通知は watchdog Lambda が Slack に飛ばす
+- **デバイス**: 各デバイスの生存状態（オンライン/欠測・最終受信・データ鮮度・累計バッチ・
+  版数・再起動要求・OTA適用状況）。`/devices` を定期取得。欠測の能動通知は watchdog Lambda が
+  Slack に飛ばす
 
 ## API URL の指定
 
@@ -22,7 +23,12 @@ BUCKET=$(cd ../terraform && terraform output -raw dashboard_bucket)
 aws s3 sync . "s3://$BUCKET/" --exclude 'config.example.js' --exclude 'README.md'
 ```
 
-`terraform output dashboard_url` の CloudFront URL で開く。
+`terraform output dashboard_url` の CloudFront URL で開く。**S3オブジェクトに
+`--cache-control` は付けない**（意図的）。ブラウザ向けの`Cache-Control: no-cache`は
+CloudFront側の`aws_cloudfront_response_headers_policy`が付与し、エッジのキャッシュ
+TTLとは別レイヤーで制御している（`terraform/dashboard.tf`参照）。S3側に付けると
+CloudFrontのエッジ↔S3間の再検証まで毎回発生してしまうので、混ぜるな
+（実際に踏んだ、2026-08-06）。
 
 ## ローカル確認
 

@@ -66,6 +66,15 @@ static constexpr const char* kRestartHeader = "X-Namz-Restart";
 static constexpr const char* kOtaVersionHeader = "X-Namz-Ota-Version";
 static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHeader};
 
+// リクエスト側に乗せて送るヘッダ（batch-uplink v1.6.0のextraRequestHeaders）。
+// 今動いているビルド版数(kFwVersion)をingestへ渡し、devicesテーブルに記録させる。
+// サーバ側からも「今どのバージョンが動いているか」を見えるようにするための
+// 汎用ヘッダで、X-Namz-Ota-Versionの停滞検知が「原因不明」で止まっていた問題
+// （docs/ota.md §7 未決事項1）に対する外部可観測性を与える。
+static constexpr const char* kFwVersionHeader = "X-Namz-Fw-Version";
+static constexpr const char* kExtraRequestHeaderNames[] = {kFwVersionHeader};
+static constexpr const char* kExtraRequestHeaderValues[] = {kFwVersion};
+
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
 static Uploader* gUploader = nullptr;
@@ -473,7 +482,8 @@ void setup() {
   gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
-                           kWatchedHeaders, 2);
+                           kWatchedHeaders, 2,
+                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 1);
   gUploader->begin();
 
   // OTA更新（docs/ota.md）。ArduinoOTA.handle()はuploaderTask（Core0）で回す。

@@ -49,13 +49,13 @@ def handler(event, context):
     try:
         if path.rstrip("/").endswith("alert"):
             return _handle_alert(raw, device)
-        return _handle_batch(raw, device)
+        return _handle_batch(raw, device, headers)
     except Exception as e:  # noqa: BLE001
         print(f"ingest error: {e!r}")
         return _resp(400, f"error: {e}")
 
 
-def _handle_batch(raw: bytes, auth_device: str):
+def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
     b = wire.parse(raw)  # magic/長さ検証も兼ねる
     # 認証に使った device と本文の device_id の一致を強制（別デバイスの騙り防止）
     if str(b.meta.device_id) != auth_device:
@@ -66,9 +66,13 @@ def _handle_batch(raw: bytes, auth_device: str):
                   ContentType="application/octet-stream")
     # 生存台帳を更新（watchdog の欠測判定・/devices 表示の元）。ここは主経路ではないので、
     # 失敗してもバッチ保存自体は成功扱いにする（デバイスに無駄な再送をさせない）。
+    # X-Namz-Fw-Version（batch-uplink v1.6.0のextraRequestHeaders経由、firmwareが
+    # 毎バッチ乗せる）は「今このデバイスが動かしている版数」。サーバ側からOTAの
+    # 進行状況・停滞原因を見えるようにする（docs/ota.md §7 未決事項1への対応）。
     try:
         devices.record_batch(b.meta.device_id, b.meta.batch_start_us,
-                             int(time.time() * 1e6), last_batch_key=key)
+                             int(time.time() * 1e6), last_batch_key=key,
+                             fw_version=headers.get("x-namz-fw-version", ""))
     except Exception as e:  # noqa: BLE001
         print(f"devices.record_batch failed: {e!r}")
 

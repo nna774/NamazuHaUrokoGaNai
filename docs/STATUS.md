@@ -97,7 +97,8 @@ cd terraform && PYTHON=../.venv/bin/python ./build_lambda.sh
 aws lambda update-function-code --function-name namazu-<fn> --zip-file fileb://builds/<fn>.zip
 #   または terraform apply（環境変数の変更を伴う時。auto-mode分類器がブロックするので手動実行）
 
-# ダッシュボード
+# ダッシュボード（S3側にCache-Controlは付けない。ブラウザ向けno-cacheは
+# CloudFrontのResponse Headers Policyが付与する。CLAUDE.md参照）
 cd dashboard && aws s3 cp app.js s3://namazu-dashboard-486414336274/app.js
 aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/app.js' '/index.html'
 ```
@@ -143,6 +144,9 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
 - **イベント詳細**: 独立画面（グラフ上部・一覧と排他でガタつかない、`#event/<id>` 直リンク）。
   グラフ下に情報パネル（発生時刻・デバイス・継続・計測震度・震度・ピーク・a0・状態・検知経路・ID）。
   縦軸レンジ選択（既定自動）
+- **デバイス一覧**: 「版数」列（`X-Namz-Fw-Version`ヘッダ経由でfirmwareが毎バッチ送る、
+  今動いているビルド版数）・「再起動要求」列・「OTA」列（要求中の目標版数、現在版数と
+  一致すれば適用済み表示）を表示（2026-08-06、[docs/log/2026-08-06-device-status-fw-version-header.md](log/2026-08-06-device-status-fw-version-header.md)）
 - API URL入力欄は config.js 設定時は非表示。重力DCを差し引いて描画
 - ライブ範囲は S3コスト対策で30分上限（`/recent` の minutes を [0.1, 30] にクランプ）
 - CloudFront配信は更新時に invalidation 必須
@@ -168,8 +172,8 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       device 2へのUSB書き込み・起動・OTAリスナー起動は実機確認済みだが、母艦(別VLAN)
       からのpush転送はネットワーク分離で届かなかった（ota.md §5）。
       `unnamed_network_g` に実際に繋がった端末から試す必要がある。
-      外出先からの更新・無人運用に要るHTTPSプル型は**実装済み・device2実機で
-      取得〜書き込み〜再起動〜新バージョン起動まで成功確認済み**
+      外出先からの更新・無人運用に要るHTTPSプル型は**実装済み・device1/2両機とも
+      NVS化＋実機でのpull型OTA成功確認済み**
       （[ota.md §7](ota.md#7-httpsプル型外出先からの更新無人運用向け)。デバイス
       発信の経路なので上記のネットワーク分離の影響を受けない）。前提としてデバイス
       識別情報・秘密をコンパイル時定数(旧secrets.h)からNVSへ移した
@@ -179,7 +183,9 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       v1.5.0で複数ヘッダ監視に対応）で気づき`HTTPUpdate`で取得する。TLS検証は
       Amazon Root CA 1を埋め込んで`setCACert()`（既定CAバンドルは実機で機能せず、
       実際の証明書チェーンを確認して1本だけ明示指定した）。失敗時は1分バックオフ
-      でリトライし、30分（既定）解消しなければwatchdogがSlack通知する。ロールバック
+      でリトライし、30分（既定）解消しなければwatchdogがSlack通知する。**2026-08-06、
+      device1(esp32dev)・device2(adxl355)両方で実際に自己更新（旧バージョン→
+      再ビルド版）まで成功し、送信も正常継続した。** ロールバック
       （`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`）は今回も見送り
 - [ ] リモート再起動要求（詳細は [remote_restart.md](remote_restart.md)）: **実装済み・
       実機での動作確認はまだ**。batch-uplink v1.3.0でUploaderにレスポンスヘッダ読み取りを
