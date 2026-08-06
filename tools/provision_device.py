@@ -20,6 +20,10 @@ docs/design.md「多点運用時のデバイス払い出し」の実装。設計
 
     # サーバ側へ登録（出力を terraform/terraform.tfvars に貼って apply）
     python tools/provision_device.py tfvars
+
+    # OTA更新（LAN内push、docs/ota.md）: 認証パスワードを引いて焼く
+    NAMZ_OTA_PASSWORD="$(python tools/provision_device.py ota-password --id 2)" \\
+        pio run -e adxl355-ota -t upload --upload-port namazu-2.local
 """
 
 from __future__ import annotations
@@ -41,12 +45,17 @@ SENSOR_ENV = {
     "adxl355": "adxl355",
 }
 
-REQUIRED_FIELDS = ("id", "env", "wifi_ssid", "wifi_pass", "hmac_secret")
+REQUIRED_FIELDS = ("id", "env", "wifi_ssid", "wifi_pass", "hmac_secret", "ota_password")
 
 
 def new_secret() -> str:
     """HMAC共有鍵。ingest は文字列をそのまま鍵に使う（auth.verify）。"""
     return pysecrets.token_hex(32)
+
+
+def new_ota_password() -> str:
+    """ArduinoOTA(espota)の認証パスワード。サーバとは無関係のLAN内専用鍵。"""
+    return pysecrets.token_hex(16)
 
 
 def load(path: Path = MANIFEST) -> dict:
@@ -100,6 +109,9 @@ static constexpr const char* kAlertUrl = "{alert}";
 static constexpr uint32_t kDeviceId = {d['id']};
 
 static constexpr const char* kHmacSecret = "{d['hmac_secret']}";
+
+// ArduinoOTA(espota)認証パスワード。サーバ側とは無関係のLAN内専用鍵。
+static constexpr const char* kOtaPassword = "{d['ota_password']}";
 """
 
 
@@ -138,6 +150,7 @@ def cmd_add(args) -> int:
         "wifi_ssid": args.wifi_ssid or m.get("default_wifi_ssid", ""),
         "wifi_pass": args.wifi_pass or m.get("default_wifi_pass", ""),
         "hmac_secret": new_secret(),
+        "ota_password": new_ota_password(),
     }
     m["devices"].append(d)
     validate(m)
@@ -174,6 +187,11 @@ def cmd_env(args) -> int:
     return 0
 
 
+def cmd_ota_password(args) -> int:
+    print(find(load(), args.id)["ota_password"])
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -203,6 +221,10 @@ def main() -> int:
     e = sub.add_parser("env", help="焼くべき platformio env 名を出す")
     e.add_argument("--id", type=int, required=True)
     e.set_defaults(func=cmd_env)
+
+    o = sub.add_parser("ota-password", help="ArduinoOTA(espota)の認証パスワードを出す")
+    o.add_argument("--id", type=int, required=True)
+    o.set_defaults(func=cmd_ota_password)
 
     args = p.parse_args()
     return args.func(args)
