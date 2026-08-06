@@ -168,8 +168,8 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       device 2へのUSB書き込み・起動・OTAリスナー起動は実機確認済みだが、母艦(別VLAN)
       からのpush転送はネットワーク分離で届かなかった（ota.md §5）。
       `unnamed_network_g` に実際に繋がった端末から試す必要がある。
-      外出先からの更新・無人運用に要るHTTPSプル型は**実装済み・device2実機で
-      取得〜書き込み〜再起動〜新バージョン起動まで成功確認済み**
+      外出先からの更新・無人運用に要るHTTPSプル型は**実装済み・device1/2両機とも
+      NVS化＋実機でのpull型OTA成功確認済み**
       （[ota.md §7](ota.md#7-httpsプル型外出先からの更新無人運用向け)。デバイス
       発信の経路なので上記のネットワーク分離の影響を受けない）。前提としてデバイス
       識別情報・秘密をコンパイル時定数(旧secrets.h)からNVSへ移した
@@ -179,7 +179,9 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       v1.5.0で複数ヘッダ監視に対応）で気づき`HTTPUpdate`で取得する。TLS検証は
       Amazon Root CA 1を埋め込んで`setCACert()`（既定CAバンドルは実機で機能せず、
       実際の証明書チェーンを確認して1本だけ明示指定した）。失敗時は1分バックオフ
-      でリトライし、30分（既定）解消しなければwatchdogがSlack通知する。ロールバック
+      でリトライし、30分（既定）解消しなければwatchdogがSlack通知する。**2026-08-06、
+      device1(esp32dev)・device2(adxl355)両方で実際に自己更新（旧バージョン→
+      再ビルド版）まで成功し、送信も正常継続した。** ロールバック
       （`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`）は今回も見送り
 - [ ] リモート再起動要求（詳細は [remote_restart.md](remote_restart.md)）: **実装済み・
       実機での動作確認はまだ**。batch-uplink v1.3.0でUploaderにレスポンスヘッダ読み取りを
