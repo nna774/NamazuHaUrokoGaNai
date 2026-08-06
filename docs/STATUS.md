@@ -160,11 +160,14 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       （削除する / 無効フラグを立てる）。退役後に watchdog が延々と欠測通知しないように、
       台帳から外すか監視対象外にする運用を決める。`tools/flag_event.py` 相当の手元CLIで
       台帳を編集する形が素直か
-- [ ] OTA更新（詳細は [ota.md](ota.md)）: **実装済み・実機での動作確認はまだ**。
+- [ ] OTA更新（詳細は [ota.md](ota.md)）: **実装済み・push転送そのものの実機確認はまだ**。
       ArduinoOTA（LAN内push）を採用。batch-uplink v1.4.0で追加した
       `Uploader::flushToSpill()`でOTA開始前に測定を止めてRAMキューをLittleFSへ退避
       してから焼く。`tools/provision_device.py ota-password --id N` でデバイス別の
-      認証パスワードを引き `pio run -e <env>-ota -t upload --upload-port namazu-N.local`
+      認証パスワードを引き `pio run -e <env>-ota -t upload --upload-port namazu-N.local`。
+      device 2へのUSB書き込み・起動・OTAリスナー起動は実機確認済みだが、母艦(別VLAN)
+      からのpush転送はネットワーク分離で届かなかった（ota.md §5）。
+      `unnamed_network_g` に実際に繋がった端末から試す必要がある
 - [ ] リモート再起動要求（詳細は [remote_restart.md](remote_restart.md)）: **実装済み・
       実機での動作確認はまだ**。batch-uplink v1.3.0でUploaderにレスポンスヘッダ読み取りを
       追加し、`tools/request_restart.py` で要求を立てるとデバイスが次回バッチ送信時に
