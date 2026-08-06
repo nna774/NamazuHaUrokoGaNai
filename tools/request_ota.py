@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -57,8 +58,9 @@ def cmd_request(args):
         sys.exit("中止した")
     _table().update_item(
         Key={"device_id": args.device_id},
-        UpdateExpression="SET pending_ota_version = :v",
-        ExpressionAttributeValues={":v": args.version},
+        UpdateExpression="SET pending_ota_version = :v, pending_ota_requested_at_us = :t "
+                          "REMOVE ota_stuck_notified_at_us",
+        ExpressionAttributeValues={":v": args.version, ":t": int(time.time() * 1e6)},
     )
     print(f"更新を許可した: device {args.device_id} -> version={args.version}"
           "（次回のデバイスからの問い合わせで反映される）")
@@ -67,7 +69,8 @@ def cmd_request(args):
 def cmd_cancel(args):
     _table().update_item(
         Key={"device_id": args.device_id},
-        UpdateExpression="REMOVE pending_ota_version",
+        UpdateExpression="REMOVE pending_ota_version, pending_ota_requested_at_us, "
+                          "ota_stuck_notified_at_us",
     )
     print(f"更新許可を取り消した: device {args.device_id}")
 
@@ -80,7 +83,10 @@ def cmd_list(_args):
     print(f"更新許可: {len(items)} 件")
     for it in items:
         did = int(it.get("device_id", 0))
-        print(f"  device {did}  pending_ota_version={it['pending_ota_version']}")
+        requested_at = it.get("pending_ota_requested_at_us")
+        age_s = int(time.time() - int(requested_at) / 1e6) if requested_at else None
+        suffix = f"（{age_s}秒前に要求）" if age_s is not None else ""
+        print(f"  device {did}  pending_ota_version={it['pending_ota_version']}{suffix}")
 
 
 def main(argv=None):

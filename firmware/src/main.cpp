@@ -8,10 +8,10 @@
 
 #include <Arduino.h>
 #include <ArduinoOTA.h>
+#include <HTTPUpdate.h>
 #include <SPI.h>
 #include <WiFi.h>
-#include <esp_crt_bundle.h>
-#include <esp_https_ota.h>
+#include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
 #include <time.h>
@@ -271,47 +271,45 @@ static void otaOnError(ota_error_t error) {
 // リトライにもなる。ヘッダは gUploader->lastResponseHeaderValue() 経由で読む
 // （batch-uplink v1.5.0 で複数ヘッダ監視に対応した）。
 
+// firmware/certs/amazon_root_ca1.pem を platformio.ini の board_build.embed_txtfiles
+// でリンクしたバイナリの先頭/終端（config.h参照）。
+extern const uint8_t amazon_root_ca1_pem_start[] asm("_binary_certs_amazon_root_ca1_pem_start");
+extern const uint8_t amazon_root_ca1_pem_end[] asm("_binary_certs_amazon_root_ca1_pem_end");
+
 // OTA本体を取得して書き込む。安全停止(pauseSamplingForOta)は呼び出し側の責務。
-// 成功時はESP.restart()するので戻らない。失敗時はfalseを返す（呼び出し側が
-// resumeSamplingAfterOtaFailureを呼ぶ）。
+// 成功時はtrueを返す（呼び出し側がESP.restart()する）。失敗時はfalseを返す
+// （呼び出し側がresumeSamplingAfterOtaFailureを呼ぶ）。
+//
+// TLS検証の経緯（実機で2段階の失敗を踏んでいる。docs/ota.md §7）:
+// 1. ESP-IDFの低レベルAPI(esp_https_ota_begin/perform/finish +
+//    esp_http_client_config_t.crt_bundle_attach)で試したが、device2実機で
+//    "Failed to attach bundle" のままTLSハンドシェイクが常に失敗した。
+// 2. Arduino-ESP32の`HTTPUpdate`（`WiFiClientSecure`+`HTTPClient`経由）に
+//    切り替えたが、`setInsecure()`を呼ばない既定CAバンドル検証も同じ理由で
+//    失敗した（"start_ssl_client: -1"）——PlatformIO Arduinoフレームワークの
+//    ビルドでは、既定CAバンドルの実体を生成するesp-idf側のcmakeステップが
+//    走らず、空のままリンクされていると見られる。
+// 結論として、`namazu.dark-kuins.net`実機で証明書チェーンを確認
+// (`openssl s_client -showcerts`)し、ルートCA(Amazon Root CA 1)を1本だけ
+// `setCACert()`で明示指定する方式にした。これはUploaderの`setInsecure()`
+// より厳格（正規のTLS検証）。
 static bool performPullOta(const String& targetVersion) {
   char url[256];
   snprintf(url, sizeof(url), "%s/ota/%s/%s.bin", gIdentity.otaBaseUrl.c_str(), kOtaEnv,
            targetVersion.c_str());
   Serial.printf("[ota-pull] fetching %s\n", url);
 
-  esp_http_client_config_t httpConfig = {};
-  httpConfig.url = url;
-  httpConfig.timeout_ms = 15000;
-  // TLS証明書はArduino-ESP32同梱のルートCAバンドルで検証する。コード実行に
-  // 直結する取得なので、Uploaderのsetinsecure()割り切りより厳しくする。
-  httpConfig.crt_bundle_attach = arduino_esp_crt_bundle_attach;
+  WiFiClientSecure client;
+  client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
+  httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
+  httpUpdate.onProgress([](int, int) {
+    esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う(otaOnProgressと同じ理由)
+  });
 
-  esp_https_ota_config_t otaConfig = {};
-  otaConfig.http_config = &httpConfig;
-
-  esp_https_ota_handle_t handle = nullptr;
-  esp_err_t err = esp_https_ota_begin(&otaConfig, &handle);
-  if (err != ESP_OK) {
-    Serial.printf("[ota-pull] begin failed: %d\n", (int)err);
-    return false;
-  }
-
-  esp_err_t performErr;
-  do {
-    performErr = esp_https_ota_perform(handle);
-    esp_task_wdt_reset();  // 転送はここでブロックする(otaOnProgressと同じ理由)
-  } while (performErr == ESP_ERR_HTTPS_OTA_IN_PROGRESS);
-
-  if (performErr != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
-    Serial.printf("[ota-pull] perform failed: %d\n", (int)performErr);
-    esp_https_ota_abort(handle);
-    return false;
-  }
-
-  esp_err_t finishErr = esp_https_ota_finish(handle);
-  if (finishErr != ESP_OK) {
-    Serial.printf("[ota-pull] finish failed: %d\n", (int)finishErr);
+  t_httpUpdate_return ret = httpUpdate.update(client, url);
+  if (ret != HTTP_UPDATE_OK) {
+    Serial.printf("[ota-pull] failed: %d (%s)\n", (int)ret,
+                  httpUpdate.getLastErrorString().c_str());
     return false;
   }
   Serial.println("[ota-pull] write OK, restarting");
@@ -319,10 +317,20 @@ static bool performPullOta(const String& targetVersion) {
   return true;
 }
 
+// 失敗後に間を置かず取得を再試行すると、ヘッダ値は次の成功バッチPOSTまで
+// 更新されないため（Uploaderがキャッシュする値なので）、この関数はuploaderTask
+// のループで毎回呼ばれ続ける。バックオフ無しだと1周(50ms+ネットワーク待ち)ごとに
+// 取得を試み、測定タイマーが止まったまま(pauseSamplingForOta中)になり続けて
+// 実測が止まる（実機で踏んだ。docs/ota.md §7）。
+static constexpr uint32_t kOtaRetryBackoffMs = 60UL * 1000UL;  // 1分
+
 // バージョン不一致を見つけたら、安全停止→取得→(成功なら再起動/失敗なら復旧)まで
 // 一息に行う。uploaderTaskのループでバッチ送信レスポンスを見た時に呼ぶ。
 static void checkAndPerformPullOta(const String& target) {
+  static uint32_t sNextAttemptMs = 0;
   if (target.length() == 0 || target == kFwVersion) return;
+  uint32_t now = millis();
+  if (now < sNextAttemptMs) return;  // 直近の失敗からバックオフ中
   Serial.printf("[ota-pull] update available: %s -> %s\n", kFwVersion, target.c_str());
   pauseSamplingForOta();
   if (performPullOta(target)) {
@@ -331,6 +339,7 @@ static void checkAndPerformPullOta(const String& target) {
     ESP.restart();
   } else {
     resumeSamplingAfterOtaFailure("pull failed");
+    sNextAttemptMs = now + kOtaRetryBackoffMs;
   }
 }
 
