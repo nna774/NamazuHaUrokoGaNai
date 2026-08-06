@@ -97,8 +97,9 @@ cd terraform && PYTHON=../.venv/bin/python ./build_lambda.sh
 aws lambda update-function-code --function-name namazu-<fn> --zip-file fileb://builds/<fn>.zip
 #   または terraform apply（環境変数の変更を伴う時。auto-mode分類器がブロックするので手動実行）
 
-# ダッシュボード
-cd dashboard && aws s3 cp app.js s3://namazu-dashboard-486414336274/app.js
+# ダッシュボード（--cache-controlを忘れるとブラウザがapp.jsだけ古いキャッシュを
+# 抱え込み、index.htmlと食い違って表示が壊れることがある。CLAUDE.md参照）
+cd dashboard && aws s3 cp app.js s3://namazu-dashboard-486414336274/app.js --cache-control 'no-cache'
 aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/app.js' '/index.html'
 ```
 
@@ -143,6 +144,9 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
 - **イベント詳細**: 独立画面（グラフ上部・一覧と排他でガタつかない、`#event/<id>` 直リンク）。
   グラフ下に情報パネル（発生時刻・デバイス・継続・計測震度・震度・ピーク・a0・状態・検知経路・ID）。
   縦軸レンジ選択（既定自動）
+- **デバイス一覧**: 「版数」列（`X-Namz-Fw-Version`ヘッダ経由でfirmwareが毎バッチ送る、
+  今動いているビルド版数）・「再起動要求」列・「OTA」列（要求中の目標版数、現在版数と
+  一致すれば適用済み表示）を表示（2026-08-06、[docs/log/2026-08-06-device-status-fw-version-header.md](log/2026-08-06-device-status-fw-version-header.md)）
 - API URL入力欄は config.js 設定時は非表示。重力DCを差し引いて描画
 - ライブ範囲は S3コスト対策で30分上限（`/recent` の minutes を [0.1, 30] にクランプ）
 - CloudFront配信は更新時に invalidation 必須

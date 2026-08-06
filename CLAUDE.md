@@ -103,7 +103,7 @@ cd terraform && AWS_REGION=ap-northeast-1 terraform apply
 
 # ダッシュボード（app.js/index.html を触ったら）
 cd dashboard && aws s3 sync . "s3://$(cd ../terraform && terraform output -raw dashboard_bucket)/" \
-  --exclude 'config.example.js' --exclude 'README.md'
+  --exclude 'config.example.js' --exclude 'README.md' --cache-control 'no-cache'
 aws cloudfront create-invalidation \
   --distribution-id "$(cd ../terraform && terraform output -raw dashboard_distribution_id)" \
   --paths '/app.js' '/index.html'
@@ -111,6 +111,14 @@ aws cloudfront create-invalidation \
 
 `config.js` は本番APIのURL(`https://api.namazu.dark-kuins.net`)が入る。sync対象なので消すな。
 カスタムドメインまわりの順序は [terraform/README.md](terraform/README.md) を参照。
+
+**`--cache-control 'no-cache'` を忘れるな。** 付けないとS3オブジェクトにCache-Controlが
+一切乗らず、ブラウザがヒューリスティックキャッシュ（Last-Modifiedベースの独自判断）で
+`app.js`だけ古いキャッシュを使い続けることがある。CloudFrontのinvalidationはCDNエッジの
+キャッシュしか消せず、ブラウザ側のキャッシュには効かない——`index.html`（新しいマークアップ）
+と`app.js`（古いロジック）が食い違ったまま表示され、「新しい列のヘッダーは出るが中身も
+罫線も途中で切れる」という壊れ方をする（2026-08-06、実際に踏んだ）。`no-cache`は「保存はする
+がETag/Last-Modifiedで毎回サーバへ再検証してから使う」指定で、無効化ではない。
 
 ## 開発の約束（グローバル設定に加えて）
 

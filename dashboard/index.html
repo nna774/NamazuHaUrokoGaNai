@@ -30,6 +30,7 @@
     .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 12px; }
     .badge-art { background: transparent; color: #888; border: 1px solid #888; margin-left: 4px; }
     .badge-manual { background: transparent; color: #2a9d8f; border: 1px solid #2a9d8f; margin-left: 4px; }
+    .badge-restart { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
     .status-ok { color: #2e9b57; font-weight: 600; }
     .status-ng { color: var(--accent); font-weight: 600; }
     /* デバイス表の警告背景: 警告値の半分超で黄、超過で赤（テーマ対応） */
@@ -166,11 +167,14 @@
       </div>
       <div id="devices-status" class="muted status-line"></div>
       <table id="devices-table">
-        <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th></tr></thead>
+        <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th><th>版数</th><th>OTA</th></tr></thead>
         <tbody></tbody>
       </table>
       <p class="muted">状態は最終受信からの経過で判定（緑=オンライン / 赤=欠測）。
-        「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。</p>
+        再起動要求が立っている間は状態の隣にバッジで出る。
+        「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。
+        「版数」はデバイスが今動かしているビルド版数。「OTA」は要求中の目標版数
+        （版数と一致すれば適用済み、違えば取得・適用待ち）。</p>
     </section>
   </main>
 
