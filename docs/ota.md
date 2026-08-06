@@ -219,37 +219,85 @@ ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファー�
 掴む事故に気付けるようにする。起動シリアルログにも出す
 （[memo.md](../memo.md)の残タスク「起動時のログにバージョン/hash」を解消）。
 
-### ダウンロード: esp_https_ota + push型と同じ安全停止シーケンス
+### ダウンロード: HTTPUpdate + push型と同じ安全停止シーケンス
 
 - 更新対象を見つけたら、push型（§4）と同じ手順でRAMキューを退避する
   （`pauseSamplingForOta()`に共通化: 測定タイマー停止→測定タスクをWDT監視から
   外す→`flushToSpill()`）。
-- `esp_https_ota`（ESP-IDFのAPI、Arduino coreから呼べる）の低レベルAPI
-  (`esp_https_ota_begin`/`perform`/`finish`)でループを回し、毎周
-  `esp_task_wdt_reset()`を呼ぶ（ArduinoOTAの`onProgress`と同じ役割。ブロッキング
-  APIそのままだと進行中にWDTを養えない）。
-- TLS証明書はArduino-ESP32同梱のルートCAバンドル(`arduino_esp_crt_bundle_attach`)
-  で検証する。`Uploader`は`setInsecure()`（検証省略、既知のTODO）だが、OTA取得は
-  そのまま実行されるコードの取得でありUploaderより一段厳しく扱うべきと判断し、
-  ここだけ正規のTLS検証にした。
+- 取得はArduino-ESP32の`HTTPUpdate`（`httpUpdate.update(client, url)`。内部は
+  `WiFiClientSecure`+`HTTPClient`、書き込みはArduinoOTAと同じ`Update.h`）。
+  `onProgress`コールバックで毎回`esp_task_wdt_reset()`を呼ぶ（ArduinoOTAの
+  `onProgress`と同じ役割。ブロッキングAPIそのままだと進行中にWDTを養えない）。
+  `rebootOnUpdate(false)`にして再起動はこちらで制御する。
 - 成功なら`ESP.restart()`。失敗系は測定タイマー・WDT登録を復旧して測定続行
-  （push型`onError`と同じ）し、次のバッチ送信時のチェックで自然にリトライする。
+  （push型`onError`と同じ）し、1分のバックオフを置いて次回のバッチ送信時の
+  チェックでリトライする（後述、実機で踏んだ不具合）。
 
-**`.sha256`との突き合わせはファーム側では実装していない**（`esp_https_ota`
-自身がESP32イメージのマジック・チェックサムを検証するのと、上記のTLS検証で
-「正規のCloudFrontから来た完全なデータ」であることは担保できる。バージョン
-文字列を取り違えて誤った版を公開する運用ミス対策としては、`.sha256`は
-`publish_ota.sh`が生成し運用者が手元で目視確認する用途に留めた）。
+**TLS検証は実機で2段階の失敗を踏んでからルートCA埋め込みに落ち着いた**
+（2026-08-06、device2実機）:
+
+1. 当初はESP-IDFの低レベルAPI(`esp_https_ota_begin`/`perform`/`finish` +
+   `esp_http_client_config_t.crt_bundle_attach = arduino_esp_crt_bundle_attach`)
+   でルートCAバンドル検証する設計だったが、実機で常に
+   `Failed to attach bundle`となりTLSハンドシェイクが失敗した。
+2. Arduino-ESP32の`HTTPUpdate`（`WiFiClientSecure`+`HTTPClient`経由）に
+   切り替え、`setInsecure()`を呼ばない既定CAバンドル検証を試したが、これも
+   `start_ssl_client: -1`で同様に失敗した。PlatformIOのArduinoフレームワーク
+   ビルドでは、既定CAバンドルの実体を生成するesp-idf側のcmakeステップが
+   走らず、空のままリンクされていると見られる——低レベルAPI・
+   `WiFiClientSecure`のどちらの経路でも「既定のバンドル任せ」は機能しない。
+3. `namazu.dark-kuins.net`実機で証明書チェーンを確認
+   (`openssl s_client -showcerts`)し、`namazu.dark-kuins.net` ->
+   `Amazon RSA 2048 M01` -> `Amazon Root CA 1`と判明。ルートCAを1本だけ
+   `firmware/certs/amazon_root_ca1.pem`として同梱し、`platformio.ini`の
+   `board_build.embed_txtfiles`でリンク、`WiFiClientSecure::setCACert()`で
+   明示検証する方式にしたところ、実機でTLSハンドシェイクが通り、取得〜
+   書き込み〜再起動〜新バージョンでの起動まで成功した。
+   これは`Uploader`の`setInsecure()`割り切りより厳格な正規のTLS検証になる。
+   出典は https://www.amazontrust.com/repository/AmazonRootCA1.pem
+   （有効期限2038-01-17。CAがローテーションされたら要更新）。
+
+**`.sha256`との突き合わせはファーム側では実装していない**（`HTTPUpdate`
+（`Update.h`）自身がESP32イメージのマジック・チェックサムを検証するのと、
+上記のTLS検証で「正規のCloudFrontから来た完全なデータ」であることは担保
+できる。バージョン文字列を取り違えて誤った版を公開する運用ミス対策としては、
+`.sha256`は`publish_ota.sh`が生成し運用者が手元で目視確認する用途に留めた）。
+
+### 実機で踏んだ不具合: 失敗時の高頻度リトライで測定が止まった
+
+トリガー(`X-Namz-Ota-Version`)は`Uploader`がキャッシュする最終成功レスポンスの
+値で、失敗直後は同じ値のまま変わらない。当初の実装はこの値を見て「不一致なら
+即座に取得を試みる」だけで、失敗時のバックオフが無かった。結果、
+`uploaderTask`のループ周期（約50ms＋ネットワーク待ち）ごとに取得を再試行する
+高頻度リトライになり、そのたびに`pauseSamplingForOta()`で測定タイマーが
+止まったまま実質戻らず、**実測が止まった**（device2実機で欠測を招いた。原因は
+上記1のTLS失敗）。1分のバックオフ（`checkAndPerformPullOta`内の
+`static uint32_t sNextAttemptMs`）を追加して解消した。
+
+### 停滞の検知: watchdog Lambdaに通知を追加
+
+`pending_ota_version`は一回性ではなく「あるべき状態」として持ち続けるため、
+証明書検証失敗のような問題が起きてもデバイスは（測定を止めずに）黙って
+バックオフ・リトライを繰り返すだけになる——手元で`request_ota.py list`を
+覗きに行かない限り気づけない。実機でTLS検証の不具合を2回連続で踏んだ実体験
+から、**要求してから`NAMZ_OTA_STUCK_AFTER_S`(既定1800秒=30分)を超えて
+解消しなければwatchdog LambdaがSlack通知する**ようにした
+（`lambda/common/ota_watch.py`の`evaluate_ota_stuck`、
+`NAMZ_OTA_STUCK_RENOTIFY_S`(既定1日)間隔で再送）。原因（証明書検証失敗か
+ネットワーク不調か配布物の取り違えか）は問わず、「何かがおかしい」ことだけを
+拾う。`tools/request_ota.py request`が`pending_ota_requested_at_us`を、
+`cancel`が`ota_stuck_notified_at_us`含め一式を消す。
 
 ### ロールバック: 今回は見送った
 
 push型（§5）で書いた「ロールバックは期待しない、最後の砦は物理アクセス」は
 pull型でも変わっていない。無人トリガーで焼き損じた場合に自動で前スロットへ
 戻れる`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`は本来pull型でこそ価値が出るが、
-これはbootloaderのsdkconfig変更を伴い、**実機で実際にロールバックが発動する
+これはbootloaderのsdkconfig変更を伴い、**実際にロールバックが発動する
 ところまで確認しないと安全側に効いているか判断できない**（設定を間違えると
-起動そのものが壊れうる）。今回のセッションでは実機を触れないため見送った。
-次に実機を触る機会に、push型の実機確認（§6の残タスク）と合わせて検討する。
+起動そのものが壊れうる）。今回は他の実機不具合（TLS・リトライ）の修正で
+手一杯になったため見送った。次に実機を触る機会に、push型の実機確認
+（§6の残タスク）と合わせて検討する。
 
 ### 未決事項・既知の割り切り
 
@@ -262,3 +310,6 @@ pull型でも変わっていない。無人トリガーで焼き損じた場合�
   も対象機と同じbase env(`adxl355-provision`)からextendsしてパーティション表を
   揃えている（provision専用ビルドで誤って4MB既定に巻き戻すとspill容量が壊れる
   ため）。
+- **watchdogの停滞検知は「解消していない」ことしか分からない。** サーバは
+  デバイスの現在バージョンを知らないので、原因の切り分けは実機のシリアル
+  ログを見に行く必要がある（ota.md §7 未決事項1と同根）。
