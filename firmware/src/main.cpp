@@ -49,6 +49,9 @@ static Display gDisplay;
 static volatile float gDispIntensity = 0.0f;
 static volatile float gDispPeakGal = 0.0f;
 static volatile uint32_t gLastShakeMs = 0;  // 瞬時合成加速度がしきい値を超えた最終時刻
+// OTA更新中フラグ（uploaderTask/Core0が書き、loop/Core1が読む）。trueの間は
+// loop()が震度画面の代わりにgDisplay.renderOtaUpdating()を出す。
+static volatile bool gOtaInProgress = false;
 
 // デバイス識別情報・秘密・エンドポイントURL。setup()の先頭でNVSからロードする
 // （旧secrets.h。コンパイル時に埋め込まない理由はdocs/ota.md §7参照）。
@@ -233,6 +236,7 @@ static void connectWifi() {
 // のバッチはLittleFSへ退避してから焼く（電源断・パニックでも失わないようにする）。
 static void pauseSamplingForOta() {
   Serial.println("[ota] start: pausing sampling, flushing queue to spill");
+  gOtaInProgress = true;  // loop()に震度画面から更新中画面への切り替えを伝える
   esp_timer_stop(gSampleTimer);
   // タイマーを止めるとsamplingTaskへの通知も止まり、自分でesp_task_wdt_reset()を
   // 呼べなくなる。転送が終わる（成功時は再起動、失敗時はresumeSamplingで再開）まで
@@ -250,6 +254,7 @@ static void resumeSamplingAfterOtaFailure(const char* reason) {
   Serial.printf("[ota] %s: resuming sampling\n", reason);
   esp_task_wdt_add(gSamplingTask);
   esp_timer_start_periodic(gSampleTimer, kReadPeriodUs);
+  gOtaInProgress = false;  // 失敗して測定を再開したので震度画面に戻す
 }
 
 static void otaOnStart() { pauseSamplingForOta(); }
@@ -571,18 +576,24 @@ void loop() {
 #ifdef NAMZ_SENSOR_TEST
     gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, 0, status, bg, clock);
 #else
-    bool wifi = WiFi.status() == WL_CONNECTED;
-    String ip = wifi ? WiFi.localIP().toString() : String("");
-    uint32_t backlog = gUploader->spillCount() + gUploader->ramQueued();
-    uint32_t backlogAgeS = 0;
-    uint64_t oldestUs;
-    if (backlog > 0 && timesync::isSynced() &&
-        gUploader->oldestQueuedStartUs(oldestUs)) {
-      uint64_t nowUs = timesync::nowUs();
-      backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
+    if (gOtaInProgress) {
+      // OTA転送中は測定タイマーが止まっており震度・WiFi・バックログの値が
+      // 意味を持たないため、震度画面の代わりに更新中であることだけを大きく出す。
+      gDisplay.renderOtaUpdating(clock);
+    } else {
+      bool wifi = WiFi.status() == WL_CONNECTED;
+      String ip = wifi ? WiFi.localIP().toString() : String("");
+      uint32_t backlog = gUploader->spillCount() + gUploader->ramQueued();
+      uint32_t backlogAgeS = 0;
+      uint64_t oldestUs;
+      if (backlog > 0 && timesync::isSynced() &&
+          gUploader->oldestQueuedStartUs(oldestUs)) {
+        uint64_t nowUs = timesync::nowUs();
+        backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
+      }
+      gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, backlog, backlogAgeS,
+                      status, bg, clock);
     }
-    gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, backlog, backlogAgeS,
-                    status, bg, clock);
 #endif
   }
   vTaskDelay(pdMS_TO_TICKS(250));

@@ -31,6 +31,14 @@ class Display {
               uint32_t backlog, uint32_t backlogAgeS, const String& status,
               uint16_t bgColor, const String& clock);
 
+  // OTA更新中の専用画面。測定タスクが止まっている間は震度・WiFi・バックログ等の
+  // 値が意味を持たない（更新中固定表示になる）ので、render()を呼ばずこちらに
+  // 差し替える想定。背景色を通常のidle/closing/active(紺/橙/赤)と区別が付く紫にし、
+  // 遠目でも「今は震度表示ではない」と分かるようにする。
+  //  clock : render()と同じ日時文字列。凍結検知（フリーズしていれば止まって見える）
+  //          を兼ねる。
+  void renderOtaUpdating(const String& clock);
+
   // 震度階級のASCII表記（"0".."4","5-","5+","6-","6+","7"）。
   static const char* scaleAscii(float intensity);
 

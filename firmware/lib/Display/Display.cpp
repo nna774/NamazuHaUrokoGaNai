@@ -161,3 +161,27 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
 
   tft_.setTextPadding(0);
 }
+
+void Display::renderOtaUpdating(const String& clock) {
+  if (!ready_) return;
+  const int w = tft_.width();
+
+  // 通常のidle/closing/active(紺/橙/赤)のどれとも被らない紫で「震度表示ではない」
+  // ことを遠目でも判別できるようにする。
+  const uint16_t bg = TFT_PURPLE;
+  if (!bgInit_ || bg != bg_) paintFrame(bg);
+  const uint16_t fg = contrastText(bg);
+
+  tft_.setTextDatum(TC_DATUM);
+  tft_.setTextPadding(120);
+  tft_.setTextColor(fg, bg);
+  tft_.drawString(clock, w / 2, 6, 1);
+
+  tft_.setTextDatum(MC_DATUM);
+  tft_.setTextColor(fg, bg);
+  tft_.setTextPadding(w);
+  tft_.drawString("OTA UPDATING", w / 2, 55, 4);
+  tft_.drawString("do not power off", w / 2, 90, 2);
+
+  tft_.setTextPadding(0);
+}
