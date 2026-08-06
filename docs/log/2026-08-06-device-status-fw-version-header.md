@@ -47,6 +47,9 @@ firmware側の変更が小さい。
 - ダッシュボードで再起動要求・OTA適用状況を一目で確認できる。
 - watchdogのOTA停滞通知に「現在バージョン」を添えられる（未着手。
   `ota_watch.evaluate_ota_stuck`は`pending_ota_version`しか見ていない）。
-- 実機で新ファームを焼けば`fw_version`が実際に埋まる。**この変更は
-  ファームアップデートを要するため実機での動作確認はまだ**（pytest全件・
-  firmwareビルド全env・`firmware/test/run.sh`は確認済み）。
+- **実機で確認した**（2026-08-06、device 2）。`tools/publish_ota.sh`相当の手順で
+  `ota/adxl355/c64f379.bin`をCloudFrontへ公開し、`tools/request_ota.py request 2
+  c64f379`で許可。次のバッチ送信でdevice 2が気づき、安全停止→取得→書き込み→
+  再起動→復帰まで通しで成功した。`/devices/2`の`fw_version`が`c64f379`（=
+  `pending_ota_version`と一致）になり、ダッシュボードの「版数」「OTA」列が
+  実データで機能することを確認した。復帰後`age_s`は数秒、欠測通知は鳴らず。
