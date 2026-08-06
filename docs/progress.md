@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-06 | **OTA転送中はTFTの震度画面を専用の「更新中」画面（紫背景 + "OTA UPDATING"）に差し替えた。** 測定タイマーが止まる間、震度・WiFi・バックログが凍った古い値のまま表示され続けると「地震計が壊れた」と誤読されるため。日時は引き続き更新するので凍結検知の役目は保てる | [log/2026-08-06-ota-display-updating-screen.md](log/2026-08-06-ota-display-updating-screen.md) |
 | 2026-08-06 | **pull型OTAの「停滞」誤検知を直した。** device1が`a93433a`へ実際には成功していたのに、`pending_ota_version`が達成後もサーバ側でクリアされず残り続けるせいでwatchdogが30分後に「停滞」を誤通知していた。ingestが受信バッチの`fw_version`と`pending_ota_version`の一致を検知したら自動でクリアするようにした（`ota_watch.reached_target()`/`clear_ota_target()`）。USB焼き直し時の自動差し戻り事故（device1-16mb-confirm.md）も同じ根だったので合わせて解消 | [log/2026-08-06-ota-stuck-false-positive.md](log/2026-08-06-ota-stuck-false-positive.md) |
 | 2026-08-06 | **device1をesptool flash_idで物理確認し、device2と同じ16MBフラッシュと判明。パーティション表・flash_size設定を`[env:esp32dev]`base側に集約し、device1/device2共通の`partitions_16mb.csv`（リネーム）に揃え、実機device1にも反映して本番復帰させた。** 途中、USB書き込み直後に古いバージョンの`pending_ota_version`が残っていたせいでpull型OTAが自動で差し戻す事故を踏み、正規のOTA経路（publish_ota.sh→request_ota.py）で収束させて回復した | [log/2026-08-06-device1-16mb-confirm.md](log/2026-08-06-device1-16mb-confirm.md) |
 | 2026-08-06 | **fw_version報告つきファーム(c64f379)をdevice1にもOTA配信した。** `ota/esp32dev/c64f379.bin`を新たにビルド・公開し、`tools/request_ota.py request 1 c64f379`で許可。次のバッチ送信サイクルで`/devices/1`の`fw_version`がc64f379に着地し、device2と同じ版数で揃った | [log/2026-08-06-ota-device1-fwversion-rollout.md](log/2026-08-06-ota-device1-fwversion-rollout.md) |

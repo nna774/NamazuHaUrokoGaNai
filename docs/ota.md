@@ -77,6 +77,15 @@ IPアドレス直指定でもよい（デバイスのTFTに表示されている
 （`setRebootOnSuccess()` の既定が `true`）。`onError()` でのみ測定タイマーと
 ウォッチドッグ登録を復旧する。
 
+**TFT表示もこのシーケンスに連動させている。** 測定タイマーが止まると
+`gDispIntensity` 等は最後の値のまま凍るため、震度画面を出し続けると
+「更新中で止まっている」のか「地震計が本当に固まった」のか目視で区別できない。
+`pauseSamplingForOta()`（push/pull共通）で立てる`gOtaInProgress`フラグを`loop()`が
+見て、震度画面の代わりに`Display::renderOtaUpdating()`（紫背景 + "OTA UPDATING"）
+を出す。日時だけは`loop()`側で毎フレーム計算し続けるので、更新中画面でも
+フリーズ検知の役目は保てる。失敗時は`resumeSamplingAfterOtaFailure()`でフラグを
+戻す。成功時は`ESP.restart()`で暗黙にリセットされる。
+
 ## 5. 実装時の落とし穴（このプロジェクト固有）
 
 - **ロールバックは期待しない。** Arduino core の既定ビルドは
