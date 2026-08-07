@@ -240,7 +240,7 @@ def dump_csv(path: str, data: np.ndarray, start_us: int, fs: float) -> None:
 
 
 def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
-         rect, arrivals, out, show, vec=None, axes_label="xyz"):
+         rect, arrivals, out, show, vec=None, axes_label="xyz", device_id=None):
     import matplotlib
 
     if not show:
@@ -315,8 +315,9 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
             a.axvline(ot, color="m", lw=0.8, alpha=0.6)
 
     t0 = datetime.fromtimestamp(start_us / 1e6, JST)
+    device_note = f"  device={device_id}" if device_id is not None else ""
     fig.suptitle(f"detectlab  start={t0:%Y-%m-%d %H:%M:%S JST}  fs={fs:.1f}Hz"
-                 f"  N={n}  axes={axes_label}")
+                 f"  N={n}  axes={axes_label}{device_note}")
     fig.tight_layout()
     if out:
         fig.savefig(out, dpi=110)
@@ -370,14 +371,17 @@ def main() -> int:
 
     if args.csv:
         data, start_us, fs = load_csv(args.csv)
+        device_id = None  # CSVは任意データなので--deviceの既定値は意味を持たない
     elif args.event:
         data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), args.event)
+        device_id = int(args.event.split("-", 1)[0])  # event_id先頭4桁=device
     else:
         center = at_to_us(args.at) if args.at else args.at_us
         seconds = args.minutes * 60.0
         end_us = int(center + seconds / 2 * 1e6)
         data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
                                             args.device)
+        device_id = args.device
 
     n = data.shape[0]
     if n == 0:
@@ -442,7 +446,7 @@ def main() -> int:
 
     plot(data, band, fs, start_us, ratio, args.thr, onsets, lo, hi,
          rect, arrivals, args.out, show=args.show or not args.out,
-         vec=vec, axes_label=args.axes)
+         vec=vec, axes_label=args.axes, device_id=device_id)
     return 0
 
 
