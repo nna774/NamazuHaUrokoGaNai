@@ -846,17 +846,21 @@ async function showDevice(id) {
   const padded = String(id).padStart(4, '0');
   title.textContent = '読み込み中… ' + padded;
   document.getElementById('device-info').innerHTML = '';
+  let hasTemp = true;  // センサ種別が分からない間・取得失敗時は出しておく（隠れて気付けないよりまし）
   try {
     const data = await apiGet('/devices/' + encodeURIComponent(id));
     const d = data.device || {};
     title.textContent = `デバイス ${String(d.device_id ?? id).padStart(4, '0')}`;
     renderDeviceInfo(d);
+    hasTemp = d.sensor === 'ADXL355';  // IIS3DHHCは温度センサを持たずトレイラー自体を送らない
   } catch (e) {
     title.textContent = `デバイス ${padded}`;
     document.getElementById('device-info').innerHTML =
       `<tr><td colspan="2">エラー: ${escapeHtml(e.message)}</td></tr>`;
   }
-  refreshDeviceTemp(id);
+  document.getElementById('device-temp-section').style.display = hasTemp ? '' : 'none';
+  document.getElementById('device-temp-hours-label').style.display = hasTemp ? '' : 'none';
+  if (hasTemp) refreshDeviceTemp(id);
 }
 
 // --- ハッシュルーティング ---
