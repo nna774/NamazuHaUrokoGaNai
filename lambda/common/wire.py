@@ -28,6 +28,12 @@ TRAILER_SENSOR_TEMP = 1
 SENSOR_TYPE_IIS3DHHC = 0
 SENSOR_TYPE_ADXL355 = 1
 
+# 表示用の名前。ダッシュボードのデバイス詳細ページで使う。
+SENSOR_TYPE_NAMES = {
+    SENSOR_TYPE_IIS3DHHC: "IIS3DHHC",
+    SENSOR_TYPE_ADXL355: "ADXL355",
+}
+
 # ADXL355 の内蔵温度の換算（データシートの公称値）。
 #   温度[℃] = 25 + (raw - TEMP_AT_25C) / LSB_PER_DEGC
 # 公称値であって校正値ではない。部品ごとのばらつきがあるので**絶対値は当てにならない**。

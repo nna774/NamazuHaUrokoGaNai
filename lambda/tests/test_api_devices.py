@@ -69,3 +69,17 @@ def test_device_temp_passes_max_points_cap(monkeypatch):
     cap = _capture_query_range(monkeypatch, [])
     api._device_temp(2, {})
     assert cap["max_points"] == api.MAX_TEMP_POINTS
+
+
+def test_device_view_reports_sensor_name(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "sensor_type": wire.SENSOR_TYPE_ADXL355})
+    resp = api._device(2)
+    assert '"sensor": "ADXL355"' in resp["body"]
+
+
+def test_device_view_sensor_none_when_not_yet_recorded(monkeypatch):
+    """古いデバイス台帳（device_meta導入前のデータ）は sensor_type が無い。"""
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)
+    assert '"sensor": null' in resp["body"]
