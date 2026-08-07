@@ -14,6 +14,19 @@ def get_batch(s3, bucket: str, key: str) -> wire.Batch:
     return wire.parse(obj["Body"].read())
 
 
+def _key_batch_start_us(key: str) -> int | None:
+    """raw/.../<device>-<startus>.bin から startus を取り出す（GETせずに窓判定するため）。"""
+    try:
+        return int(key.rsplit("-", 1)[1].split(".")[0])
+    except (IndexError, ValueError):
+        return None
+
+
+# バッチ長の上限見積り（ファーム側 kBatchSeconds は最大30秒）。GET前フィルタで
+# 「この時刻に始まったバッチはどんなに長くても window に届かない」を判定する余裕。
+MAX_BATCH_DURATION_US = 60_000_000
+
+
 def list_raw_keys_in_range(s3, bucket: str, start_us: int, end_us: int,
                            device_id: int | None = None) -> list[str]:
     """[start,end] と重なる raw/ のキーを時系列順で返す。
@@ -90,11 +103,8 @@ def copy_raw_to_event(s3, bucket: str, eid: str, start_us: int, end_us: int,
     """
     copied = 0
     for key in list_raw_keys_in_range(s3, bucket, start_us, end_us, device_id):
-        try:  # ファイル名末尾の startus で範囲判定
-            b_start = int(key.rsplit("-", 1)[1].split(".")[0])
-        except (IndexError, ValueError):
-            continue
-        if b_start < start_us - 30_000_000 or b_start > end_us:
+        b_start = _key_batch_start_us(key)  # ファイル名末尾の startus で範囲判定
+        if b_start is None or b_start < start_us - 30_000_000 or b_start > end_us:
             continue
         s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": key},
                        Key=s3util.event_batch_key(eid, b_start))
@@ -117,6 +127,13 @@ def load_window(s3, bucket: str, end_us: int, seconds: float,
     win_start = None
     fs = 100.0
     for key in keys:
+        # list_raw_keys_in_range の Prefix は時間(hour)+device までしか絞れないので、
+        # ここでは同じ時間帯の全バッチが渡ってくる。GETする前にファイル名の startus
+        # だけで窓外を弾く（弾かずに全部GETしてから捨てると、その時間帯に溜まった
+        # バッチ数だけリクエストの分数によらず一定時間かかる — 実際に踏んだ）。
+        hint = _key_batch_start_us(key)
+        if hint is not None and (hint > end_us or hint + MAX_BATCH_DURATION_US < start_us):
+            continue
         try:
             b = get_batch(s3, bucket, key)
         except Exception:
