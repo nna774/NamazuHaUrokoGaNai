@@ -203,7 +203,7 @@
       <div id="device-detail" style="display:none">
         <div class="row">
           <button id="device-back">← 一覧に戻る</button>
-          <label>温度の期間:
+          <label id="device-temp-hours-label">温度の期間:
             <select id="device-temp-hours">
               <option value="1">1時間</option>
               <option value="3" selected>3時間</option>
@@ -214,13 +214,16 @@
         </div>
         <h3 id="device-title"></h3>
         <table id="device-info"></table>
-        <h4>センサ内蔵温度</h4>
-        <div id="device-temp-status" class="muted status-line"></div>
-        <canvas id="device-temp-canvas"></canvas>
-        <p class="muted">センサ内蔵温度計の生値からの参考換算[℃]。校正値ではないため
-          <strong>絶対値は当てにならない</strong>。架台の熱ドリフトとの相関を見る
-          相対変化の目安として見ること。温度計を持たない機体（IIS3DHHC機等）は
-          データが出ない。</p>
+        <!-- センサ内蔵温度計を持たない機体（IIS3DHHC機等）ではセクションごと隠す
+             （showDevice()がd.sensorを見て切り替える）。 -->
+        <div id="device-temp-section">
+          <h4>センサ内蔵温度</h4>
+          <div id="device-temp-status" class="muted status-line"></div>
+          <canvas id="device-temp-canvas"></canvas>
+          <p class="muted">センサ内蔵温度計の生値からの参考換算[℃]。校正値ではないため
+            <strong>絶対値は当てにならない</strong>。架台の熱ドリフトとの相関を見る
+            相対変化の目安として見ること。</p>
+        </div>
       </div>
     </section>
   </main>
