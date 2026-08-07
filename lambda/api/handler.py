@@ -7,6 +7,7 @@ Lambda Function URL (payload v2.0)。
 - GET /event?id=<event_id>        イベントのメタ + 波形
       &from=<us>&to=<to>          任意。保存済み波形からこの区間だけ切り出して返す
                                   （ダッシュボードのズームが狭い区間のrawを取り直す用）
+- GET /devices/<id>/temp?hours=<n> センサ内蔵温度の時系列（デバイス詳細ページ用）
 """
 
 from __future__ import annotations
@@ -36,6 +37,11 @@ MAX_POINTS = 3000
 # /recent の分数上限。上限が無いと巨大値でS3 LIST/GETを大量発行して
 # ハング/課金する（認証なし公開のため要ガード）。UIの選択肢も30分まで。
 MAX_RECENT_MINUTES = 30.0
+# /devices/<id>/temp の時間窓上限とヘッダ/トレイラーのみ取得しても間引く点数上限。
+# 温度は分〜時間の時定数のドリフトを見る用途なので、/recent ほど短く絞らなくても
+# 1バッチずつの軽量GET(store.load_temp_series)であれば24時間まで許容できる。
+MAX_TEMP_HOURS = 24.0
+MAX_TEMP_POINTS = 300
 # CORSヘッダは Function URL の cors 設定に任せる（ここで access-control-* を
 # 返すと Function URL のぶんと二重になり、ブラウザが弾く）。ここは content-type のみ。
 HEADERS = {"content-type": "application/json"}
@@ -69,7 +75,10 @@ def handler(event, context):
             return _events(q)
         if path.endswith("/event"):
             return _event(q)
-        m = re.search(r"/devices/(\d{1,4})$", path)  # 個別デバイス（より具体的な方を先に）
+        m = re.search(r"/devices/(\d{1,4})/temp$", path)  # 個別デバイスの温度（より具体的な方を先に）
+        if m:
+            return _device_temp(int(m.group(1)), q)
+        m = re.search(r"/devices/(\d{1,4})$", path)
         if m:
             return _device(int(m.group(1)))
         if path.endswith("/devices"):
@@ -281,6 +290,23 @@ def _device(device_id: int):
     return _json(200, {"device": _device_view(item, now_us),
                        "offline_after_s": OFFLINE_AFTER_S,
                        "lag_after_s": LAG_AFTER_S})
+
+
+def _device_temp(device_id: int, q):
+    try:
+        hours = float(q.get("hours", "3"))
+    except (TypeError, ValueError):
+        hours = 3.0
+    if not math.isfinite(hours):
+        hours = 3.0
+    hours = max(0.1, min(hours, MAX_TEMP_HOURS))  # 巨大値によるS3スキャン暴走を防ぐ
+    end_us = int(time.time() * 1e6)
+    series = store.load_temp_series(s3, BUCKET, end_us, hours * 3600, device_id,
+                                    max_points=MAX_TEMP_POINTS)
+    # raw はセンサ生値そのもの、c は換算式が既知（ADXL355）の時だけ付く参考値
+    # （校正値ではないので絶対値は当てにならない。ドリフトの相対変化用）。
+    points = [{"t": t, "raw": meta.sensor_temp_raw, "c": wire.temp_c(meta)} for t, meta in series]
+    return _json(200, {"device_id": device_id, "hours": hours, "points": points})
 
 
 def _waveform_payload(gal: np.ndarray, start_us: int, fs: float) -> dict:

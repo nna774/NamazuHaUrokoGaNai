@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from batch_uplink import s3util
@@ -135,3 +137,43 @@ def load_window(s3, bucket: str, end_us: int, seconds: float,
     if not parts:
         return np.empty((0, 3)), end_us, fs
     return np.concatenate(parts, axis=0), win_start, fs
+
+
+def load_temp_series(s3, bucket: str, end_us: int, seconds: float, device_id: int,
+                     max_points: int = 300) -> list[tuple[int, wire.BatchMeta]]:
+    """[end_us-seconds, end_us] のバッチから温度だけを軽く取り出す。
+
+    温度が追う熱ドリフトは分〜時間の時定数（docs/wire_format.md）なので、波形と
+    違って全バッチを読む意味が無い。1バッチ数十KBのペイロードは読まず、
+    ヘッダ→トレイラーの2回 Range GET で済ませ、さらにキー数が max_points を
+    超えたら間引く（ダッシュボードの表示点数もそのくらいで十分なので二重に得）。
+
+    v1バッチ(トレイラー無し)はペイロード末尾がオブジェクト末尾と一致し、
+    その先を範囲指定すると416で例外になる。壊れたトレイラーと同じく
+    「温度なし」として握りつぶす（`wire.parse_trailer` と同じ方針）。
+
+    returns: [(batch_start_us, BatchMeta), ...]。温度が無いバッチは含めない。
+    """
+    start_us = int(end_us - seconds * 1e6)
+    keys = list_raw_keys_in_range(s3, bucket, start_us, end_us, device_id)
+    if len(keys) > max_points:
+        stride = math.ceil(len(keys) / max_points)
+        keys = keys[::stride]
+    out: list[tuple[int, wire.BatchMeta]] = []
+    for key in keys:
+        try:
+            head = s3.get_object(Bucket=bucket, Key=key,
+                                 Range=f"bytes=0-{wire.HEADER_SIZE - 1}")["Body"].read()
+            meta = wire.parse_header(head)
+            if meta.device_id != device_id:
+                continue
+            tail_off = wire.HEADER_SIZE + wire.payload_size(meta)
+            tail = s3.get_object(Bucket=bucket, Key=key,
+                                 Range=f"bytes={tail_off}-")["Body"].read()
+            meta.trailer = wire.parse_trailer(tail)
+        except Exception:
+            continue
+        if meta.sensor_temp_raw is None:
+            continue
+        out.append((meta.batch_start_us, meta))
+    return out

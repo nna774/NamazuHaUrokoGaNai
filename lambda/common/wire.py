@@ -23,6 +23,11 @@ TLV_HEADER_FMT = "<HH"
 TLV_HEADER_SIZE = struct.calcsize(TLV_HEADER_FMT)
 TRAILER_SENSOR_TEMP = 1
 
+# sensor_type（firmware AccelSensor::sensorType() と一致させる）。
+# 温度の換算式はチップ依存なので、どのチップかの判定に使う（TLVのtypeとは無関係）。
+SENSOR_TYPE_IIS3DHHC = 0
+SENSOR_TYPE_ADXL355 = 1
+
 # ADXL355 の内蔵温度の換算（データシートの公称値）。
 #   温度[℃] = 25 + (raw - TEMP_AT_25C) / LSB_PER_DEGC
 # 公称値であって校正値ではない。部品ごとのばらつきがあるので**絶対値は当てにならない**。
@@ -39,6 +44,14 @@ ADXL355_TEMP_LSB_PER_DEGC = -9.05
 def adxl355_temp_c(raw: int) -> float:
     """ADXL355 の温度生値を℃へ。絶対精度は無い（上のコメント参照）。"""
     return 25.0 + (raw - ADXL355_TEMP_AT_25C) / ADXL355_TEMP_LSB_PER_DEGC
+
+
+def temp_c(meta: BatchMeta) -> float | None:
+    """バッチの温度トレイラーを℃へ。換算式が無いセンサ種別や温度自体が無ければ None。"""
+    raw = meta.sensor_temp_raw
+    if raw is None or meta.sensor_type != SENSOR_TYPE_ADXL355:
+        return None
+    return adxl355_temp_c(raw)
 
 
 @dataclass
@@ -72,6 +85,31 @@ class Batch:
         n = self.meta.sample_count
         dt_us = 1e6 / self.meta.sample_rate_hz
         return self.meta.batch_start_us + np.round(np.arange(n) * dt_us).astype(np.int64)
+
+
+def parse_header(data: bytes) -> BatchMeta:
+    """先頭32バイト（ヘッダ）だけをパースする。
+
+    温度トレンドはトレイラーしか要らず、1バッチ数十KBのペイロードを読むのは無駄
+    （`store.load_temp_series` が Range GET でヘッダ→トレイラーの2回読みに使う）。
+    """
+    if len(data) < HEADER_SIZE:
+        raise ValueError("too short for header")
+    (magic, version, sensor_type, sample_format, axes, start_us,
+     rate_mhz, count, scale, device_id) = struct.unpack(HEADER_FMT, data[:HEADER_SIZE])
+    if magic != MAGIC:
+        raise ValueError(f"bad magic {magic:#x}")
+    return BatchMeta(
+        version=version, sensor_type=sensor_type, sample_format=sample_format,
+        axes=axes, batch_start_us=start_us, sample_rate_hz=rate_mhz / 1000.0,
+        sample_count=count, scale_mg_per_lsb=scale, device_id=device_id,
+    )
+
+
+def payload_size(meta: BatchMeta) -> int:
+    """サンプル列のバイト長（トレイラーの開始オフセット = HEADER_SIZE + これ）。"""
+    itemsize = 4 if meta.sample_format == 1 else 2
+    return meta.sample_count * meta.axes * itemsize
 
 
 def parse(data: bytes) -> Batch:
