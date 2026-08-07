@@ -724,6 +724,16 @@ function showDevicesMode(detail) {
   document.getElementById('device-detail').style.display = detail ? 'block' : 'none';
 }
 
+// バージョン文字列はビルド時のgit短縮hash(tools/get_fw_version.py)なので、
+// そのままGitHubのコミットへのリンクにできる。
+const GITHUB_REPO_URL = 'https://github.com/nna774/NamazuHaUrokoGaNai';
+
+function fwVersionHtml(v) {
+  if (!v) return '—';
+  const safe = escapeHtml(v);
+  return `<a href="${GITHUB_REPO_URL}/commit/${safe}" target="_blank" rel="noopener">${safe}</a>`;
+}
+
 function renderDeviceInfo(d) {
   const tbody = document.getElementById('device-info');
   const st = d.online
@@ -737,13 +747,17 @@ function renderDeviceInfo(d) {
     ['最終受信', last],
     ['データ鮮度', `${fmtAgo(d.lag_s)}遅れ`],
     ['累計バッチ', String(d.batches_total ?? 0)],
-    ['版数', d.fw_version || '—'],
+    ['版数', fwVersionHtml(d.fw_version)],
+    ['センサ', d.sensor || '不明'],
   ];
   if (d.pending_ota_version) {
     rows.push(['OTA', (d.fw_version && d.fw_version === d.pending_ota_version)
       ? `適用済み (${d.pending_ota_version})` : `→ ${d.pending_ota_version}`]);
   }
   if (d.pending_restart_requested_at_us) rows.push(['再起動要求', '立っている（次回受信で反映）']);
+  // events?p=1&all=0&d=<id> を直接組む。eventsHash()は現在のイベント一覧の
+  // グローバル状態(eventsDeviceId等)に依存するので、ここでは使えない。
+  rows.push(['イベント', `<a href="#events?p=1&all=0&d=${encodeURIComponent(d.device_id)}">このデバイスの一覧を見る →</a>`]);
   tbody.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 }
 

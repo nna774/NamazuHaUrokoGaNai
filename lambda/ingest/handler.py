@@ -16,7 +16,7 @@ import boto3
 
 from batch_uplink import auth, devices, notify, s3util
 
-from common import device_temp, events, ota_watch, wire
+from common import device_meta, device_temp, events, ota_watch, wire
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
@@ -75,6 +75,12 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
                              fw_version=headers.get("x-namz-fw-version", ""))
     except Exception as e:  # noqa: BLE001
         print(f"devices.record_batch failed: {e!r}")
+
+    # センサ種別をデバイス詳細ページ表示用に記録（ヘッダに毎回乗っているので追加コスト無し）。
+    try:
+        device_meta.record_sensor_type(b.meta.device_id, b.meta.sensor_type)
+    except Exception as e:  # noqa: BLE001
+        print(f"device_meta.record_sensor_type failed: {e!r}")
 
     # 温度トレイラーがあれば記録（既に wire.parse 済みなので追加のS3アクセス無し）。
     # ダッシュボードの読み取り側が毎回 raw/ を漁らずに済むよう、書き込み側で1回だけ

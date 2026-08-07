@@ -271,6 +271,9 @@ def _device_view(item: dict, now_us: int) -> dict:
         # v1.6.0のextraRequestHeaders経由で毎バッチ送られてくる)。
         # pending_ota_versionと比較すればOTAが実際に着地したか外からも分かる。
         "fw_version": item.get("fw_version", ""),
+        # ヘッダのsensor_typeをingestが記録したもの(device_meta.record_sensor_type)。
+        # 表示名はwire.SENSOR_TYPE_NAMESが単一の真実。未記録(古いデータ等)はNone。
+        "sensor": wire.SENSOR_TYPE_NAMES.get(item.get("sensor_type")),
     }
 
 
