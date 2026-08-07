@@ -19,6 +19,7 @@ class FakeS3:
     def __init__(self, objects):
         self.objects = objects  # {key: bytes}
         self.listed_prefixes = []
+        self.get_keys = []
 
     def list_objects_v2(self, **kw):
         prefix = kw["Prefix"]
@@ -27,6 +28,7 @@ class FakeS3:
         return {"Contents": [{"Key": k} for k in keys], "IsTruncated": False}
 
     def get_object(self, Bucket, Key):  # noqa: N803
+        self.get_keys.append(Key)
         return {"Body": _Body(self.objects[Key])}
 
 
@@ -86,6 +88,19 @@ def test_load_window_narrows_the_s3_prefix(s3):
     """デバイス絞り込みは S3 の Prefix に落ちること（列挙量も減る）。"""
     store.load_window(s3, "b", T0 + 4_000_000, 10.0, device_id=2)
     assert all(p.endswith("/0002-") for p in s3.listed_prefixes)
+
+
+def test_load_window_skips_get_for_batches_outside_window(s3):
+    """list_raw_keys_in_range は時間帯(hour)+deviceまでしか絞れないので、
+    同じ時間帯の遠いバッチもキーとして渡ってくる。GETする前にファイル名の
+    startusだけで弾けているか（全部GETしてから捨てていないか）を確認する。
+    起きた不具合: 窓を絞ってもGET数がその時間帯の総バッチ数のままで、
+    /recent が分数によらず一定時間（数秒）かかっていた。
+    """
+    far_st = T0 + 3_000_000_000  # 同じ時間帯(hour)だが50分後。窓には絶対入らない。
+    s3.objects[s3util.raw_key(1, far_st)] = build(1, far_st, dc_gal=-7.0)
+    store.load_window(s3, "b", T0 + 4_000_000, 10.0, device_id=1)
+    assert all(not k.endswith(f"{far_st:020d}.bin") for k in s3.get_keys)
 
 
 def test_copy_raw_to_event_only_copies_one_device(s3):
