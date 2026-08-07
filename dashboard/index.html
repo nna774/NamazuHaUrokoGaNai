@@ -119,10 +119,14 @@
         <label><input type="checkbox" id="autorefresh" checked> 自動更新</label>
       </div>
       <div id="live-status" class="muted status-line"></div>
+      <div id="live-intensity" class="status-line"></div>
       <canvas id="live-canvas"></canvas>
       <p class="muted">縦軸: 加速度 [gal]。x=赤 y=緑 z=青。範囲が広いときは min/max エンベロープ表示。
         ドラッグで時間方向に拡大（その区間を取り直すので細かくなる。自動更新は止まる）。
         ダブルクリックか「ライブ」で戻る。</p>
+      <p class="muted">概算震度は「1分」表示時のみ、取得済みの生波形からブラウザ内で計算する
+        参考値（気象庁計測震度のFIR近似・追加のサーバ通信なし）。イベント一覧の確定値とは
+        算出経路が異なるため、僅かにずれることがある。</p>
     </section>
 
     <section id="events">
