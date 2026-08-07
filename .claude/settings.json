@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(terraform apply*)",
+      "Bash(terraform plan*)",
+      "Bash(cd terraform && terraform apply*)",
+      "Bash(cd terraform && terraform plan*)",
+      "Bash(cd terraform && AWS_REGION=ap-northeast-1 terraform apply*)",
+      "Bash(cd terraform && AWS_REGION=ap-northeast-1 terraform plan*)"
+    ]
+  }
+}
