@@ -47,6 +47,7 @@ data "aws_iam_policy_document" "lambda" {
     resources = [
       aws_dynamodb_table.events.arn,
       aws_dynamodb_table.devices.arn,
+      aws_dynamodb_table.device_temp.arn,
     ]
   }
 }

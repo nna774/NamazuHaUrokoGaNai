@@ -108,30 +108,10 @@ def test_adxl355_temp_intercept_is_not_the_adxl359_value():
     assert wire.ADXL355_TEMP_AT_25C == 1885.0
 
 
-def test_parse_header_matches_full_parse():
-    data = build_batch(version=2, sensor_type=1,
-                       trailer=tlv(wire.TRAILER_SENSOR_TEMP, struct.pack("<H", 1900)))
-    full = wire.parse(data)
-    head = wire.parse_header(data[:wire.HEADER_SIZE])
-    assert head.device_id == full.meta.device_id
-    assert head.sample_count == full.meta.sample_count
-    assert head.trailer == {}  # ヘッダだけなのでトレイラーはまだ無い
-
-
-def test_payload_size_matches_trailer_offset():
-    samples = np.array([[1, -2, 3], [100, 200, -300], [0, 0, 1]], dtype=np.int16)
-    trailer = tlv(wire.TRAILER_SENSOR_TEMP, struct.pack("<H", 1900))
-    data = build_batch(version=2, samples=samples, trailer=trailer)
-    meta = wire.parse_header(data[:wire.HEADER_SIZE])
-    off = wire.HEADER_SIZE + wire.payload_size(meta)
-    assert data[off:] == trailer
-
-
-def test_payload_size_accounts_for_int32_samples():
-    samples = np.array([[1, 2, 3]], dtype=np.int32)
-    data = build_batch(sample_format=1, samples=samples)
-    meta = wire.parse_header(data[:wire.HEADER_SIZE])
-    assert wire.payload_size(meta) == 1 * 3 * 4
+def test_temp_c_for_only_adxl355():
+    assert wire.temp_c_for(wire.SENSOR_TYPE_ADXL355, 1900) == pytest.approx(wire.adxl355_temp_c(1900))
+    assert wire.temp_c_for(wire.SENSOR_TYPE_IIS3DHHC, 1900) is None
+    assert wire.temp_c_for(wire.SENSOR_TYPE_ADXL355, None) is None
 
 
 def test_temp_c_only_for_adxl355():

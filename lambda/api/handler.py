@@ -23,7 +23,7 @@ import numpy as np
 
 from batch_uplink import devices, s3util
 
-from common import events, store, wire
+from common import device_temp, events, store, wire
 from jismo.rounding import intensity_scale
 
 s3 = boto3.client("s3")
@@ -37,9 +37,8 @@ MAX_POINTS = 3000
 # /recent の分数上限。上限が無いと巨大値でS3 LIST/GETを大量発行して
 # ハング/課金する（認証なし公開のため要ガード）。UIの選択肢も30分まで。
 MAX_RECENT_MINUTES = 30.0
-# /devices/<id>/temp の時間窓上限とヘッダ/トレイラーのみ取得しても間引く点数上限。
-# 温度は分〜時間の時定数のドリフトを見る用途なので、/recent ほど短く絞らなくても
-# 1バッチずつの軽量GET(store.load_temp_series)であれば24時間まで許容できる。
+# /devices/<id>/temp の時間窓上限と間引き点数上限。DynamoDB Query なので /recent の
+# S3スキャンほど窓を絞る必要はないが、上限はUIの選択肢(24時間)に合わせて置いておく。
 MAX_TEMP_HOURS = 24.0
 MAX_TEMP_POINTS = 300
 # CORSヘッダは Function URL の cors 設定に任せる（ここで access-control-* を
@@ -299,13 +298,14 @@ def _device_temp(device_id: int, q):
         hours = 3.0
     if not math.isfinite(hours):
         hours = 3.0
-    hours = max(0.1, min(hours, MAX_TEMP_HOURS))  # 巨大値によるS3スキャン暴走を防ぐ
+    hours = max(0.1, min(hours, MAX_TEMP_HOURS))  # 巨大値によるDynamoDB Query暴走を防ぐ
     end_us = int(time.time() * 1e6)
-    series = store.load_temp_series(s3, BUCKET, end_us, hours * 3600, device_id,
-                                    max_points=MAX_TEMP_POINTS)
+    start_us = int(end_us - hours * 3600 * 1e6)
+    items = device_temp.query_range(device_id, start_us, end_us, max_points=MAX_TEMP_POINTS)
     # raw はセンサ生値そのもの、c は換算式が既知（ADXL355）の時だけ付く参考値
     # （校正値ではないので絶対値は当てにならない。ドリフトの相対変化用）。
-    points = [{"t": t, "raw": meta.sensor_temp_raw, "c": wire.temp_c(meta)} for t, meta in series]
+    points = [{"t": int(it["batch_start_us"]), "raw": int(it["raw"]),
+              "c": wire.temp_c_for(int(it["sensor_type"]), int(it["raw"]))} for it in items]
     return _json(200, {"device_id": device_id, "hours": hours, "points": points})
 
 
