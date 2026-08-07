@@ -44,8 +44,8 @@
     .tabs button.active { background: var(--accent); color: #fff; }
     section { display: none; }
     section.active { display: block; }
-    #event-info { max-width: 480px; margin-top: 14px; }
-    #event-info td:first-child { color: #888; width: 42%; white-space: nowrap; }
+    #event-info, #device-info { max-width: 480px; margin-top: 14px; }
+    #event-info td:first-child, #device-info td:first-child { color: #888; width: 42%; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -161,20 +161,46 @@
     </section>
 
     <section id="devices">
-      <div class="row">
-        <button id="reload-devices">再読み込み</button>
-        <label><input type="checkbox" id="devices-auto" checked> 自動更新</label>
+      <!-- 一覧モード -->
+      <div id="devices-list">
+        <div class="row">
+          <button id="reload-devices">再読み込み</button>
+          <label><input type="checkbox" id="devices-auto" checked> 自動更新</label>
+        </div>
+        <div id="devices-status" class="muted status-line"></div>
+        <table id="devices-table">
+          <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th><th>版数</th><th>OTA</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="muted">状態は最終受信からの経過で判定（緑=オンライン / 赤=欠測）。
+          再起動要求が立っている間は状態の隣にバッジで出る。
+          「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。
+          「版数」はデバイスが今動かしているビルド版数。「OTA」は要求中の目標版数
+          （版数と一致すれば適用済み、違えば取得・適用待ち）。行クリックで詳細へ。</p>
       </div>
-      <div id="devices-status" class="muted status-line"></div>
-      <table id="devices-table">
-        <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th><th>版数</th><th>OTA</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="muted">状態は最終受信からの経過で判定（緑=オンライン / 赤=欠測）。
-        再起動要求が立っている間は状態の隣にバッジで出る。
-        「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。
-        「版数」はデバイスが今動かしているビルド版数。「OTA」は要求中の目標版数
-        （版数と一致すれば適用済み、違えば取得・適用待ち）。</p>
+      <!-- 詳細モード（一覧とは排他表示） -->
+      <div id="device-detail" style="display:none">
+        <div class="row">
+          <button id="device-back">← 一覧に戻る</button>
+          <label>温度の期間:
+            <select id="device-temp-hours">
+              <option value="1">1時間</option>
+              <option value="3" selected>3時間</option>
+              <option value="6">6時間</option>
+              <option value="24">24時間</option>
+            </select>
+          </label>
+        </div>
+        <h3 id="device-title"></h3>
+        <table id="device-info"></table>
+        <h4>センサ内蔵温度</h4>
+        <div id="device-temp-status" class="muted status-line"></div>
+        <canvas id="device-temp-canvas"></canvas>
+        <p class="muted">センサ内蔵温度計の生値からの参考換算[℃]。校正値ではないため
+          <strong>絶対値は当てにならない</strong>。架台の熱ドリフトとの相関を見る
+          相対変化の目安として見ること。温度計を持たない機体（IIS3DHHC機等）は
+          データが出ない。</p>
+      </div>
     </section>
   </main>
 

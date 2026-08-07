@@ -16,7 +16,7 @@ import boto3
 
 from batch_uplink import auth, devices, notify, s3util
 
-from common import events, ota_watch, wire
+from common import device_temp, events, ota_watch, wire
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
@@ -75,6 +75,16 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
                              fw_version=headers.get("x-namz-fw-version", ""))
     except Exception as e:  # noqa: BLE001
         print(f"devices.record_batch failed: {e!r}")
+
+    # 温度トレイラーがあれば記録（既に wire.parse 済みなので追加のS3アクセス無し）。
+    # ダッシュボードの読み取り側が毎回 raw/ を漁らずに済むよう、書き込み側で1回だけ
+    # DynamoDB に残す（docs/log/2026-08-07-device-detail-page-temp-trend.md）。
+    if b.meta.sensor_temp_raw is not None:
+        try:
+            device_temp.record(b.meta.device_id, b.meta.batch_start_us,
+                               b.meta.sensor_temp_raw, b.meta.sensor_type)
+        except Exception as e:  # noqa: BLE001
+            print(f"device_temp.record failed: {e!r}")
 
     # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。ここも主経路では
     # ないので、失敗してもバッチ保存自体は成功扱いにする。

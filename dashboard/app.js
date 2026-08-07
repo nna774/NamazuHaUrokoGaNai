@@ -671,6 +671,8 @@ async function refreshDevices() {
     tbody.innerHTML = '';
     for (const d of (data.devices || [])) {
       const tr = document.createElement('tr');
+      tr.dataset.id = d.device_id;
+      tr.onclick = () => { location.hash = deviceHash(d.device_id); };
       const id = String(d.device_id).padStart(4, '0');
       const restartBadge = d.pending_restart_requested_at_us
         ? ' <span class="badge badge-restart">再起動要求</span>'
@@ -711,6 +713,128 @@ function scheduleDevices() {
   if (document.getElementById('devices-auto').checked) {
     devicesTimer = setInterval(refreshDevices, 30000);
   }
+}
+
+// --- デバイス詳細（温度トレンド） ---
+let currentDeviceId = null;  // device-temp-hours 変更時にハッシュを組み直すため
+
+function showDevicesMode(detail) {
+  // 一覧モードと詳細モードは排他表示（イベントと同じ考え方）
+  document.getElementById('devices-list').style.display = detail ? 'none' : 'block';
+  document.getElementById('device-detail').style.display = detail ? 'block' : 'none';
+}
+
+function renderDeviceInfo(d) {
+  const tbody = document.getElementById('device-info');
+  const st = d.online
+    ? '<span class="status-ok">● オンライン</span>'
+    : '<span class="status-ng">● 欠測</span>';
+  const last = d.last_ingest_at_us
+    ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
+    : '—';
+  const rows = [
+    ['状態', st],
+    ['最終受信', last],
+    ['データ鮮度', `${fmtAgo(d.lag_s)}遅れ`],
+    ['累計バッチ', String(d.batches_total ?? 0)],
+    ['版数', d.fw_version || '—'],
+  ];
+  if (d.pending_ota_version) {
+    rows.push(['OTA', (d.fw_version && d.fw_version === d.pending_ota_version)
+      ? `適用済み (${d.pending_ota_version})` : `→ ${d.pending_ota_version}`]);
+  }
+  if (d.pending_restart_requested_at_us) rows.push(['再起動要求', '立っている（次回受信で反映）']);
+  tbody.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+
+// 温度トレンドの折れ線を描く。drawWaveform と同じ pad/fitCanvas を使い回すが、
+// 1系列・実時間軸なので専用に書く（波形の3軸描画ロジックを流用すると複雑さが増す）。
+function drawTempChart(cv, points) {
+  const { ctx, w, h } = fitCanvas(cv);
+  ctx.clearRect(0, 0, w, h);
+  const pad = PAD;
+  const plotW = w - pad * 2, plotH = h - pad * 2;
+
+  if (!points.length) {
+    ctx.fillStyle = '#888';
+    ctx.fillText('データなし', pad, h / 2);
+    return;
+  }
+
+  // c（換算℃）があればそちらを、無ければ生値をそのまま描く。
+  const val = p => p.c != null ? p.c : p.raw;
+  const vals = points.map(val);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const margin = (hi - lo) * 0.1 || 1;
+  lo -= margin; hi += margin;
+  const t0 = points[0].t, t1 = points[points.length - 1].t;
+  const tr = Math.max(1, t1 - t0);
+  const X = t => pad + ((t - t0) / tr) * plotW;
+  const Y = v => pad + plotH - ((v - lo) / (hi - lo)) * plotH;
+
+  ctx.fillStyle = '#888'; ctx.font = '11px system-ui';
+  ctx.fillText(hi.toFixed(1), 2, Y(hi) + 4);
+  ctx.fillText(lo.toFixed(1), 2, Y(lo) + 4);
+
+  ctx.strokeStyle = '#e67e22';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = X(p.t), y = Y(val(p));
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+
+  // 横軸の時刻目盛り（drawWaveform と同じ間引き方）
+  const nticks = Math.max(2, Math.min(6, Math.floor(plotW / 80)));
+  ctx.font = '11px system-ui';
+  for (let k = 0; k < nticks; k++) {
+    const f = k / (nticks - 1);
+    const x = pad + f * plotW;
+    ctx.strokeStyle = 'rgba(128,128,128,.18)';
+    ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, pad + plotH); ctx.stroke();
+    ctx.fillStyle = '#888';
+    ctx.textAlign = k === 0 ? 'left' : k === nticks - 1 ? 'right' : 'center';
+    const d = new Date((t0 + f * (t1 - t0)) / 1000);
+    ctx.fillText(d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }), x, h - 8);
+  }
+  ctx.textAlign = 'left';
+}
+
+async function refreshDeviceTemp(id) {
+  const status = document.getElementById('device-temp-status');
+  const hours = document.getElementById('device-temp-hours').value;
+  try {
+    status.textContent = '取得中…';
+    const data = await apiGet(`/devices/${encodeURIComponent(id)}/temp?hours=${hours}`);
+    const points = data.points || [];
+    drawTempChart(document.getElementById('device-temp-canvas'), points);
+    status.textContent = points.length
+      ? `${points.length} 点（直近${hours}時間）`
+      : 'データなし（このセンサは温度非対応、または直近データなし）';
+  } catch (e) {
+    status.textContent = 'エラー: ' + e.message;
+  }
+}
+
+async function showDevice(id) {
+  currentDeviceId = id;
+  const title = document.getElementById('device-title');
+  const padded = String(id).padStart(4, '0');
+  title.textContent = '読み込み中… ' + padded;
+  document.getElementById('device-info').innerHTML = '';
+  try {
+    const data = await apiGet('/devices/' + encodeURIComponent(id));
+    const d = data.device || {};
+    title.textContent = `デバイス ${String(d.device_id ?? id).padStart(4, '0')}`;
+    renderDeviceInfo(d);
+  } catch (e) {
+    title.textContent = `デバイス ${padded}`;
+    document.getElementById('device-info').innerHTML =
+      `<tr><td colspan="2">エラー: ${escapeHtml(e.message)}</td></tr>`;
+  }
+  refreshDeviceTemp(id);
 }
 
 // --- ハッシュルーティング ---
@@ -777,6 +901,12 @@ function eventHash(id) {
     + `${eventsDeviceHash()}&r=${r}&ax=${axesStr('event')}${t}`;
 }
 
+// デバイス詳細ハッシュ。温度の表示期間(h)を持たせ、リロード・共有URLで復元される。
+function deviceHash(id) {
+  const h = document.getElementById('device-temp-hours').value;
+  return `device/${encodeURIComponent(id)}?h=${h}`;
+}
+
 function showEventsMode(detail) {
   // 一覧モードと詳細モードは排他表示（同時に出さないのでテーブルがガタつかない）
   document.getElementById('events-list').style.display = detail ? 'none' : 'block';
@@ -803,8 +933,14 @@ function route() {
     document.getElementById('events-all').checked = params.all === '1';
     eventsDeviceId = params.d ? decodeURIComponent(params.d) : 'all';
     reloadEvents(params.p ? parseInt(params.p, 10) : 1);
+  } else if (path.startsWith('device/')) {
+    showView('devices');
+    showDevicesMode(true);
+    if (params.h) document.getElementById('device-temp-hours').value = params.h;
+    showDevice(decodeURIComponent(path.slice('device/'.length)));
   } else if (path === 'devices') {
     showView('devices');
+    showDevicesMode(false);
     refreshDevices();
     scheduleDevices();
   } else {
@@ -912,6 +1048,13 @@ window.addEventListener('load', () => {
   };
   document.getElementById('reload-devices').onclick = () => refreshDevices();
   document.getElementById('devices-auto').onchange = () => scheduleDevices();
+  document.getElementById('device-back').onclick = () => { location.hash = 'devices'; };
+  // 期間の変更は取り直しが要るので再フェッチする（縦軸レンジ等の再描画のみとは違う）。
+  document.getElementById('device-temp-hours').onchange = () => {
+    if (currentDeviceId == null) return;
+    history.replaceState(null, '', '#' + deviceHash(currentDeviceId));
+    refreshDeviceTemp(currentDeviceId);
+  };
   // タイトルクリックで全操作状態を既定に戻す（ライブ・1分窓・自動更新・±100gal・全軸）。
   // イベント側のフィルタ・ページも既定へ。既に既定ならハッシュが変わらないので直接 route する。
   document.getElementById('home').onclick = () => {

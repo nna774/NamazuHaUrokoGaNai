@@ -106,3 +106,26 @@ def test_adxl355_temp_intercept_is_not_the_adxl359_value():
     ADI のデモコード(ADuCM360_demo_adxl355_pmdz)が 1852 を使っているので混同しやすい。
     """
     assert wire.ADXL355_TEMP_AT_25C == 1885.0
+
+
+def test_temp_c_for_only_adxl355():
+    assert wire.temp_c_for(wire.SENSOR_TYPE_ADXL355, 1900) == pytest.approx(wire.adxl355_temp_c(1900))
+    assert wire.temp_c_for(wire.SENSOR_TYPE_IIS3DHHC, 1900) is None
+    assert wire.temp_c_for(wire.SENSOR_TYPE_ADXL355, None) is None
+
+
+def test_temp_c_only_for_adxl355():
+    meta_adxl = wire.parse(build_batch(
+        version=2, sensor_type=wire.SENSOR_TYPE_ADXL355,
+        trailer=tlv(wire.TRAILER_SENSOR_TEMP, struct.pack("<H", 1900)))).meta
+    assert wire.temp_c(meta_adxl) == pytest.approx(wire.adxl355_temp_c(1900))
+
+    meta_iis = wire.parse(build_batch(
+        version=2, sensor_type=wire.SENSOR_TYPE_IIS3DHHC,
+        trailer=tlv(wire.TRAILER_SENSOR_TEMP, struct.pack("<H", 1900)))).meta
+    assert wire.temp_c(meta_iis) is None  # IIS3DHHCは換算式を持たない(そもそも積まない想定)
+
+
+def test_temp_c_none_without_trailer():
+    meta = wire.parse(build_batch(version=2, sensor_type=wire.SENSOR_TYPE_ADXL355)).meta
+    assert wire.temp_c(meta) is None
