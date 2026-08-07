@@ -29,12 +29,20 @@
        余白・フォントを詰めた上でセル内の自動折り返しを止め（最終受信の日/時は
        <br>で明示的に改行するのでnowrapと両立する）、崩れずに1画面へ収める。 */
     #devices-table th, #devices-table td { padding: 4px 5px; font-size: 13px; white-space: nowrap; }
-    @media (max-width: 480px) {
+    /* ブレークポイントは実デバイス幅(390〜430px)より広めの700pxにしてある。
+       SafariのWebサイト表示設定「ページ拡大/縮小」を100%未満（例:75%）にしていると
+       window.innerWidthはデバイス幅より大きく報告される（実測: iPhone 15 Pro 393pt
+       ÷ 0.75 ≈ 524px）ため、デバイス幅ぴったりの閾値だと縮小表示のSafariで
+       発火し損ねて素の8列レイアウトのままページ全体が右にはみ出す事故を踏んだ。 */
+    @media (max-width: 700px) {
       #devices-table th, #devices-table td { padding: 3px 3px; font-size: 11px; }
       /* 累計バッチ・版数は個別ページ(#device/<id>)で確認できるので、
-         iPhone幅では隠して横スクロールなしに収める。 */
+         狭い画面では隠して横スクロールなしに収める。 */
       #devices-table .col-batches, #devices-table .col-fw { display: none; }
     }
+    /* 上のブレークポイントで想定より狭い実効幅（さらなる縮小表示等）に当たっても、
+       ページ全体ではなくテーブル内だけが横スクロールするようにする安全策。 */
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     tr[data-id] { cursor: pointer; }
     tr[data-id]:hover { background: rgba(192,57,43,.08); }
     .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 12px; }
@@ -178,10 +186,12 @@
           <label><input type="checkbox" id="devices-auto" checked> 自動更新</label>
         </div>
         <div id="devices-status" class="muted status-line"></div>
-        <table id="devices-table">
-          <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th class="col-batches">累計バッチ</th><th class="col-fw">版数</th><th>稼働時間</th><th>OTA</th></tr></thead>
-          <tbody></tbody>
-        </table>
+        <div class="table-scroll">
+          <table id="devices-table">
+            <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th class="col-batches">累計バッチ</th><th class="col-fw">版数</th><th>稼働時間</th><th>OTA</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
         <p class="muted">状態は最終受信からの経過で判定（緑=オンライン / 赤=欠測）。
           再起動要求が立っている間は状態の隣にバッジで出る。
           「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。
