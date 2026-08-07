@@ -660,6 +660,14 @@ function warnBg(sec, warnAt) {
   return '';
 }
 
+// 一覧テーブルは列数がぎりぎりなので、日付と時刻を明示的に改行して1セルの
+// 最大幅を縮める（ブラウザの自動折り返しに任せると崩れ位置が揃わない）。
+function fmtLastIngestCell(us, ageS) {
+  if (!us) return '—';
+  const dt = new Date(us / 1000);
+  return `${dt.toLocaleDateString('ja-JP')}<br>${dt.toLocaleTimeString('ja-JP')}（${fmtAgo(ageS)}前）`;
+}
+
 async function refreshDevices() {
   const status = document.getElementById('devices-status');
   const tbody = document.querySelector('#devices-table tbody');
@@ -680,9 +688,7 @@ async function refreshDevices() {
       const st = (d.online
         ? '<span class="status-ok">● オンライン</span>'
         : '<span class="status-ng">● 欠測</span>') + restartBadge;
-      const last = d.last_ingest_at_us
-        ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
-        : '—';
+      const last = fmtLastIngestCell(d.last_ingest_at_us, d.age_s);
       const fwVersion = d.fw_version || '—';
       let ota = '—';
       if (d.pending_ota_version) {
@@ -693,8 +699,9 @@ async function refreshDevices() {
       tr.innerHTML = `<td>${id}</td><td>${st}</td>`
         + `<td${warnBg(d.age_s, offlineAt)}>${last}</td>`
         + `<td${warnBg(d.lag_s, lagAt)}>${fmtAgo(d.lag_s)}遅れ</td>`
-        + `<td>${d.batches_total ?? 0}</td>`
-        + `<td>${fwVersion}</td>`
+        + `<td class="col-batches">${d.batches_total ?? 0}</td>`
+        + `<td class="col-fw">${fwVersion}</td>`
+        + `<td>${d.uptime_s != null ? fmtAgo(d.uptime_s) : '—'}</td>`
         + `<td>${ota}</td>`;
       tbody.appendChild(tr);
     }

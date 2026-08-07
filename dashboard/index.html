@@ -25,6 +25,16 @@
     .status-line { min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 0 8px; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
+    /* デバイス一覧は列数が多く、狭い画面(iPhone Safari等)だと崩れやすい。
+       余白・フォントを詰めた上でセル内の自動折り返しを止め（最終受信の日/時は
+       <br>で明示的に改行するのでnowrapと両立する）、崩れずに1画面へ収める。 */
+    #devices-table th, #devices-table td { padding: 4px 5px; font-size: 13px; white-space: nowrap; }
+    @media (max-width: 480px) {
+      #devices-table th, #devices-table td { padding: 3px 3px; font-size: 11px; }
+      /* 累計バッチ・版数は個別ページ(#device/<id>)で確認できるので、
+         iPhone幅では隠して横スクロールなしに収める。 */
+      #devices-table .col-batches, #devices-table .col-fw { display: none; }
+    }
     tr[data-id] { cursor: pointer; }
     tr[data-id]:hover { background: rgba(192,57,43,.08); }
     .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 12px; }
@@ -169,13 +179,14 @@
         </div>
         <div id="devices-status" class="muted status-line"></div>
         <table id="devices-table">
-          <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th>累計バッチ</th><th>版数</th><th>OTA</th></tr></thead>
+          <thead><tr><th>デバイス</th><th>状態</th><th>最終受信</th><th>データ鮮度</th><th class="col-batches">累計バッチ</th><th class="col-fw">版数</th><th>稼働時間</th><th>OTA</th></tr></thead>
           <tbody></tbody>
         </table>
         <p class="muted">状態は最終受信からの経過で判定（緑=オンライン / 赤=欠測）。
           再起動要求が立っている間は状態の隣にバッジで出る。
           「データ鮮度」は最新の測定時刻からの遅れ（復旧直後のバックフィル中は大きくなる）。
-          「版数」はデバイスが今動かしているビルド版数。「OTA」は要求中の目標版数
+          「版数」はデバイスが今動かしているビルド版数。「稼働時間」は最後に検知した
+          起動からの経過（旧ファーム等で未記録なら「—」）。「OTA」は要求中の目標版数
           （版数と一致すれば適用済み、違えば取得・適用待ち）。行クリックで詳細へ。</p>
       </div>
       <!-- 詳細モード（一覧とは排他表示） -->
