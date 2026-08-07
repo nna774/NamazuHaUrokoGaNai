@@ -749,6 +749,7 @@ function renderDeviceInfo(d) {
     ['累計バッチ', String(d.batches_total ?? 0)],
     ['版数', fwVersionHtml(d.fw_version)],
     ['センサ', d.sensor || '不明'],
+    ['稼働時間', d.uptime_s != null ? fmtAgo(d.uptime_s) : '不明'],
   ];
   if (d.pending_ota_version) {
     rows.push(['OTA', (d.fw_version && d.fw_version === d.pending_ota_version)

@@ -95,6 +95,7 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
     # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。ここも主経路では
     # ないので、失敗してもバッチ保存自体は成功扱いにする。
     extra_headers: dict[str, str] = {}
+    item = None
     try:
         item = devices.get_device(b.meta.device_id)
         if item:
@@ -118,6 +119,20 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
                     extra_headers["X-Namz-Ota-Version"] = str(pending_ota)
     except Exception as e:  # noqa: BLE001
         print(f"restart/ota request check failed: {e!r}")
+
+    # 稼働時間ヘッダ(X-Namz-Uptime-Us、docs/uptime.md §2.2)から起動時刻を逆算し、
+    # 前回保存値からTimeSyncドリフト許容(±2分)を超えてズレていたら再起動とみなして
+    # 記録する。raw/には残さず、その場で使い切る（wire v2トレイラーではなくヘッダに
+    # した理由そのもの）。
+    uptime_raw = headers.get("x-namz-uptime-us", "")
+    if uptime_raw:
+        try:
+            boot_epoch_us = b.meta.batch_start_us - int(uptime_raw)
+            prev = item.get("boot_epoch_us") if item else None
+            if device_meta.should_update_boot_epoch(prev, boot_epoch_us):
+                device_meta.record_boot_epoch(b.meta.device_id, boot_epoch_us)
+        except Exception as e:  # noqa: BLE001
+            print(f"device_meta.record_boot_epoch failed: {e!r}")
 
     return _resp(200, f"stored {key}", extra_headers or None)
 

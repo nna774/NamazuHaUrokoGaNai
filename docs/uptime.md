@@ -2,7 +2,7 @@
 
 デバイス詳細ページ（[device_overlay.md](device_overlay.md)とは別件、[progress.md](progress.md)
 2026-08-07の温度トレンド追加の派生）で「最終起動からの経過時間」を出したいという
-要望から。**未着手**（設計のみ）。
+要望から。**実装済み（実機・本番デプロイはまだ）**。
 
 ## 1. なぜ今は出せないか
 
@@ -69,7 +69,7 @@ batch-uplink `Uploader`の`extraRequestHeaderNames/Values`（v1.6.0、[device-st
 ので空きがある。**batch-uplinkの変更もバージョンpinの変更も不要**（wire v2トレイラー
 案よりさらに軽い）。
 
-firmware側の実装イメージ（`main.cpp`）:
+firmware側の実装（`main.cpp`）:
 
 ```cpp
 static constexpr const char* kUptimeHeader = "X-Namz-Uptime-Us";
@@ -77,18 +77,17 @@ static char sUptimeBuf[24];  // int64のUS値を文字列化するバッファ
 static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf};  // 2枠目は可変
 
-// バッチ送信の直前（postBatch呼び出し前）に毎回更新する:
+// uploaderTaskのループでpump()を呼ぶ直前に毎周更新する:
 snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
 ```
 
-`kExtraRequestHeaderValues`は現状`static constexpr const char*[]`（配列全体が
-コンパイル時定数）なので、1枠だけ可変にするには配列自体をconstexprから外す必要がある
-（`kFwVersion`側は文字列リテラルへのポインタのままでよく、書き換わるのは
-`sUptimeBuf`を指す2枠目だけ）。
+`kExtraRequestHeaderValues`は`kExtraRequestHeaderNames`と同様constexprを外し、値が
+実行時に書き換わる（`sUptimeBuf`を指す2枠目）ことを許した。`Uploader`のコンストラクタに
+渡す`extraRequestHeaderCount`も1→2に上げた。
 
 ingest側は`headers.get("x-namz-uptime-us", "")`を読むだけ。`lambda/common/wire.py`・
-`firmware/lib/NamzWire/WireFormat.h`はどちらも変更不要（wire v2 トレイラーに新種別を
-足す必要が無くなった）。
+`firmware/lib/NamzWire/WireFormat.h`はどちらも変更していない（wire v2 トレイラーに
+新種別を足す必要が無くなった）。
 
 ### 2.3 使い分けの原則（今回の整理）
 
@@ -108,12 +107,19 @@ boot_epoch_us = batch_start_us - uptime_us
 
 `lambda/common/device_meta.py`（[2026-08-07-device-detail-sensor-and-links.md](log/2026-08-07-device-detail-sensor-and-links.md)で
 センサ種別を記録するために作った、Namazu固有の静的なデバイス属性を`namazu-devices`に
-`update_item`で足す型。既存）に`record_boot_epoch()`を足す:
+`update_item`で足す型。既存）に足した:
 
-1. 今回計算した`boot_epoch_us`と、`namazu-devices`に保存済みの`boot_epoch_us`を比較
-2. 差が閾値（TimeSyncのドリフト許容、案: ±2分）を超えていたら「再起動があった」と
-   みなし、`boot_epoch_us`を更新
-3. 閾値内なら何もしない（同一ブートセッション内のジッタはDynamoDB書き込みを増やさない）
+- `BOOT_EPOCH_DRIFT_THRESHOLD_US = 120_000_000`（±2分、TimeSyncのドリフト許容）
+- `should_update_boot_epoch(prev_boot_epoch_us, new_boot_epoch_us) -> bool`（副作用なし）:
+  未記録(`prev=None`)なら無条件でTrue、記録済みなら閾値超えのズレの時だけTrue。
+  `devices.evaluate()`（欠測判定の状態遷移を副作用から分離した既存パターン）に倣い、
+  再起動検知の判定ロジックをDynamoDB書き込みから切り離してテストしやすくした。
+- `record_boot_epoch(device_id, boot_epoch_us)`（`update_item`本体）
+
+`ingest`の`_handle_batch`は、リモート再起動/OTAチェックで既に読んでいる
+`devices.get_device()`の結果を使い回して`prev`を得る（追加のDynamoDB読み取りは無い）。
+`should_update_boot_epoch`がTrueの時だけ`record_boot_epoch`を呼ぶので、閾値内の
+ジッタでは書き込みが起きない。
 
 この差分検知が**再起動検知そのもの**になる。`fw_version`の変化を見るより確実——
 クラッシュや電源断による再起動も、`fw_version`が変わらなくても拾える。
@@ -123,10 +129,12 @@ boot_epoch_us = batch_start_us - uptime_us
 
 ## 4. ダッシュボード表示
 
-デバイス詳細ページ（`#device/<id>`）の情報テーブルに「稼働時間」行を1つ足す。
-`api`の`/devices`・`/devices/<id>`が返す`boot_epoch_us`から`now - boot_epoch_us`を
-クライアント側で計算するか、`_device_view()`側で計算済みの秒数を返すかは実装時に決める
-（既存の`age_s`/`lag_s`と同じ「サーバ側で計算して返す」流儀に合わせるのが自然）。
+デバイス詳細ページ（`#device/<id>`）の情報テーブルに「稼働時間」行を1つ足した。
+`api`の`_device_view()`が`boot_epoch_us`（生値）と`uptime_s = (now_us - boot_epoch_us) / 1e6`
+（計算済み秒数）の両方を返す（既存の`age_s`/`lag_s`と同じ「サーバ側で計算して返す」流儀）。
+ダッシュボード側は既存の`fmtAgo()`（`age_s`/`lag_s`表示と同じ粗い相対表記ヘルパー）を
+そのまま流用した。旧ファーム（稼働時間ヘッダ未送信）は`boot_epoch_us`が無く、
+`uptime_s`は`null`→「不明」と表示される。
 
 **やるかは好み**: 温度トレンドと同じ折れ線チャートで「稼働時間」を時系列表示すると
 鋸波になり、ゼロ近くに落ちた瞬間＝再起動、が一目で分かる。ただし表示のためだけに
@@ -134,9 +142,9 @@ boot_epoch_us = batch_start_us - uptime_us
 なので、時系列が要るなら温度と同じく別テーブルに倒す判断が要る）。まずは最新値の
 1行表示だけで十分そう。
 
-## 5. 副産物: `millis()`の折り返しバグ
+## 5. 副産物: `millis()`の折り返しバグ（修正済み）
 
-`checkAndPerformPullOta()`（`firmware/src/main.cpp` line 338-353）:
+`checkAndPerformPullOta()`（`firmware/src/main.cpp`、修正前は line 338-353）:
 
 ```cpp
 static void checkAndPerformPullOta(const String& target) {
@@ -161,20 +169,25 @@ static void checkAndPerformPullOta(const String& target) {
 実害は小さい: pull型OTAの目標バージョンが実際に一致していない瞬間にこの
 ウィンドウを踏んだ場合だけ、1分のバックオフが1回だけ早く切れて再試行が早まる
 （測定停止を招く`pauseSamplingForOta()`が1回余分に走りうる程度）。頻度は
-49.7日に一度のごく短い窓なので優先度は低いが、`esp_timer_get_time()`ベースの
-安全な減算比較（`(int64_t)(sNextAttemptUs - now) > 0`）に直せば同時に直る。
-稼働時間トレイラーの実装（§2.1）と一緒に直すのが効率的。
+49.7日に一度のごく短い窓なので優先度は低かったが、稼働時間の実装で
+`esp_timer_get_time()`を導入するのに合わせて直した——`sNextAttemptUs`を`int64_t`に
+し、`now < sNextAttemptUs`の直接比較のまま（`esp_timer_get_time()`は事実上
+折り返さないので、直接比較のままで安全になる）。
 
 他の`millis()`使用箇所（WiFi接続タイムアウト20秒・NTP再同期1時間・画面の揺れ表示）
 は減算パターン＋十分小さい閾値なので折り返し安全（詳細は本ドキュメント作成時の
-調査ログ参照、コミットの会話に残る）。
+調査ログ参照、コミットの会話に残る）。これらは`millis()`のままにした
+（`esp_timer_get_time()`への置き換えは稼働時間・OTAバックオフの用途に限った）。
 
 ## 6. 未定事項
 
-- 再起動検知の閾値（TimeSyncのドリフト許容、案の±2分が妥当か）
-- `restart_count`のような累積カウンタを最初から持たせるか、まずは最新値だけにするか
-- 稼働時間の時系列表示（鋸波チャート）をやるかどうか・やるなら保存先をどうするか
+- `restart_count`のような累積カウンタを最初から持たせるか、まずは最新値だけにするか（見送り中）
+- 稼働時間の時系列表示（鋸波チャート）をやるかどうか・やるなら保存先をどうするか（見送り中）
 
 ## 実装状況
 
-未着手。
+firmware（`X-Namz-Uptime-Us`ヘッダ送信・`millis()`折り返しバグ修正）・
+ingest（`boot_epoch_us`逆算・再起動検知）・api（`boot_epoch_us`/`uptime_s`公開）・
+ダッシュボード（デバイス詳細ページの「稼働時間」行）まで実装済み。
+`firmware/test/run.sh`・`pio run`（esp32dev/adxl355両env）・`pytest lambda/tests`
+（97件）は確認済み。**実機での動作確認・本番デプロイはまだ**。

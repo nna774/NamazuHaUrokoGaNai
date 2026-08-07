@@ -274,6 +274,11 @@ def _device_view(item: dict, now_us: int) -> dict:
         # ヘッダのsensor_typeをingestが記録したもの(device_meta.record_sensor_type)。
         # 表示名はwire.SENSOR_TYPE_NAMESが単一の真実。未記録(古いデータ等)はNone。
         "sensor": wire.SENSOR_TYPE_NAMES.get(item.get("sensor_type")),
+        # 稼働時間(docs/uptime.md)。boot_epoch_usはingestがX-Namz-Uptime-Usヘッダから
+        # 逆算・記録したもの(device_meta.record_boot_epoch)。未記録(旧ファーム等)はNone。
+        "boot_epoch_us": int(item["boot_epoch_us"]) if item.get("boot_epoch_us") else None,
+        "uptime_s": ((now_us - int(item["boot_epoch_us"])) / 1e6)
+                   if item.get("boot_epoch_us") else None,
     }
 
 

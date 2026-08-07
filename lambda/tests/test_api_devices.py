@@ -83,3 +83,22 @@ def test_device_view_sensor_none_when_not_yet_recorded(monkeypatch):
     monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
     resp = api._device(2)
     assert '"sensor": null' in resp["body"]
+
+
+def test_device_view_reports_uptime(monkeypatch):
+    monkeypatch.setattr(api.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "boot_epoch_us": int(1000.0 * 1e6)})
+    resp = api._device(2)
+    body = resp["body"]
+    assert '"boot_epoch_us": 1000000000' in body
+    assert '"uptime_s": 1000.0' in body
+
+
+def test_device_view_uptime_none_when_not_yet_recorded(monkeypatch):
+    """旧ファーム（稼働時間ヘッダ未送信）は boot_epoch_us が無い。"""
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)
+    body = resp["body"]
+    assert '"boot_epoch_us": null' in body
+    assert '"uptime_s": null' in body
