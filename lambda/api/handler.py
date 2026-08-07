@@ -7,6 +7,7 @@ Lambda Function URL (payload v2.0)。
 - GET /event?id=<event_id>        イベントのメタ + 波形
       &from=<us>&to=<to>          任意。保存済み波形からこの区間だけ切り出して返す
                                   （ダッシュボードのズームが狭い区間のrawを取り直す用）
+- GET /devices/<id>/temp?hours=<n> センサ内蔵温度の時系列（デバイス詳細ページ用）
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import numpy as np
 
 from batch_uplink import devices, s3util
 
-from common import events, store, wire
+from common import device_temp, events, store, wire
 from jismo.rounding import intensity_scale
 
 s3 = boto3.client("s3")
@@ -32,10 +33,18 @@ BUCKET = os.environ["NAMZ_BUCKET"]
 OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))
 # データ遅延の警告値。watchdog の遅延判定と揃える。ダッシュボードの背景色警告に使う。
 LAG_AFTER_S = float(os.environ.get("NAMZ_LAG_AFTER_S", "600"))
-MAX_POINTS = 3000
+# 6000 = 1分@100Hz。ライブ画面の既定窓(1分)をrawのまま返すための値
+# （ダッシュボードがクライアント側で概算震度を計算するには生サンプルが要る。
+# dashboard/app.js の EVENT_RAW_MAX_POINTS と一致させること）。
+# S3読み出し量は minutes(上限30分)で決まりこれとは無関係なので、上げてもスキャンは増えない。
+MAX_POINTS = 6000
 # /recent の分数上限。上限が無いと巨大値でS3 LIST/GETを大量発行して
 # ハング/課金する（認証なし公開のため要ガード）。UIの選択肢も30分まで。
 MAX_RECENT_MINUTES = 30.0
+# /devices/<id>/temp の時間窓上限と間引き点数上限。DynamoDB Query なので /recent の
+# S3スキャンほど窓を絞る必要はないが、上限はUIの選択肢(24時間)に合わせて置いておく。
+MAX_TEMP_HOURS = 24.0
+MAX_TEMP_POINTS = 300
 # CORSヘッダは Function URL の cors 設定に任せる（ここで access-control-* を
 # 返すと Function URL のぶんと二重になり、ブラウザが弾く）。ここは content-type のみ。
 HEADERS = {"content-type": "application/json"}
@@ -69,7 +78,10 @@ def handler(event, context):
             return _events(q)
         if path.endswith("/event"):
             return _event(q)
-        m = re.search(r"/devices/(\d{1,4})$", path)  # 個別デバイス（より具体的な方を先に）
+        m = re.search(r"/devices/(\d{1,4})/temp$", path)  # 個別デバイスの温度（より具体的な方を先に）
+        if m:
+            return _device_temp(int(m.group(1)), q)
+        m = re.search(r"/devices/(\d{1,4})$", path)
         if m:
             return _device(int(m.group(1)))
         if path.endswith("/devices"):
@@ -263,6 +275,14 @@ def _device_view(item: dict, now_us: int) -> dict:
         # v1.6.0のextraRequestHeaders経由で毎バッチ送られてくる)。
         # pending_ota_versionと比較すればOTAが実際に着地したか外からも分かる。
         "fw_version": item.get("fw_version", ""),
+        # ヘッダのsensor_typeをingestが記録したもの(device_meta.record_sensor_type)。
+        # 表示名はwire.SENSOR_TYPE_NAMESが単一の真実。未記録(古いデータ等)はNone。
+        "sensor": wire.SENSOR_TYPE_NAMES.get(item.get("sensor_type")),
+        # 稼働時間(docs/uptime.md)。boot_epoch_usはingestがX-Namz-Uptime-Usヘッダから
+        # 逆算・記録したもの(device_meta.record_boot_epoch)。未記録(旧ファーム等)はNone。
+        "boot_epoch_us": int(item["boot_epoch_us"]) if item.get("boot_epoch_us") else None,
+        "uptime_s": ((now_us - int(item["boot_epoch_us"])) / 1e6)
+                   if item.get("boot_epoch_us") else None,
     }
 
 
@@ -281,6 +301,24 @@ def _device(device_id: int):
     return _json(200, {"device": _device_view(item, now_us),
                        "offline_after_s": OFFLINE_AFTER_S,
                        "lag_after_s": LAG_AFTER_S})
+
+
+def _device_temp(device_id: int, q):
+    try:
+        hours = float(q.get("hours", "3"))
+    except (TypeError, ValueError):
+        hours = 3.0
+    if not math.isfinite(hours):
+        hours = 3.0
+    hours = max(0.1, min(hours, MAX_TEMP_HOURS))  # 巨大値によるDynamoDB Query暴走を防ぐ
+    end_us = int(time.time() * 1e6)
+    start_us = int(end_us - hours * 3600 * 1e6)
+    items = device_temp.query_range(device_id, start_us, end_us, max_points=MAX_TEMP_POINTS)
+    # raw はセンサ生値そのもの、c は換算式が既知（ADXL355）の時だけ付く参考値
+    # （校正値ではないので絶対値は当てにならない。ドリフトの相対変化用）。
+    points = [{"t": int(it["batch_start_us"]), "raw": int(it["raw"]),
+              "c": wire.temp_c_for(int(it["sensor_type"]), int(it["raw"]))} for it in items]
+    return _json(200, {"device_id": device_id, "hours": hours, "points": points})
 
 
 def _waveform_payload(gal: np.ndarray, start_us: int, fs: float) -> dict:

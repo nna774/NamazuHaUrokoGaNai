@@ -23,6 +23,17 @@ TLV_HEADER_FMT = "<HH"
 TLV_HEADER_SIZE = struct.calcsize(TLV_HEADER_FMT)
 TRAILER_SENSOR_TEMP = 1
 
+# sensor_type（firmware AccelSensor::sensorType() と一致させる）。
+# 温度の換算式はチップ依存なので、どのチップかの判定に使う（TLVのtypeとは無関係）。
+SENSOR_TYPE_IIS3DHHC = 0
+SENSOR_TYPE_ADXL355 = 1
+
+# 表示用の名前。ダッシュボードのデバイス詳細ページで使う。
+SENSOR_TYPE_NAMES = {
+    SENSOR_TYPE_IIS3DHHC: "IIS3DHHC",
+    SENSOR_TYPE_ADXL355: "ADXL355",
+}
+
 # ADXL355 の内蔵温度の換算（データシートの公称値）。
 #   温度[℃] = 25 + (raw - TEMP_AT_25C) / LSB_PER_DEGC
 # 公称値であって校正値ではない。部品ごとのばらつきがあるので**絶対値は当てにならない**。
@@ -39,6 +50,22 @@ ADXL355_TEMP_LSB_PER_DEGC = -9.05
 def adxl355_temp_c(raw: int) -> float:
     """ADXL355 の温度生値を℃へ。絶対精度は無い（上のコメント参照）。"""
     return 25.0 + (raw - ADXL355_TEMP_AT_25C) / ADXL355_TEMP_LSB_PER_DEGC
+
+
+def temp_c_for(sensor_type: int, raw: int | None) -> float | None:
+    """(sensor_type, 生値) から℃へ。換算式が無いセンサ種別や生値が無ければ None。
+
+    `common.device_temp` に記録した DynamoDB アイテムのように、BatchMeta を経由
+    しない場所（既に raw/sensor_type だけが手元にある場所）から呼ぶための実体。
+    """
+    if raw is None or sensor_type != SENSOR_TYPE_ADXL355:
+        return None
+    return adxl355_temp_c(raw)
+
+
+def temp_c(meta: BatchMeta) -> float | None:
+    """バッチの温度トレイラーを℃へ。換算式が無いセンサ種別や温度自体が無ければ None。"""
+    return temp_c_for(meta.sensor_type, meta.sensor_temp_raw)
 
 
 @dataclass

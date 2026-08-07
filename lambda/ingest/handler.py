@@ -16,7 +16,7 @@ import boto3
 
 from batch_uplink import auth, devices, notify, s3util
 
-from common import events, wire
+from common import device_meta, device_temp, events, ota_watch, wire
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
@@ -76,9 +76,26 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
     except Exception as e:  # noqa: BLE001
         print(f"devices.record_batch failed: {e!r}")
 
+    # センサ種別をデバイス詳細ページ表示用に記録（ヘッダに毎回乗っているので追加コスト無し）。
+    try:
+        device_meta.record_sensor_type(b.meta.device_id, b.meta.sensor_type)
+    except Exception as e:  # noqa: BLE001
+        print(f"device_meta.record_sensor_type failed: {e!r}")
+
+    # 温度トレイラーがあれば記録（既に wire.parse 済みなので追加のS3アクセス無し）。
+    # ダッシュボードの読み取り側が毎回 raw/ を漁らずに済むよう、書き込み側で1回だけ
+    # DynamoDB に残す（docs/log/2026-08-07-device-detail-page-temp-trend.md）。
+    if b.meta.sensor_temp_raw is not None:
+        try:
+            device_temp.record(b.meta.device_id, b.meta.batch_start_us,
+                               b.meta.sensor_temp_raw, b.meta.sensor_type)
+        except Exception as e:  # noqa: BLE001
+            print(f"device_temp.record failed: {e!r}")
+
     # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。ここも主経路では
     # ないので、失敗してもバッチ保存自体は成功扱いにする。
     extra_headers: dict[str, str] = {}
+    item = None
     try:
         item = devices.get_device(b.meta.device_id)
         if item:
@@ -88,15 +105,34 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
                 extra_headers["X-Namz-Restart"] = "1"
                 devices.clear_restart_request(b.meta.device_id)
             # pull型OTA（tools/request_ota.py が立てる、docs/ota.md §7）の許可
-            # バージョンは「あるべき状態」なので、再起動要求と違いここではクリア
-            # しない——デバイスが実際にそのバージョンで起動する（次にNAMZ_FW_VERSION
-            # が一致したバッチを送ってくる）までヘッダを返し続ける。ダウンロード・
-            # 書き込み失敗時の自然なリトライにもなる。
+            # バージョンは「あるべき状態」なので、再起動要求と違い達成前は
+            # クリアしない——デバイスが実際にそのバージョンで起動する（次に
+            # NAMZ_FW_VERSIONが一致したバッチを送ってくる）までヘッダを返し
+            # 続ける。ダウンロード・書き込み失敗時の自然なリトライにもなる。
+            # 一致した後は解放する。さもないとwatchdogの停滞検知（時間経過
+            # ベース）が達成後も誤検知し続ける。
             pending_ota = item.get("pending_ota_version")
             if pending_ota:
-                extra_headers["X-Namz-Ota-Version"] = str(pending_ota)
+                if ota_watch.reached_target(item):
+                    ota_watch.clear_ota_target(b.meta.device_id, str(pending_ota))
+                else:
+                    extra_headers["X-Namz-Ota-Version"] = str(pending_ota)
     except Exception as e:  # noqa: BLE001
         print(f"restart/ota request check failed: {e!r}")
+
+    # 稼働時間ヘッダ(X-Namz-Uptime-Us、docs/uptime.md §2.2)から起動時刻を逆算し、
+    # 前回保存値からTimeSyncドリフト許容(±2分)を超えてズレていたら再起動とみなして
+    # 記録する。raw/には残さず、その場で使い切る（wire v2トレイラーではなくヘッダに
+    # した理由そのもの）。
+    uptime_raw = headers.get("x-namz-uptime-us", "")
+    if uptime_raw:
+        try:
+            boot_epoch_us = b.meta.batch_start_us - int(uptime_raw)
+            prev = item.get("boot_epoch_us") if item else None
+            if device_meta.should_update_boot_epoch(prev, boot_epoch_us):
+                device_meta.record_boot_epoch(b.meta.device_id, boot_epoch_us)
+        except Exception as e:  # noqa: BLE001
+            print(f"device_meta.record_boot_epoch failed: {e!r}")
 
     return _resp(200, f"stored {key}", extra_headers or None)
 

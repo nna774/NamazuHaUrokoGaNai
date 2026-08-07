@@ -49,6 +49,9 @@ static Display gDisplay;
 static volatile float gDispIntensity = 0.0f;
 static volatile float gDispPeakGal = 0.0f;
 static volatile uint32_t gLastShakeMs = 0;  // 瞬時合成加速度がしきい値を超えた最終時刻
+// OTA更新中フラグ（uploaderTask/Core0が書き、loop/Core1が読む）。trueの間は
+// loop()が震度画面の代わりにgDisplay.renderOtaUpdating()を出す。
+static volatile bool gOtaInProgress = false;
 
 // デバイス識別情報・秘密・エンドポイントURL。setup()の先頭でNVSからロードする
 // （旧secrets.h。コンパイル時に埋め込まない理由はdocs/ota.md §7参照）。
@@ -72,8 +75,15 @@ static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHea
 // 汎用ヘッダで、X-Namz-Ota-Versionの停滞検知が「原因不明」で止まっていた問題
 // （docs/ota.md §7 未決事項1）に対する外部可観測性を与える。
 static constexpr const char* kFwVersionHeader = "X-Namz-Fw-Version";
-static constexpr const char* kExtraRequestHeaderNames[] = {kFwVersionHeader};
-static constexpr const char* kExtraRequestHeaderValues[] = {kFwVersion};
+// 起動からの経過(us、esp_timer_get_time())を毎バッチ乗せる（docs/uptime.md §2.2）。
+// センサ値ではなく「今のプロセスの状態」なのでwireトレイラーではなくヘッダで運ぶ。
+// サーバはraw/に保存せず、その場でboot_epoch_usの逆算にだけ使う。
+static constexpr const char* kUptimeHeader = "X-Namz-Uptime-Us";
+static char sUptimeBuf[24];  // int64 usを文字列化するバッファ（uploaderTaskが毎周更新）
+// Values側は1枠だけ実行時に書き換わる(sUptimeBuf)ので配列自体はconstexprにできない
+// （Uploaderは値をコピーせずポインタを保持するので、指す先の内容だけ書き換えればよい）。
+static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader};
+static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf};
 
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
@@ -233,6 +243,7 @@ static void connectWifi() {
 // のバッチはLittleFSへ退避してから焼く（電源断・パニックでも失わないようにする）。
 static void pauseSamplingForOta() {
   Serial.println("[ota] start: pausing sampling, flushing queue to spill");
+  gOtaInProgress = true;  // loop()に震度画面から更新中画面への切り替えを伝える
   esp_timer_stop(gSampleTimer);
   // タイマーを止めるとsamplingTaskへの通知も止まり、自分でesp_task_wdt_reset()を
   // 呼べなくなる。転送が終わる（成功時は再起動、失敗時はresumeSamplingで再開）まで
@@ -250,6 +261,7 @@ static void resumeSamplingAfterOtaFailure(const char* reason) {
   Serial.printf("[ota] %s: resuming sampling\n", reason);
   esp_task_wdt_add(gSamplingTask);
   esp_timer_start_periodic(gSampleTimer, kReadPeriodUs);
+  gOtaInProgress = false;  // 失敗して測定を再開したので震度画面に戻す
 }
 
 static void otaOnStart() { pauseSamplingForOta(); }
@@ -331,15 +343,20 @@ static bool performPullOta(const String& targetVersion) {
 // のループで毎回呼ばれ続ける。バックオフ無しだと1周(50ms+ネットワーク待ち)ごとに
 // 取得を試み、測定タイマーが止まったまま(pauseSamplingForOta中)になり続けて
 // 実測が止まる（実機で踏んだ。docs/ota.md §7）。
-static constexpr uint32_t kOtaRetryBackoffMs = 60UL * 1000UL;  // 1分
+static constexpr int64_t kOtaRetryBackoffUs = 60LL * 1000000LL;  // 1分
 
 // バージョン不一致を見つけたら、安全停止→取得→(成功なら再起動/失敗なら復旧)まで
 // 一息に行う。uploaderTaskのループでバッチ送信レスポンスを見た時に呼ぶ。
+//
+// 時刻源は esp_timer_get_time()（int64 us、事実上折り返さない）。以前は millis()
+// （uint32 ms、約49.7日で折り返す）で「加算した期限」と「今」を直接比較しており、
+// 49.7日境界をまたぐ最大60秒の窓でバックオフが早期満了と誤判定されうるバグが
+// あった（稼働時間トレイラーの調査の副産物。docs/uptime.md §5）。
 static void checkAndPerformPullOta(const String& target) {
-  static uint32_t sNextAttemptMs = 0;
+  static int64_t sNextAttemptUs = 0;
   if (target.length() == 0 || target == kFwVersion) return;
-  uint32_t now = millis();
-  if (now < sNextAttemptMs) return;  // 直近の失敗からバックオフ中
+  int64_t now = esp_timer_get_time();
+  if (now < sNextAttemptUs) return;  // 直近の失敗からバックオフ中
   Serial.printf("[ota-pull] update available: %s -> %s\n", kFwVersion, target.c_str());
   pauseSamplingForOta();
   if (performPullOta(target)) {
@@ -348,7 +365,7 @@ static void checkAndPerformPullOta(const String& target) {
     ESP.restart();
   } else {
     resumeSamplingAfterOtaFailure("pull failed");
-    sNextAttemptMs = now + kOtaRetryBackoffMs;
+    sNextAttemptUs = now + kOtaRetryBackoffUs;
   }
 }
 
@@ -402,6 +419,9 @@ static void uploaderTask(void*) {
       Serial.printf("[alert] I=%.1f peak=%.2fgal sent=%d\n", m.intensity, m.peak, ok);
     }
 
+    // 送信直前に稼働時間ヘッダを更新（Uploaderは値をコピーせずポインタを保持する
+    // ため、pump()がPOSTする直前の値を確実に使わせるにはこの位置で書く必要がある）。
+    snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
     gUploader->pump();
     esp_task_wdt_reset();
 
@@ -483,7 +503,7 @@ void setup() {
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
                            kWatchedHeaders, 2,
-                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 1);
+                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 2);
   gUploader->begin();
 
   // OTA更新（docs/ota.md）。ArduinoOTA.handle()はuploaderTask（Core0）で回す。
@@ -571,18 +591,24 @@ void loop() {
 #ifdef NAMZ_SENSOR_TEST
     gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, 0, status, bg, clock);
 #else
-    bool wifi = WiFi.status() == WL_CONNECTED;
-    String ip = wifi ? WiFi.localIP().toString() : String("");
-    uint32_t backlog = gUploader->spillCount() + gUploader->ramQueued();
-    uint32_t backlogAgeS = 0;
-    uint64_t oldestUs;
-    if (backlog > 0 && timesync::isSynced() &&
-        gUploader->oldestQueuedStartUs(oldestUs)) {
-      uint64_t nowUs = timesync::nowUs();
-      backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
+    if (gOtaInProgress) {
+      // OTA転送中は測定タイマーが止まっており震度・WiFi・バックログの値が
+      // 意味を持たないため、震度画面の代わりに更新中であることだけを大きく出す。
+      gDisplay.renderOtaUpdating(clock);
+    } else {
+      bool wifi = WiFi.status() == WL_CONNECTED;
+      String ip = wifi ? WiFi.localIP().toString() : String("");
+      uint32_t backlog = gUploader->spillCount() + gUploader->ramQueued();
+      uint32_t backlogAgeS = 0;
+      uint64_t oldestUs;
+      if (backlog > 0 && timesync::isSynced() &&
+          gUploader->oldestQueuedStartUs(oldestUs)) {
+        uint64_t nowUs = timesync::nowUs();
+        backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
+      }
+      gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, backlog, backlogAgeS,
+                      status, bg, clock);
     }
-    gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, backlog, backlogAgeS,
-                    status, bg, clock);
 #endif
   }
   vTaskDelay(pdMS_TO_TICKS(250));

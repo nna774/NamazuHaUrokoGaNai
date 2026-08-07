@@ -56,3 +56,23 @@ def test_pending_without_timestamp_is_ignored():
     # （手動でDynamoDBを触った等、想定外の状態）→ 誤検知しない
     it = {"device_id": 2, "pending_ota_version": "a1b2c3d"}
     assert ota_watch.evaluate_ota_stuck(it, NOW, STUCK, RENOTIFY) is None
+
+
+def test_reached_target_when_fw_version_matches_pending():
+    it = {"device_id": 2, "pending_ota_version": "a93433a", "fw_version": "a93433a"}
+    assert ota_watch.reached_target(it) is True
+
+
+def test_reached_target_false_when_fw_version_differs():
+    it = {"device_id": 2, "pending_ota_version": "a93433a", "fw_version": "c64f379"}
+    assert ota_watch.reached_target(it) is False
+
+
+def test_reached_target_false_when_no_pending():
+    it = {"device_id": 2, "fw_version": "a93433a"}
+    assert ota_watch.reached_target(it) is False
+
+
+def test_reached_target_false_when_fw_version_missing():
+    it = {"device_id": 2, "pending_ota_version": "a93433a"}
+    assert ota_watch.reached_target(it) is False

@@ -299,6 +299,146 @@ function attachZoomDrag(cv, getWf, redraw, apply) {
   cv.addEventListener('dblclick', () => apply(null));  // ダブルタップでも発火する
 }
 
+// --- クライアント側 概算震度計算（ライブ1分窓・生波形限定） ---
+// tools/jismo/fir.py --fs 100 --numtaps 511 で設計したFIR係数（firmware/lib/Shindo/JmaFirTaps.h
+// と同一）。tools/jismo/realtime.py のオフライン一括計算(filtered_composite)と同じ手順を
+// JSに移植し、サーバへ問い合わせず「ガル表示のためにもう取得済みの」1分窓の生波形だけで
+// 震度を概算する。fs/numtapsを変えたらこの配列も再生成すること
+// （python -c "from jismo.fir import design_fir; ..." で作れる。tools/gen_fir_header.py 参照）。
+const JMA_FIR_TAPS = [
+  -5.958238504e-4, -5.959681457e-4, -5.961305200e-4, -5.963158097e-4, -5.965197882e-4, -5.967473698e-4,
+  -5.969942425e-4, -5.972654152e-4, -5.975564711e-4, -5.978725321e-4, -5.982090567e-4, -5.985712980e-4,
+  -5.989545694e-4, -5.993642751e-4, -5.997955623e-4, -6.002540068e-4, -6.007345683e-4, -6.012430157e-4,
+  -6.017740993e-4, -6.023338041e-4, -6.029166488e-4, -6.035288586e-4, -6.041646980e-4, -6.048306582e-4,
+  -6.055207269e-4, -6.062416883e-4, -6.069872304e-4, -6.077644597e-4, -6.085667413e-4, -6.094015347e-4,
+  -6.102618596e-4, -6.111555613e-4, -6.120752910e-4, -6.130293153e-4, -6.140098941e-4, -6.150257527e-4,
+  -6.160687374e-4, -6.171480724e-4, -6.182551683e-4, -6.193997908e-4, -6.205728931e-4, -6.217848282e-4,
+  -6.230260707e-4, -6.243076096e-4, -6.256194200e-4, -6.269731787e-4, -6.283583412e-4, -6.297873275e-4,
+  -6.312490535e-4, -6.327567410e-4, -6.342987471e-4, -6.358891576e-4, -6.375157523e-4, -6.391935467e-4,
+  -6.409097248e-4, -6.426803014e-4, -6.444918466e-4, -6.463614480e-4, -6.482750439e-4, -6.502508716e-4,
+  -6.522742197e-4, -6.543645563e-4, -6.565065020e-4, -6.587208402e-4, -6.609915053e-4, -6.633406838e-4,
+  -6.657516045e-4, -6.682479490e-4, -6.708122201e-4, -6.734696892e-4, -6.762021113e-4, -6.790364462e-4,
+  -6.819536766e-4, -6.849825519e-4, -6.881032565e-4, -6.913464331e-4, -6.946914381e-4, -6.981709139e-4,
+  -7.017633556e-4, -7.055035135e-4, -7.093689842e-4, -7.133967358e-4, -7.175634232e-4, -7.219083440e-4,
+  -7.264071628e-4, -7.311016186e-4, -7.359663304e-4, -7.410455910e-4, -7.463129110e-4, -7.518152493e-4,
+  -7.575249363e-4, -7.634917090e-4, -7.696866364e-4, -7.761623442e-4, -7.828885484e-4, -7.899208725e-4,
+  -7.972275761e-4, -8.048673877e-4, -8.128069939e-4, -8.211083332e-4, -8.297363892e-4, -8.387564119e-4,
+  -8.481315370e-4, -8.579304241e-4, -8.681141999e-4, -8.787550283e-4, -8.898118487e-4, -9.013604199e-4,
+  -9.133572969e-4, -9.258819201e-4, -9.388882435e-4, -9.524594714e-4, -9.665467198e-4, -9.812370346e-4,
+  -9.964784346e-4, -1.012361881e-3, -1.028832014e-3, -1.045983780e-3, -1.063758133e-3, -1.082254072e-3,
+  -1.101408535e-3, -1.121324632e-3, -1.141934932e-3, -1.163346718e-3, -1.185487802e-3, -1.208469700e-3,
+  -1.232215055e-3, -1.256839674e-3, -1.282260592e-3, -1.308597963e-3, -1.335762745e-3, -1.363879502e-3,
+  -1.392852609e-3, -1.422811106e-3, -1.453652256e-3, -1.485509642e-3, -1.518272846e-3, -1.552080079e-3,
+  -1.586812642e-3, -1.622613458e-3, -1.659354916e-3, -1.697184752e-3, -1.735965774e-3, -1.775850650e-3,
+  -1.816691895e-3, -1.858647251e-3, -1.901558195e-3, -1.945587698e-3, -1.990565414e-3, -2.036659734e-3,
+  -2.083687658e-3, -2.131823214e-3, -2.180869872e-3, -2.231007557e-3, -2.282025281e-3, -2.334109161e-3,
+  -2.387032782e-3, -2.440988791e-3, -2.495734314e-3, -2.551468926e-3, -2.607932198e-3, -2.665331089e-3,
+  -2.723386456e-3, -2.782313158e-3, -2.841812104e-3, -2.902106647e-3, -2.962876432e-3, -3.024353974e-3,
+  -3.086196249e-3, -3.148645690e-3, -3.211335094e-3, -3.274517670e-3, -3.337800402e-3, -3.401448243e-3,
+  -3.465040595e-3, -3.528855239e-3, -3.592442076e-3, -3.656092924e-3, -3.719326087e-3, -3.782448773e-3,
+  -3.844945382e-3, -3.907140029e-3, -3.968480660e-3, -4.029309980e-3, -4.089036657e-3, -4.148023861e-3,
+  -4.205637826e-3, -4.262264270e-3, -4.317223453e-3, -4.370925957e-3, -4.422642067e-3, -4.472809800e-3,
+  -4.520644930e-3, -4.566615760e-3, -4.609878374e-3, -4.650934521e-3, -4.688874649e-3, -4.724237462e-3,
+  -4.756040899e-3, -4.784864513e-3, -4.809645745e-3, -4.831009311e-3, -4.847802817e-3, -4.860700924e-3,
+  -4.868450404e-3, -4.871781164e-3, -4.869326104e-3, -4.861876243e-3, -4.847935033e-3, -4.828361084e-3,
+  -4.801509654e-3, -4.768314073e-3, -4.726958643e-3, -4.678459216e-3, -4.620801243e-3, -4.555091559e-3,
+  -4.479082231e-3, -4.393980107e-3, -4.297260633e-3, -4.190240071e-3, -4.070062428e-3, -3.938162719e-3,
+  -3.791283036e-3, -3.630985608e-3, -3.453518558e-3, -3.260577409e-3, -3.047793883e-3, -2.816997726e-3,
+  -2.563038050e-3, -2.287869509e-3, -1.985327525e-3, -1.657462598e-3, -1.296766145e-3, -9.053175663e-4,
+  -4.737763615e-4, -4.110013663e-6, 5.156035203e-4, 1.083796708e-3, 1.716179120e-3, 2.412179694e-3,
+  3.193370502e-3, 4.061492513e-3, 5.047794678e-3, 6.159099856e-3, 7.443690623e-3, 8.921260531e-3,
+  1.067862505e-2, 1.277532723e-2, 1.537975303e-2, 1.864195380e-2, 2.312040933e-2, 3.030638585e-2,
+  4.430245987e-2, 7.048877873e-2, 1.069516257e-1, 1.273922218e-1, 1.069516257e-1, 7.048877873e-2,
+  4.430245987e-2, 3.030638585e-2, 2.312040933e-2, 1.864195380e-2, 1.537975303e-2, 1.277532723e-2,
+  1.067862505e-2, 8.921260531e-3, 7.443690623e-3, 6.159099856e-3, 5.047794678e-3, 4.061492513e-3,
+  3.193370502e-3, 2.412179694e-3, 1.716179120e-3, 1.083796708e-3, 5.156035203e-4, -4.110013663e-6,
+  -4.737763615e-4, -9.053175663e-4, -1.296766145e-3, -1.657462598e-3, -1.985327525e-3, -2.287869509e-3,
+  -2.563038050e-3, -2.816997726e-3, -3.047793883e-3, -3.260577409e-3, -3.453518558e-3, -3.630985608e-3,
+  -3.791283036e-3, -3.938162719e-3, -4.070062428e-3, -4.190240071e-3, -4.297260633e-3, -4.393980107e-3,
+  -4.479082231e-3, -4.555091559e-3, -4.620801243e-3, -4.678459216e-3, -4.726958643e-3, -4.768314073e-3,
+  -4.801509654e-3, -4.828361084e-3, -4.847935033e-3, -4.861876243e-3, -4.869326104e-3, -4.871781164e-3,
+  -4.868450404e-3, -4.860700924e-3, -4.847802817e-3, -4.831009311e-3, -4.809645745e-3, -4.784864513e-3,
+  -4.756040899e-3, -4.724237462e-3, -4.688874649e-3, -4.650934521e-3, -4.609878374e-3, -4.566615760e-3,
+  -4.520644930e-3, -4.472809800e-3, -4.422642067e-3, -4.370925957e-3, -4.317223453e-3, -4.262264270e-3,
+  -4.205637826e-3, -4.148023861e-3, -4.089036657e-3, -4.029309980e-3, -3.968480660e-3, -3.907140029e-3,
+  -3.844945382e-3, -3.782448773e-3, -3.719326087e-3, -3.656092924e-3, -3.592442076e-3, -3.528855239e-3,
+  -3.465040595e-3, -3.401448243e-3, -3.337800402e-3, -3.274517670e-3, -3.211335094e-3, -3.148645690e-3,
+  -3.086196249e-3, -3.024353974e-3, -2.962876432e-3, -2.902106647e-3, -2.841812104e-3, -2.782313158e-3,
+  -2.723386456e-3, -2.665331089e-3, -2.607932198e-3, -2.551468926e-3, -2.495734314e-3, -2.440988791e-3,
+  -2.387032782e-3, -2.334109161e-3, -2.282025281e-3, -2.231007557e-3, -2.180869872e-3, -2.131823214e-3,
+  -2.083687658e-3, -2.036659734e-3, -1.990565414e-3, -1.945587698e-3, -1.901558195e-3, -1.858647251e-3,
+  -1.816691895e-3, -1.775850650e-3, -1.735965774e-3, -1.697184752e-3, -1.659354916e-3, -1.622613458e-3,
+  -1.586812642e-3, -1.552080079e-3, -1.518272846e-3, -1.485509642e-3, -1.453652256e-3, -1.422811106e-3,
+  -1.392852609e-3, -1.363879502e-3, -1.335762745e-3, -1.308597963e-3, -1.282260592e-3, -1.256839674e-3,
+  -1.232215055e-3, -1.208469700e-3, -1.185487802e-3, -1.163346718e-3, -1.141934932e-3, -1.121324632e-3,
+  -1.101408535e-3, -1.082254072e-3, -1.063758133e-3, -1.045983780e-3, -1.028832014e-3, -1.012361881e-3,
+  -9.964784346e-4, -9.812370346e-4, -9.665467198e-4, -9.524594714e-4, -9.388882435e-4, -9.258819201e-4,
+  -9.133572969e-4, -9.013604199e-4, -8.898118487e-4, -8.787550283e-4, -8.681141999e-4, -8.579304241e-4,
+  -8.481315370e-4, -8.387564119e-4, -8.297363892e-4, -8.211083332e-4, -8.128069939e-4, -8.048673877e-4,
+  -7.972275761e-4, -7.899208725e-4, -7.828885484e-4, -7.761623442e-4, -7.696866364e-4, -7.634917090e-4,
+  -7.575249363e-4, -7.518152493e-4, -7.463129110e-4, -7.410455910e-4, -7.359663304e-4, -7.311016186e-4,
+  -7.264071628e-4, -7.219083440e-4, -7.175634232e-4, -7.133967358e-4, -7.093689842e-4, -7.055035135e-4,
+  -7.017633556e-4, -6.981709139e-4, -6.946914381e-4, -6.913464331e-4, -6.881032565e-4, -6.849825519e-4,
+  -6.819536766e-4, -6.790364462e-4, -6.762021113e-4, -6.734696892e-4, -6.708122201e-4, -6.682479490e-4,
+  -6.657516045e-4, -6.633406838e-4, -6.609915053e-4, -6.587208402e-4, -6.565065020e-4, -6.543645563e-4,
+  -6.522742197e-4, -6.502508716e-4, -6.482750439e-4, -6.463614480e-4, -6.444918466e-4, -6.426803014e-4,
+  -6.409097248e-4, -6.391935467e-4, -6.375157523e-4, -6.358891576e-4, -6.342987471e-4, -6.327567410e-4,
+  -6.312490535e-4, -6.297873275e-4, -6.283583412e-4, -6.269731787e-4, -6.256194200e-4, -6.243076096e-4,
+  -6.230260707e-4, -6.217848282e-4, -6.205728931e-4, -6.193997908e-4, -6.182551683e-4, -6.171480724e-4,
+  -6.160687374e-4, -6.150257527e-4, -6.140098941e-4, -6.130293153e-4, -6.120752910e-4, -6.111555613e-4,
+  -6.102618596e-4, -6.094015347e-4, -6.085667413e-4, -6.077644597e-4, -6.069872304e-4, -6.062416883e-4,
+  -6.055207269e-4, -6.048306582e-4, -6.041646980e-4, -6.035288586e-4, -6.029166488e-4, -6.023338041e-4,
+  -6.017740993e-4, -6.012430157e-4, -6.007345683e-4, -6.002540068e-4, -5.997955623e-4, -5.993642751e-4,
+  -5.989545694e-4, -5.985712980e-4, -5.982090567e-4, -5.978725321e-4, -5.975564711e-4, -5.972654152e-4,
+  -5.969942425e-4, -5.967473698e-4, -5.965197882e-4, -5.963158097e-4, -5.961305200e-4, -5.959681457e-4,
+  -5.958238504e-4,
+];
+// ゼロ履歴で始まる畳み込みの立ち上がり(=フィルタの整定時間)ぶんは震度計算から除く。
+// tools/jismo/realtime.py の _warmup と同じ考え方（numtaps + fs秒ぶん）。
+const JMA_FIR_WARMUP = JMA_FIR_TAPS.length + 100;
+const JMA_EXCEEDANCE_SAMPLES = 30;  // 0.3秒 @ 100Hz（気象庁定義の超過時間）
+
+// 1軸ぶんの因果FIR畳み込み。x[負の添字]=0として扱う（deque初期値ゼロのstreaming版と同値）。
+function jmaFirFilter(x, taps) {
+  const n = x.length, m = taps.length;
+  const y = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    const kmax = Math.min(i, m - 1);
+    for (let k = 0; k <= kmax; k++) s += taps[k] * x[i - k];
+    y[i] = s;
+  }
+  return y;
+}
+
+// 気象庁の丸め規則（tools/jismo/rounding.py jma_round と同一）:
+// 小数第3位を四捨五入(ゼロから遠い方へ)し、小数第2位を切り捨てる。
+function jmaRound(x) {
+  const sign = x < 0 ? -1 : 1;
+  const two = sign * Math.round(Math.abs(x) * 100) / 100;
+  return Math.floor(two * 10) / 10;
+}
+
+// 3軸加速度[gal]から計測震度を概算する。100Hz・6000点(=1分)前後の生波形を想定。
+// 短すぎる(整定時間+超過時間ぶんに満たない)・fsが100Hz以外なら null を返す。
+function computeIntensity(x, y, z, fs) {
+  const n = x && x.length || 0;
+  if (Math.round(fs) !== 100 || n - JMA_FIR_WARMUP < JMA_EXCEEDANCE_SAMPLES) return null;
+  const fx = jmaFirFilter(x, JMA_FIR_TAPS);
+  const fy = jmaFirFilter(y, JMA_FIR_TAPS);
+  const fz = jmaFirFilter(z, JMA_FIR_TAPS);
+  const comp = new Float64Array(n - JMA_FIR_WARMUP);
+  for (let i = JMA_FIR_WARMUP; i < n; i++) {
+    const cx = fx[i], cy = fy[i], cz = fz[i];
+    comp[i - JMA_FIR_WARMUP] = Math.sqrt(cx * cx + cy * cy + cz * cz);
+  }
+  const sorted = Array.from(comp).sort((a, b) => a - b);
+  const a0 = sorted[sorted.length - JMA_EXCEEDANCE_SAMPLES];
+  if (!(a0 > 0)) return { intensity: 0, scale: intensityScale(0), a0: 0 };
+  const intensity = jmaRound(2 * Math.log10(a0) + 0.94);
+  return { intensity, scale: intensityScale(intensity), a0 };
+}
+
 // --- ライブ / 指定時刻 ---
 let liveTimer = null;
 let lastLiveWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
@@ -341,6 +481,22 @@ function redrawLive() {
   if (!lastLiveWaveform) return;
   const yrange = Number(document.getElementById('yrange').value) || 0;
   drawWaveform(document.getElementById('live-canvas'), displayedLiveWf(), yrange, visibleAxes('live'));
+}
+
+// ライブの概算震度バッジを更新する。rawの生波形が手元にある時だけ計算する
+// （envelope=間引き済みでは計算不能。「3分」以上の窓や拡大表示中は出さない）。
+function updateLiveIntensity(wf) {
+  const el = document.getElementById('live-intensity');
+  if (!el) return;
+  if (!wf || !wf.n) { el.innerHTML = ''; return; }
+  if (wf.mode !== 'raw') {
+    el.innerHTML = '<span class="muted">概算震度: 表示範囲が広いため計算できません（「1分」表示でのみ計算）</span>';
+    return;
+  }
+  const r = computeIntensity(wf.x, wf.y, wf.z, wf.fs);
+  if (!r) { el.innerHTML = '<span class="muted">概算震度: データが少なく計算できません</span>'; return; }
+  el.innerHTML = `概算震度 ${scaleBadge(r.scale, false)}`
+    + `<span class="muted"> 計測震度 ${r.intensity.toFixed(1)}・クライアント側の参考値（気象庁確定値ではない）</span>`;
 }
 
 // 波形は1デバイスぶんだけ引く。混ぜると継ぎ目の段差が揺れに見える（api側も絞る）。
@@ -388,6 +544,8 @@ async function refreshLive() {
       lastLiveWaveform = await apiGet('/recent?minutes=' + spanMin.toFixed(4)
         + '&start=' + Math.round(liveZoom.fromUs) + liveDeviceParam());
       redrawLive();
+      // 拡大表示は窓の長さが不定（60秒の想定と噛み合わない）なので震度は出さない。
+      updateLiveIntensity(null);
       const wf = displayedLiveWf();
       const from = new Date(liveZoom.fromUs / 1000).toLocaleTimeString('ja-JP');
       status.textContent = `拡大表示: ${from} から ${((liveZoom.toUs - liveZoom.fromUs) / 1e6).toFixed(1)}秒`
@@ -398,6 +556,7 @@ async function refreshLive() {
       + (sec ? '&start=' + sec * 1e6 : '') + liveDeviceParam());
     lastLiveWaveform = wf;
     redrawLive();
+    updateLiveIntensity(wf);
     if (sec) {
       // 指定時刻表示は過去の固定窓なので鮮度は無意味。指定範囲を表示する。
       const from = new Date(sec * 1000).toLocaleString('ja-JP');
@@ -569,7 +728,7 @@ let eventZoom = null;          // 時間方向ズーム {fromUs, toUs}。null = 
 let eventRawWf = null;         // {fromUs, toUs, wf}
 let eventRawSeq = 0;           // 遅れて届いた古い応答を捨てるためのトークン
 // APIの MAX_POINTS と一致させる（この点数以下ならAPIはrawで返す）
-const EVENT_RAW_MAX_POINTS = 3000;
+const EVENT_RAW_MAX_POINTS = 6000;
 
 // raw キャッシュが現在のズーム区間を覆っているか
 function rawCovers(z) {
@@ -660,6 +819,14 @@ function warnBg(sec, warnAt) {
   return '';
 }
 
+// 一覧テーブルは列数がぎりぎりなので、日付と時刻を明示的に改行して1セルの
+// 最大幅を縮める（ブラウザの自動折り返しに任せると崩れ位置が揃わない）。
+function fmtLastIngestCell(us, ageS) {
+  if (!us) return '—';
+  const dt = new Date(us / 1000);
+  return `${dt.toLocaleDateString('ja-JP')}<br>${dt.toLocaleTimeString('ja-JP')}（${fmtAgo(ageS)}前）`;
+}
+
 async function refreshDevices() {
   const status = document.getElementById('devices-status');
   const tbody = document.querySelector('#devices-table tbody');
@@ -671,6 +838,8 @@ async function refreshDevices() {
     tbody.innerHTML = '';
     for (const d of (data.devices || [])) {
       const tr = document.createElement('tr');
+      tr.dataset.id = d.device_id;
+      tr.onclick = () => { location.hash = deviceHash(d.device_id); };
       const id = String(d.device_id).padStart(4, '0');
       const restartBadge = d.pending_restart_requested_at_us
         ? ' <span class="badge badge-restart">再起動要求</span>'
@@ -678,9 +847,7 @@ async function refreshDevices() {
       const st = (d.online
         ? '<span class="status-ok">● オンライン</span>'
         : '<span class="status-ng">● 欠測</span>') + restartBadge;
-      const last = d.last_ingest_at_us
-        ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
-        : '—';
+      const last = fmtLastIngestCell(d.last_ingest_at_us, d.age_s);
       const fwVersion = d.fw_version || '—';
       let ota = '—';
       if (d.pending_ota_version) {
@@ -691,8 +858,9 @@ async function refreshDevices() {
       tr.innerHTML = `<td>${id}</td><td>${st}</td>`
         + `<td${warnBg(d.age_s, offlineAt)}>${last}</td>`
         + `<td${warnBg(d.lag_s, lagAt)}>${fmtAgo(d.lag_s)}遅れ</td>`
-        + `<td>${d.batches_total ?? 0}</td>`
-        + `<td>${fwVersion}</td>`
+        + `<td class="col-batches">${d.batches_total ?? 0}</td>`
+        + `<td class="col-fw">${fwVersion}</td>`
+        + `<td>${d.uptime_s != null ? fmtAgo(d.uptime_s) : '—'}</td>`
         + `<td>${ota}</td>`;
       tbody.appendChild(tr);
     }
@@ -711,6 +879,147 @@ function scheduleDevices() {
   if (document.getElementById('devices-auto').checked) {
     devicesTimer = setInterval(refreshDevices, 30000);
   }
+}
+
+// --- デバイス詳細（温度トレンド） ---
+let currentDeviceId = null;  // device-temp-hours 変更時にハッシュを組み直すため
+
+function showDevicesMode(detail) {
+  // 一覧モードと詳細モードは排他表示（イベントと同じ考え方）
+  document.getElementById('devices-list').style.display = detail ? 'none' : 'block';
+  document.getElementById('device-detail').style.display = detail ? 'block' : 'none';
+}
+
+// バージョン文字列はビルド時のgit短縮hash(tools/get_fw_version.py)なので、
+// そのままGitHubのコミットへのリンクにできる。
+const GITHUB_REPO_URL = 'https://github.com/nna774/NamazuHaUrokoGaNai';
+
+function fwVersionHtml(v) {
+  if (!v) return '—';
+  const safe = escapeHtml(v);
+  return `<a href="${GITHUB_REPO_URL}/commit/${safe}" target="_blank" rel="noopener">${safe}</a>`;
+}
+
+function renderDeviceInfo(d) {
+  const tbody = document.getElementById('device-info');
+  const st = d.online
+    ? '<span class="status-ok">● オンライン</span>'
+    : '<span class="status-ng">● 欠測</span>';
+  const last = d.last_ingest_at_us
+    ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
+    : '—';
+  const rows = [
+    ['状態', st],
+    ['最終受信', last],
+    ['データ鮮度', `${fmtAgo(d.lag_s)}遅れ`],
+    ['累計バッチ', String(d.batches_total ?? 0)],
+    ['版数', fwVersionHtml(d.fw_version)],
+    ['センサ', d.sensor || '不明'],
+    ['稼働時間', d.uptime_s != null ? fmtAgo(d.uptime_s) : '不明'],
+  ];
+  if (d.pending_ota_version) {
+    rows.push(['OTA', (d.fw_version && d.fw_version === d.pending_ota_version)
+      ? `適用済み (${d.pending_ota_version})` : `→ ${d.pending_ota_version}`]);
+  }
+  if (d.pending_restart_requested_at_us) rows.push(['再起動要求', '立っている（次回受信で反映）']);
+  // events?p=1&all=0&d=<id> を直接組む。eventsHash()は現在のイベント一覧の
+  // グローバル状態(eventsDeviceId等)に依存するので、ここでは使えない。
+  rows.push(['イベント', `<a href="#events?p=1&all=0&d=${encodeURIComponent(d.device_id)}">このデバイスの一覧を見る →</a>`]);
+  tbody.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+
+// 温度トレンドの折れ線を描く。drawWaveform と同じ pad/fitCanvas を使い回すが、
+// 1系列・実時間軸なので専用に書く（波形の3軸描画ロジックを流用すると複雑さが増す）。
+function drawTempChart(cv, points) {
+  const { ctx, w, h } = fitCanvas(cv);
+  ctx.clearRect(0, 0, w, h);
+  const pad = PAD;
+  const plotW = w - pad * 2, plotH = h - pad * 2;
+
+  if (!points.length) {
+    ctx.fillStyle = '#888';
+    ctx.fillText('データなし', pad, h / 2);
+    return;
+  }
+
+  // c（換算℃）があればそちらを、無ければ生値をそのまま描く。
+  const val = p => p.c != null ? p.c : p.raw;
+  const vals = points.map(val);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const margin = (hi - lo) * 0.1 || 1;
+  lo -= margin; hi += margin;
+  const t0 = points[0].t, t1 = points[points.length - 1].t;
+  const tr = Math.max(1, t1 - t0);
+  const X = t => pad + ((t - t0) / tr) * plotW;
+  const Y = v => pad + plotH - ((v - lo) / (hi - lo)) * plotH;
+
+  ctx.fillStyle = '#888'; ctx.font = '11px system-ui';
+  ctx.fillText(hi.toFixed(1), 2, Y(hi) + 4);
+  ctx.fillText(lo.toFixed(1), 2, Y(lo) + 4);
+
+  ctx.strokeStyle = '#e67e22';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = X(p.t), y = Y(val(p));
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+
+  // 横軸の時刻目盛り（drawWaveform と同じ間引き方）
+  const nticks = Math.max(2, Math.min(6, Math.floor(plotW / 80)));
+  ctx.font = '11px system-ui';
+  for (let k = 0; k < nticks; k++) {
+    const f = k / (nticks - 1);
+    const x = pad + f * plotW;
+    ctx.strokeStyle = 'rgba(128,128,128,.18)';
+    ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, pad + plotH); ctx.stroke();
+    ctx.fillStyle = '#888';
+    ctx.textAlign = k === 0 ? 'left' : k === nticks - 1 ? 'right' : 'center';
+    const d = new Date((t0 + f * (t1 - t0)) / 1000);
+    ctx.fillText(d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }), x, h - 8);
+  }
+  ctx.textAlign = 'left';
+}
+
+async function refreshDeviceTemp(id) {
+  const status = document.getElementById('device-temp-status');
+  const hours = document.getElementById('device-temp-hours').value;
+  try {
+    status.textContent = '取得中…';
+    const data = await apiGet(`/devices/${encodeURIComponent(id)}/temp?hours=${hours}`);
+    const points = data.points || [];
+    drawTempChart(document.getElementById('device-temp-canvas'), points);
+    status.textContent = points.length
+      ? `${points.length} 点（直近${hours}時間）`
+      : 'データなし（このセンサは温度非対応、または直近データなし）';
+  } catch (e) {
+    status.textContent = 'エラー: ' + e.message;
+  }
+}
+
+async function showDevice(id) {
+  currentDeviceId = id;
+  const title = document.getElementById('device-title');
+  const padded = String(id).padStart(4, '0');
+  title.textContent = '読み込み中… ' + padded;
+  document.getElementById('device-info').innerHTML = '';
+  let hasTemp = true;  // センサ種別が分からない間・取得失敗時は出しておく（隠れて気付けないよりまし）
+  try {
+    const data = await apiGet('/devices/' + encodeURIComponent(id));
+    const d = data.device || {};
+    title.textContent = `デバイス ${String(d.device_id ?? id).padStart(4, '0')}`;
+    renderDeviceInfo(d);
+    hasTemp = d.sensor === 'ADXL355';  // IIS3DHHCは温度センサを持たずトレイラー自体を送らない
+  } catch (e) {
+    title.textContent = `デバイス ${padded}`;
+    document.getElementById('device-info').innerHTML =
+      `<tr><td colspan="2">エラー: ${escapeHtml(e.message)}</td></tr>`;
+  }
+  document.getElementById('device-temp-section').style.display = hasTemp ? '' : 'none';
+  document.getElementById('device-temp-hours-label').style.display = hasTemp ? '' : 'none';
+  if (hasTemp) refreshDeviceTemp(id);
 }
 
 // --- ハッシュルーティング ---
@@ -777,6 +1086,12 @@ function eventHash(id) {
     + `${eventsDeviceHash()}&r=${r}&ax=${axesStr('event')}${t}`;
 }
 
+// デバイス詳細ハッシュ。温度の表示期間(h)を持たせ、リロード・共有URLで復元される。
+function deviceHash(id) {
+  const h = document.getElementById('device-temp-hours').value;
+  return `device/${encodeURIComponent(id)}?h=${h}`;
+}
+
 function showEventsMode(detail) {
   // 一覧モードと詳細モードは排他表示（同時に出さないのでテーブルがガタつかない）
   document.getElementById('events-list').style.display = detail ? 'none' : 'block';
@@ -803,8 +1118,14 @@ function route() {
     document.getElementById('events-all').checked = params.all === '1';
     eventsDeviceId = params.d ? decodeURIComponent(params.d) : 'all';
     reloadEvents(params.p ? parseInt(params.p, 10) : 1);
+  } else if (path.startsWith('device/')) {
+    showView('devices');
+    showDevicesMode(true);
+    if (params.h) document.getElementById('device-temp-hours').value = params.h;
+    showDevice(decodeURIComponent(path.slice('device/'.length)));
   } else if (path === 'devices') {
     showView('devices');
+    showDevicesMode(false);
     refreshDevices();
     scheduleDevices();
   } else {
@@ -912,6 +1233,13 @@ window.addEventListener('load', () => {
   };
   document.getElementById('reload-devices').onclick = () => refreshDevices();
   document.getElementById('devices-auto').onchange = () => scheduleDevices();
+  document.getElementById('device-back').onclick = () => { location.hash = 'devices'; };
+  // 期間の変更は取り直しが要るので再フェッチする（縦軸レンジ等の再描画のみとは違う）。
+  document.getElementById('device-temp-hours').onchange = () => {
+    if (currentDeviceId == null) return;
+    history.replaceState(null, '', '#' + deviceHash(currentDeviceId));
+    refreshDeviceTemp(currentDeviceId);
+  };
   // タイトルクリックで全操作状態を既定に戻す（ライブ・1分窓・自動更新・±100gal・全軸）。
   // イベント側のフィルタ・ページも既定へ。既に既定ならハッシュが変わらないので直接 route する。
   document.getElementById('home').onclick = () => {
