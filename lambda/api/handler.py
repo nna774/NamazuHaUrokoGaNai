@@ -33,7 +33,11 @@ BUCKET = os.environ["NAMZ_BUCKET"]
 OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))
 # データ遅延の警告値。watchdog の遅延判定と揃える。ダッシュボードの背景色警告に使う。
 LAG_AFTER_S = float(os.environ.get("NAMZ_LAG_AFTER_S", "600"))
-MAX_POINTS = 3000
+# 6000 = 1分@100Hz。ライブ画面の既定窓(1分)をrawのまま返すための値
+# （ダッシュボードがクライアント側で概算震度を計算するには生サンプルが要る。
+# dashboard/app.js の EVENT_RAW_MAX_POINTS と一致させること）。
+# S3読み出し量は minutes(上限30分)で決まりこれとは無関係なので、上げてもスキャンは増えない。
+MAX_POINTS = 6000
 # /recent の分数上限。上限が無いと巨大値でS3 LIST/GETを大量発行して
 # ハング/課金する（認証なし公開のため要ガード）。UIの選択肢も30分まで。
 MAX_RECENT_MINUTES = 30.0

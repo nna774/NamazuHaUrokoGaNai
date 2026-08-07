@@ -56,6 +56,10 @@
   - 照合は**合成波か実イベントの波形で行う**。FFT版は記録全体・FIR版は60秒移動窓なので、
     静穏データで `backtest.py` の diff を見ても意味がない（[docs/intensity_pitfalls.md](docs/intensity_pitfalls.md)）。
   - FFT版は入力を線形デトレンドしてから掛ける。傾斜・熱ドリフトを残すと窓の端が暴れる。
+  - **`dashboard/app.js` の `JMA_FIR_TAPS` も同じFIR係数(511tap, fs=100Hz)の第三の写経**
+    （ライブ画面「1分」表示のクライアント側概算震度用。`dashboard/README.md`参照）。
+    `tools/jismo/fir.py` の `--fs`/`--numtaps` を変えたら、firmwareの `JmaFirTaps.h` と
+    合わせてこの配列も手で再生成すること（自動同期は無い）。
 - **イベントのデータモデル**（DynamoDB `namazu-events`、[lambda/common/events.py](lambda/common/events.py)）:
   - `device_prompt` … デバイス速報が来た / `cloud_confirmed` … クラウドFFTで確定
   - `checked` … detectが評価済み（未確定なら一覧の既定で隠れる=非該当）
