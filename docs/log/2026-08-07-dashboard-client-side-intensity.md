@@ -50,12 +50,24 @@
   経由でバッジ表示（「概算震度 4 計測震度 3.5」）を確認。本番API（未デプロイのため
   `MAX_POINTS`はまだ3000のまま）に向けた場合は「表示範囲が広いため計算できません」に
   正しくフォールバックすることも確認。
-- `pytest lambda/tests`: 97件通過（`MAX_POINTS`変更後も無改修で通過）。
+- `pytest lambda/tests`: 98件通過（PR #29 のmerge後。`MAX_POINTS`変更後も無改修で通過）。
+
+## 本番デプロイ・確認（2026-08-07）
+
+PR #29（`/recent`のGET前フィルタ）がmasterへマージされたのを取り込んでから、
+`terraform/build_lambda.sh` → `terraform apply`（4 Lambda全部が`common/`共有のため
+更新、破壊的変更なし）→ dashboard を `aws s3 sync`＋CloudFront invalidationでデプロイした。
+
+- `curl https://api.namazu.dark-kuins.net/recent?minutes=1` が `mode: raw, n: 6000` を
+  返すことを確認（デプロイ前は `mode: envelope` だった）。
+- 本番ダッシュボード(`https://namazu.dark-kuins.net/`)をヘッドレスChromeで開き、
+  実機device1の静穏データに対して「概算震度 0（計測震度 -0.5）」が表示されることを
+  確認した。地震が起きていない現状の値として妥当（a0が小さく負のraw値になるのは
+  想定通り）。実際の揺れに対する精度検証（イベント一覧の確定値との突き合わせ）は
+  今後、実際の地震か人工加振の機会に行う。
 
 ## 残作業
 
-- **未デプロイ**（`terraform apply` と dashboard の S3 sync/invalidation はこの作業に
-  含まれていない）。デプロイ後、本番の1分窓で実データの概算震度がイベント一覧の確定値と
-  近い値になるか実機データで確認するとよい。
 - FIRのnumtaps/fsを変更したら `dashboard/app.js` の `JMA_FIR_TAPS` を手動で再生成すること
   （自動同期の仕組みは無い。firmwareの `JmaFirTaps.h` も同様に手動生成)。
+- 実地震での精度検証はまだ（上記の通り、静穏データでの疎通確認のみ）。
