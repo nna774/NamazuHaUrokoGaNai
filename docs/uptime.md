@@ -21,8 +21,8 @@
 
 ファームに「今何時か」を計算させない。`batch_start_us`（バッチ先頭のUNIX時刻、
 TimeSync同期済み）は既に毎バッチ乗っているので、**起動からの経過時間**だけ送れば
-サーバ側で絶対時刻を逆算できる。これは温度トレイラー（生値のまま送り、℃換算は
-サーバ側でやる）と同じ考え方（[wire_format.md](wire_format.md)）。
+サーバ側で絶対時刻を逆算できる。値を生値のまま送り計算はサーバ側でやる、という
+方針自体は温度トレイラーと同じ（[wire_format.md](wire_format.md)）。
 
 ### 2.1 `millis()`ではなく`esp_timer_get_time()`を使う
 
@@ -41,24 +41,62 @@ TimeSync同期済み）は既に毎バッチ乗っているので、**起動か�
 減算パターン（`now - before < threshold`）で書かれており、閾値も49.7日よりずっと
 短いので折り返し安全。
 
-### 2.2 wire v2 トレイラーに新種別を1つ足す
+### 2.2 wireトレイラーではなくHTTPリクエストヘッダで送る
 
-`firmware/lib/NamzWire/WireFormat.h`の`TrailerType`に追加:
+**当初案（wire v2トレイラーに新種別を足す）は破棄した。** 理由: トレイラーは
+バッチ本体の一部として`raw/`にそのままS3保存される（`ingest`の`_handle_batch`が
+受信バイト列を無加工で`s3.put_object`する）。温度は「センサが測った値」で、後から
+生の波形と突き合わせて調べたくなる可能性がある測定データだからトレイラーに乗せる
+意味があるが、**稼働時間は「今のプロセスの状態」であって測定データではない**。
+毎バッチ`raw_retention_days`（既定90日）ぶん保存され続けるのは無駄だし、そもそも
+サーバが欲しいのは「今このバッチを送った瞬間の1値」だけで、過去の値を保存済み
+バッチから遡って読みたい場面がない（`ota_watch`や`device_meta`が扱う他の
+「プロセスの状態」——版数・センサ種別・OTA目標——も同じ理由で全部トレイラーではなく
+別経路で運んでいる）。
+
+**採用: `fw_version`と全く同じ「HTTPリクエストヘッダに乗せる」方式。**
+`fw_version`は`X-Namz-Fw-Version`ヘッダで送られていて（wireペイロードには一切
+乗らない）、ingestが`headers.get("x-namz-fw-version", "")`で読んでいる。これは
+batch-uplink `Uploader`の`extraRequestHeaderNames/Values`（v1.6.0、[device-status-fw-version-header.md](log/2026-08-06-device-status-fw-version-header.md)）
+を使っている。この配列の実装を確認したところ
+
+> 値を毎回変えたい場合は呼び出し側がvalues配列の指す先を書き換えればよい
+> （Uploaderはコピーせずポインタを保持する）
+> ——`batch-uplink/src/Uploader.h`のコメントより
+
+とあり、**まさにこの用途（毎バッチ変わる値をヘッダで送る）のために作られたAPI**
+だと分かった。`kMaxExtraRequestHeaders = 4`で現状`fw_version`の1枠しか使っていない
+ので空きがある。**batch-uplinkの変更もバージョンpinの変更も不要**（wire v2トレイラー
+案よりさらに軽い）。
+
+firmware側の実装イメージ（`main.cpp`）:
 
 ```cpp
-enum TrailerType : uint16_t {
-  kTrailerSensorTemp = 1,
-  kTrailerUptimeUs = 2,  // 起動からの経過[us]（esp_timer_get_time()の生値）。バッチ先頭時点の1点
-};
+static constexpr const char* kUptimeHeader = "X-Namz-Uptime-Us";
+static char sUptimeBuf[24];  // int64のUS値を文字列化するバッファ
+static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader};
+static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf};  // 2枠目は可変
+
+// バッチ送信の直前（postBatch呼び出し前）に毎回更新する:
+snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
 ```
 
-温度と全く同じ「バッチ先頭時点の1点」パターン。トレイラーは「知らないtypeは
-lenぶん読み飛ばす」設計（[wire_format.md](wire_format.md)）なので、旧ファーム・
-旧readerとの互換は既存の仕組みがそのまま守る。**batch-uplinkには一切触れない**
-（`Batch`/`Uploader`はペイロードの中身に無関心。CLAUDE.mdの不変条件どおり）。
+`kExtraRequestHeaderValues`は現状`static constexpr const char*[]`（配列全体が
+コンパイル時定数）なので、1枠だけ可変にするには配列自体をconstexprから外す必要がある
+（`kFwVersion`側は文字列リテラルへのポインタのままでよく、書き換わるのは
+`sUptimeBuf`を指す2枠目だけ）。
 
-`lambda/common/wire.py`の`BatchMeta`に`uptime_us`プロパティを足す（`sensor_temp_raw`
-と同じ形、`struct.unpack("<Q", ...)`でu64を読む）。
+ingest側は`headers.get("x-namz-uptime-us", "")`を読むだけ。`lambda/common/wire.py`・
+`firmware/lib/NamzWire/WireFormat.h`はどちらも変更不要（wire v2 トレイラーに新種別を
+足す必要が無くなった）。
+
+### 2.3 使い分けの原則（今回の整理）
+
+- **センサが測った値（波形と同じ「測定データ」の一部）→ wireトレイラー**。
+  例: 温度（`kTrailerSensorTemp`）。後から保存済みraw/波形と突き合わせる価値がある。
+- **プロセス・デバイスの状態（測定とは別の「今の情況」）→ HTTPリクエストヘッダ**。
+  例: `fw_version`（既存）、稼働時間（今回）。ingestがその場で読んで
+  `namazu-devices`に反映するだけで、raw/に焼き込む必要はない。
 
 ## 3. サーバ側: 起動時刻(boot epoch)を逆算し、再起動を検知する
 
@@ -68,9 +106,9 @@ lenぶん読み飛ばす」設計（[wire_format.md](wire_format.md)）なので
 boot_epoch_us = batch_start_us - uptime_us
 ```
 
-新設する`lambda/common/device_meta.py`（[2026-08-07-device-detail-sensor-and-links.md](log/2026-08-07-device-detail-sensor-and-links.md)で
-センサ種別を記録するのに作った、Namazu固有の静的なデバイス属性を`namazu-devices`に
-`update_item`で足す型）に`record_boot_epoch()`を足す:
+`lambda/common/device_meta.py`（[2026-08-07-device-detail-sensor-and-links.md](log/2026-08-07-device-detail-sensor-and-links.md)で
+センサ種別を記録するために作った、Namazu固有の静的なデバイス属性を`namazu-devices`に
+`update_item`で足す型。既存）に`record_boot_epoch()`を足す:
 
 1. 今回計算した`boot_epoch_us`と、`namazu-devices`に保存済みの`boot_epoch_us`を比較
 2. 差が閾値（TimeSyncのドリフト許容、案: ±2分）を超えていたら「再起動があった」と
