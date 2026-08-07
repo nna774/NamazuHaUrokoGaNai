@@ -75,8 +75,15 @@ static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHea
 // 汎用ヘッダで、X-Namz-Ota-Versionの停滞検知が「原因不明」で止まっていた問題
 // （docs/ota.md §7 未決事項1）に対する外部可観測性を与える。
 static constexpr const char* kFwVersionHeader = "X-Namz-Fw-Version";
-static constexpr const char* kExtraRequestHeaderNames[] = {kFwVersionHeader};
-static constexpr const char* kExtraRequestHeaderValues[] = {kFwVersion};
+// 起動からの経過(us、esp_timer_get_time())を毎バッチ乗せる（docs/uptime.md §2.2）。
+// センサ値ではなく「今のプロセスの状態」なのでwireトレイラーではなくヘッダで運ぶ。
+// サーバはraw/に保存せず、その場でboot_epoch_usの逆算にだけ使う。
+static constexpr const char* kUptimeHeader = "X-Namz-Uptime-Us";
+static char sUptimeBuf[24];  // int64 usを文字列化するバッファ（uploaderTaskが毎周更新）
+// Values側は1枠だけ実行時に書き換わる(sUptimeBuf)ので配列自体はconstexprにできない
+// （Uploaderは値をコピーせずポインタを保持するので、指す先の内容だけ書き換えればよい）。
+static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader};
+static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf};
 
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
@@ -336,15 +343,20 @@ static bool performPullOta(const String& targetVersion) {
 // のループで毎回呼ばれ続ける。バックオフ無しだと1周(50ms+ネットワーク待ち)ごとに
 // 取得を試み、測定タイマーが止まったまま(pauseSamplingForOta中)になり続けて
 // 実測が止まる（実機で踏んだ。docs/ota.md §7）。
-static constexpr uint32_t kOtaRetryBackoffMs = 60UL * 1000UL;  // 1分
+static constexpr int64_t kOtaRetryBackoffUs = 60LL * 1000000LL;  // 1分
 
 // バージョン不一致を見つけたら、安全停止→取得→(成功なら再起動/失敗なら復旧)まで
 // 一息に行う。uploaderTaskのループでバッチ送信レスポンスを見た時に呼ぶ。
+//
+// 時刻源は esp_timer_get_time()（int64 us、事実上折り返さない）。以前は millis()
+// （uint32 ms、約49.7日で折り返す）で「加算した期限」と「今」を直接比較しており、
+// 49.7日境界をまたぐ最大60秒の窓でバックオフが早期満了と誤判定されうるバグが
+// あった（稼働時間トレイラーの調査の副産物。docs/uptime.md §5）。
 static void checkAndPerformPullOta(const String& target) {
-  static uint32_t sNextAttemptMs = 0;
+  static int64_t sNextAttemptUs = 0;
   if (target.length() == 0 || target == kFwVersion) return;
-  uint32_t now = millis();
-  if (now < sNextAttemptMs) return;  // 直近の失敗からバックオフ中
+  int64_t now = esp_timer_get_time();
+  if (now < sNextAttemptUs) return;  // 直近の失敗からバックオフ中
   Serial.printf("[ota-pull] update available: %s -> %s\n", kFwVersion, target.c_str());
   pauseSamplingForOta();
   if (performPullOta(target)) {
@@ -353,7 +365,7 @@ static void checkAndPerformPullOta(const String& target) {
     ESP.restart();
   } else {
     resumeSamplingAfterOtaFailure("pull failed");
-    sNextAttemptMs = now + kOtaRetryBackoffMs;
+    sNextAttemptUs = now + kOtaRetryBackoffUs;
   }
 }
 
@@ -407,6 +419,9 @@ static void uploaderTask(void*) {
       Serial.printf("[alert] I=%.1f peak=%.2fgal sent=%d\n", m.intensity, m.peak, ok);
     }
 
+    // 送信直前に稼働時間ヘッダを更新（Uploaderは値をコピーせずポインタを保持する
+    // ため、pump()がPOSTする直前の値を確実に使わせるにはこの位置で書く必要がある）。
+    snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
     gUploader->pump();
     esp_task_wdt_reset();
 
@@ -488,7 +503,7 @@ void setup() {
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
                            kWatchedHeaders, 2,
-                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 1);
+                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 2);
   gUploader->begin();
 
   // OTA更新（docs/ota.md）。ArduinoOTA.handle()はuploaderTask（Core0）で回す。
