@@ -65,6 +65,12 @@
   ベースライン0.4-0.6から0.8-0.9へ同時に跳ねた。振幅SNRは1前後で単独では「微妙」だが、
   2台独立に同タイミング・同特徴（直線偏光）が揃ったため **probable detection**
   （詳細・図: [log/2026-08-08-ibaraki-m3.8-post-hoc-detection.md](log/2026-08-08-ibaraki-m3.8-post-hoc-detection.md)）。
+- **2026-08-09 02:58 岩手県沖 M4.9 深さ10km（震央距離483km）**: リアルタイム閾値未達で
+  正式イベントは立たず。事後解析（3軸・1-10Hz）では device1/device2 とも予測P波到達窓
+  （02:59:02-21）内にSTA/LTAが山（device1=4.32・device2=4.50、両機とも閾値4超過）を
+  同時刻に作った。直線性は固定窓では0.5-0.6台と茨城の事例ほど跳ねなかったが、
+  独立クロック2台が幅20秒弱の予測窓内で一致したこと自体が偶然とは考えにくく
+  **probable detection**（詳細・図: [log/2026-08-09-iwateoki-m4.9-post-hoc-detection.md](log/2026-08-09-iwateoki-m4.9-post-hoc-detection.md)）。
 
 ## 実務結論
 
