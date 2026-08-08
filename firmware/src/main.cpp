@@ -53,6 +53,17 @@ static volatile uint32_t gLastShakeMs = 0;  // 瞬時合成加速度がしきい
 // loop()が震度画面の代わりにgDisplay.renderOtaUpdating()を出す。
 static volatile bool gOtaInProgress = false;
 
+// ボタン長押しによる緊急手動再起動フラグ（gOtaInProgressとは逆方向、
+// loop/Core1が書きuploaderTask/Core0が読む。config.hのkRebootHoldConfirmMs/
+// kRebootHoldTriggerMs参照）。
+// - gManualRebootArmed    : 確認画面に入った時点でtrueにし、Core0へキューの
+//   先回り退避を指示する。キャンセルされても一方向のまま戻さない
+//   （flushToSpill()は空キューならほぼ無償なので、Core0側で毎周呼び続けても無害）。
+// - gManualRebootConfirmed: さらに閾値を超えて押し続けたらtrueにし、
+//   リモート再起動と同じrestartRequestedの仕組みに合流させて実際に再起動する。
+static volatile bool gManualRebootArmed = false;
+static volatile bool gManualRebootConfirmed = false;
+
 // デバイス識別情報・秘密・エンドポイントURL。setup()の先頭でNVSからロードする
 // （旧secrets.h。コンパイル時に埋め込まない理由はdocs/ota.md §7参照）。
 static DeviceIdentity gIdentity;
@@ -448,6 +459,17 @@ static void uploaderTask(void*) {
       restartRequested = true;
       Serial.println("[uploader] restart requested by server, flushing queue to spill");
     }
+    // 緊急手動再起動（ボタン長押し。docs/log/2026-08-08-emergency-reboot-button.md）。
+    // 確認画面に入った時点(gManualRebootArmed)で先回り退避を始め、閾値を超えて
+    // 押し続けた確定(gManualRebootConfirmed)でrestartRequestedに合流させる。
+    // リモート再起動と同じ「2xxが返るまで捨てない」不変条件のまま安全に再起動する。
+    if (!restartRequested && gManualRebootArmed) {
+      gUploader->flushToSpill();
+    }
+    if (!restartRequested && gManualRebootConfirmed) {
+      restartRequested = true;
+      Serial.println("[uploader] manual reboot confirmed via button hold, flushing queue to spill");
+    }
     if (restartRequested) {
       // gBatchQueueはこの周のループ冒頭で既にuploaderへ吸い出し済み。
       gUploader->flushToSpill();
@@ -564,10 +586,43 @@ void loop() {
   static bool active = false;
   static int tick = 0;
 
+#ifndef NAMZ_SENSOR_TEST
+  // ボタン長押しでの緊急手動再起動（config.hのkRebootHoldConfirmMs/
+  // kRebootHoldTriggerMs参照）。短押し(確認画面に入らずに離す)は従来どおり
+  // 画面反転のみ。押し続けてconfirm閾値を超えたら確認画面に切り替え、その時点
+  // でuploaderTask(Core0)へキューの先回り退避を指示する(gManualRebootArmed)。
+  // さらにtrigger閾値まで押し続けたら実際の再起動を指示する
+  // (gManualRebootConfirmed)。confirm閾値未満で離せば何もせず通常表示に戻る
+  // （キャンセル。既にflushしていても実害は無い）。
+  static uint32_t pressStartMs = 0;
+  static bool rebootArmed = false;  // このセッションでconfirm閾値を超えたか
+  bool pressed = digitalRead(kPinButtonFlip) == LOW;
+  uint32_t nowMsButton = millis();
+  uint32_t holdMs = 0;
+  if (pressed && !prevPressed) {
+    pressStartMs = nowMsButton;
+    rebootArmed = false;
+  }
+  if (pressed) {
+    holdMs = nowMsButton - pressStartMs;
+    if (!rebootArmed && holdMs >= kRebootHoldConfirmMs) {
+      rebootArmed = true;
+      gManualRebootArmed = true;
+    }
+    if (rebootArmed && holdMs >= kRebootHoldTriggerMs) {
+      gManualRebootConfirmed = true;
+    }
+  }
+  if (!pressed && prevPressed && !rebootArmed) {
+    gDisplay.toggleFlip();  // 確認画面に入らなかった短押しだけ画面反転
+  }
+  prevPressed = pressed;
+#else
   // ボタン押下エッジで画面反転
   bool pressed = digitalRead(kPinButtonFlip) == LOW;
   if (pressed && !prevPressed) gDisplay.toggleFlip();
   prevPressed = pressed;
+#endif
 
   // 継続ステートの算出（瞬時の揺れベース）
   uint32_t now = millis();
@@ -611,7 +666,15 @@ void loop() {
 #ifdef NAMZ_SENSOR_TEST
     gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, 0, status, bg, clock);
 #else
-    if (gOtaInProgress) {
+    if (rebootArmed) {
+      // ボタン長押し中: 確認画面（黄）に切り替え、あと何秒でtrigger閾値に
+      // 達するかを出す。trigger閾値到達後はCore0が退避完了を待っているだけ
+      // なので「REBOOTING」に切り替える。
+      bool confirmed = holdMs >= kRebootHoldTriggerMs;
+      uint32_t remainMs = confirmed ? 0 : (kRebootHoldTriggerMs - holdMs);
+      uint32_t remainSeconds = (remainMs + 999) / 1000;  // 切り上げでカウントダウン表示
+      gDisplay.renderRebootHold(clock, confirmed, remainSeconds);
+    } else if (gOtaInProgress) {
       // OTA転送中は測定タイマーが止まっており震度・WiFi・バックログの値が
       // 意味を持たないため、震度画面の代わりに更新中であることだけを大きく出す。
       gDisplay.renderOtaUpdating(clock);
