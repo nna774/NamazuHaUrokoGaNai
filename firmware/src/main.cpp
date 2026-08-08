@@ -78,7 +78,9 @@ static DeviceIdentity gIdentity;
 //   ingestが返し続ける（一回性ではない、消費しない）。
 static constexpr const char* kRestartHeader = "X-Namz-Restart";
 static constexpr const char* kOtaVersionHeader = "X-Namz-Ota-Version";
-static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHeader};
+// batch-uplink v2.0.0以降、watchResponseHeadersはnullptr終端の配列（argv方式）。
+// 本数を別引数で渡す必要はない。
+static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHeader, nullptr};
 
 // リクエスト側に乗せて送るヘッダ（batch-uplink v1.6.0のextraRequestHeaders）。
 // 今動いているビルド版数(kFwVersion)をingestへ渡し、devicesテーブルに記録させる。
@@ -101,10 +103,12 @@ static char sHeapFreeBuf[16];
 static char sHeapMaxblockBuf[16];
 // Values側は実行時に書き換わる枠がある(sUptimeBuf・sHeapFreeBuf・sHeapMaxblockBuf)
 // ので配列自体はconstexprにできない（Uploaderは値をコピーせずポインタを保持するので、
-// 指す先の内容だけ書き換えればよい）。batch-uplink側の変更は不要——
-// Uploader::kMaxExtraRequestHeaders=4に対しここで使うのは4枠ちょうど。
+// 指す先の内容だけ書き換えればよい）。batch-uplink v2.0.0以降、namesはnullptr終端
+// （argv方式、本数の上限は無い）。valuesは同じ本数ぶん並べるだけで終端は不要
+// （ループはnamesの終端で止まる）。
 static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
-                                                  kHeapFreeHeader, kHeapMaxblockHeader};
+                                                  kHeapFreeHeader, kHeapMaxblockHeader,
+                                                  nullptr};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
                                                    sHeapFreeBuf, sHeapMaxblockBuf};
 
@@ -543,8 +547,8 @@ void setup() {
   gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
-                           kWatchedHeaders, 2,
-                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 4,
+                           kWatchedHeaders,
+                           kExtraRequestHeaderNames, kExtraRequestHeaderValues,
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
   gUploader->begin();
 
