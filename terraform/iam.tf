@@ -50,6 +50,18 @@ data "aws_iam_policy_document" "lambda" {
       aws_dynamodb_table.device_temp.arn,
     ]
   }
+
+  statement {
+    sid    = "CloudWatchMetrics"
+    effect = "Allow"
+    actions = [
+      # ヒープ空き容量(X-Namz-Heap-Free/-Maxblock)の時系列をカスタムメトリクスで
+      # 残す（docs/design.md「送信の信頼性」未定事項4）。PutMetricDataはリソース
+      # レベル権限に対応しないAPIなので resources は "*" にするしかない。
+      "cloudwatch:PutMetricData",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda" {

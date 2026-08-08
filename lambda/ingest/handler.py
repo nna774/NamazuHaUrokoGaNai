@@ -16,7 +16,7 @@ import boto3
 
 from batch_uplink import auth, devices, notify, s3util
 
-from common import device_meta, device_temp, events, ota_watch, wire
+from common import device_meta, device_temp, events, metrics, ota_watch, wire
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
@@ -91,6 +91,18 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
                                b.meta.sensor_temp_raw, b.meta.sensor_type)
         except Exception as e:  # noqa: BLE001
             print(f"device_temp.record failed: {e!r}")
+
+    # ヒープ空き容量ヘッダ(X-Namz-Heap-Free/-Maxblock、docs/design.md「送信の
+    # 信頼性」未定事項4)をCloudWatchカスタムメトリクスへ送る。TLS接続使い回し
+    # (v1.7.0)がバックフィル中の断片化にどう効くか、実機のシリアルログ無しでも
+    # 事後に推移で追えるようにするための可観測性。
+    heap_free_raw = headers.get("x-namz-heap-free", "")
+    heap_maxblock_raw = headers.get("x-namz-heap-maxblock", "")
+    if heap_free_raw and heap_maxblock_raw:
+        try:
+            metrics.record_heap(b.meta.device_id, int(heap_free_raw), int(heap_maxblock_raw))
+        except Exception as e:  # noqa: BLE001
+            print(f"metrics.record_heap failed: {e!r}")
 
     # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。ここも主経路では
     # ないので、失敗してもバッチ保存自体は成功扱いにする。
