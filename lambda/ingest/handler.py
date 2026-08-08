@@ -142,7 +142,11 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
             boot_epoch_us = b.meta.batch_start_us - int(uptime_raw)
             prev = item.get("boot_epoch_us") if item else None
             if device_meta.should_update_boot_epoch(prev, boot_epoch_us):
-                device_meta.record_boot_epoch(b.meta.device_id, boot_epoch_us)
+                # X-Namz-Reset-Reason(esp_reset_reason())は再起動を検知した
+                # 瞬間にしか意味が無いので、ここでしか読まない。
+                device_meta.record_boot_epoch(
+                    b.meta.device_id, boot_epoch_us,
+                    reset_reason=headers.get("x-namz-reset-reason", ""))
         except Exception as e:  # noqa: BLE001
             print(f"device_meta.record_boot_epoch failed: {e!r}")
 

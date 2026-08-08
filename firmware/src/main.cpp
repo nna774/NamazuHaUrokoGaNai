@@ -12,6 +12,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
 #include <time.h>
@@ -101,6 +102,33 @@ static constexpr const char* kHeapFreeHeader = "X-Namz-Heap-Free";
 static constexpr const char* kHeapMaxblockHeader = "X-Namz-Heap-Maxblock";
 static char sHeapFreeBuf[16];
 static char sHeapMaxblockBuf[16];
+
+// 直前の再起動理由(esp_reset_reason())。WDT panic説（docs/log/2026-08-08-
+// wdt-panic-hypothesis.md）とヒープ枯渇説を実機データで切り分けるための可観測性。
+// 起動時に1回だけ確定し以後変わらない値だが、kExtraRequestHeaderValues[]の要素は
+// 静的初期化時にポインタの値をコピーして持つだけなので、単純な`const char*`変数を
+// 後からsetup()で別の文字列リテラルへ差し替えても配列側には反映されない
+// （sUptimeBuf等と違い固定アドレスのバッファではないため）。同じ「固定アドレスの
+// 中身だけ書き換える」やり方に揃え、バッファへコピーする。
+static constexpr const char* kResetReasonHeader = "X-Namz-Reset-Reason";
+static char sResetReasonBuf[16] = "UNKNOWN";
+
+static const char* resetReasonToString(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON: return "POWERON";
+    case ESP_RST_EXT: return "EXT";
+    case ESP_RST_SW: return "SW";
+    case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT: return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "UNKNOWN";
+  }
+}
+
 // Values側は実行時に書き換わる枠がある(sUptimeBuf・sHeapFreeBuf・sHeapMaxblockBuf)
 // ので配列自体はconstexprにできない（Uploaderは値をコピーせずポインタを保持するので、
 // 指す先の内容だけ書き換えればよい）。batch-uplink v2.0.0以降、namesはnullptr終端
@@ -108,9 +136,10 @@ static char sHeapMaxblockBuf[16];
 // （ループはnamesの終端で止まる）。
 static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
                                                   kHeapFreeHeader, kHeapMaxblockHeader,
-                                                  nullptr};
+                                                  kResetReasonHeader, nullptr};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
-                                                   sHeapFreeBuf, sHeapMaxblockBuf};
+                                                   sHeapFreeBuf, sHeapMaxblockBuf,
+                                                   sResetReasonBuf};
 
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
@@ -500,6 +529,14 @@ void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
   Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
+#ifndef NAMZ_SENSOR_TEST
+  // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
+  // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
+  // 同じ#ifndefで囲まれている）。
+  snprintf(sResetReasonBuf, sizeof(sResetReasonBuf), "%s",
+           resetReasonToString(esp_reset_reason()));
+  Serial.printf("[boot] reset_reason=%s\n", sResetReasonBuf);
+#endif
 
   // デバイス識別情報・秘密・エンドポイントURLをNVSからロードする（docs/ota.md §7）。
   // 失敗時はdeviceId=0のまま返る。表示のIDだけはこの時点で使うが、実際に
