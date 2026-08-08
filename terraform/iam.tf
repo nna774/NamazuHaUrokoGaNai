@@ -56,9 +56,12 @@ data "aws_iam_policy_document" "lambda" {
     effect = "Allow"
     actions = [
       # ヒープ空き容量(X-Namz-Heap-Free/-Maxblock)の時系列をカスタムメトリクスで
-      # 残す（docs/design.md「送信の信頼性」未定事項4）。PutMetricDataはリソース
-      # レベル権限に対応しないAPIなので resources は "*" にするしかない。
+      # 残す（docs/design.md「送信の信頼性」未定事項4）。PutMetricData/
+      # GetMetricStatisticsともリソースレベル権限に対応しないAPIなので
+      # resources は "*" にするしかない。GetMetricStatisticsはapiがデバイス
+      # 詳細ページ向けに直近1点だけ読むのに使う。
       "cloudwatch:PutMetricData",
+      "cloudwatch:GetMetricStatistics",
     ]
     resources = ["*"]
   }
