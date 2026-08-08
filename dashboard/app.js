@@ -900,6 +900,19 @@ function fwVersionHtml(v) {
   return `<a href="${GITHUB_REPO_URL}/commit/${safe}" target="_blank" rel="noopener">${safe}</a>`;
 }
 
+// このプロジェクトはリージョン固定(ap-northeast-1、CLAUDE.md)。ヒープテレメトリの
+// トレンドはCloudWatch側に任せ、ここはコンソールへの深リンクだけを組む
+// （軽く見る用途は最新値のテキスト表示のみ、docs/design.md「送信の信頼性」未定事項4）。
+const CLOUDWATCH_REGION = 'ap-northeast-1';
+
+function cloudwatchHeapUrl(deviceId) {
+  const id = String(deviceId);
+  return `https://${CLOUDWATCH_REGION}.console.aws.amazon.com/cloudwatch/home?region=${CLOUDWATCH_REGION}`
+    + `#metricsV2:graph=~(metrics~(~(~'Namazu~'HeapFreeBytes~'DeviceId~'${id})`
+    + `~(~'Namazu~'HeapMaxAllocBytes~'DeviceId~'${id}))~view~'timeSeries~stacked~false`
+    + `~region~'${CLOUDWATCH_REGION}~start~'-PT24H~end~'P0D)`;
+}
+
 function renderDeviceInfo(d) {
   const tbody = document.getElementById('device-info');
   const st = d.online
@@ -916,7 +929,13 @@ function renderDeviceInfo(d) {
     ['版数', fwVersionHtml(d.fw_version)],
     ['センサ', d.sensor || '不明'],
     ['稼働時間', d.uptime_s != null ? fmtAgo(d.uptime_s) : '不明'],
+    ['前回の再起動理由', d.reset_reason ? escapeHtml(d.reset_reason) : '不明'],
   ];
+  const heapText = d.heap_free_bytes != null
+    ? `空き${(d.heap_free_bytes / 1024).toFixed(0)}KB / 最大連続${(d.heap_maxblock_bytes / 1024).toFixed(0)}KB　`
+    : '直近データなし　';
+  rows.push(['ヒープ', heapText
+    + `<a href="${cloudwatchHeapUrl(d.device_id)}" target="_blank" rel="noopener">CloudWatchで見る →</a>`]);
   if (d.pending_ota_version) {
     rows.push(['OTA', (d.fw_version && d.fw_version === d.pending_ota_version)
       ? `適用済み (${d.pending_ota_version})` : `→ ${d.pending_ota_version}`]);

@@ -65,4 +65,8 @@ class Display {
   bool bgInit_ = false;     // 背景を一度でも塗ったか（回転時にリセット）
   String lastClass_;        // 前回描いた震度階級（変化時のみ描き直してちらつき回避）
   uint32_t deviceId_ = 0;   // NAMAZUの下に出すデバイスID
+  // renderRebootHold: confirmed=falseとtrueでは背景色(黄)が同じまま行数・Y座標が
+  // 変わるため、bg色不変で背景の塗り直しを省くと前のレイアウトの残像が残る。
+  // confirmed=trueへ切り替わった最初の1回だけ強制的に塗り直すためのフラグ。
+  bool rebootHoldConfirmedShown_ = false;
 };

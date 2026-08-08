@@ -1,10 +1,18 @@
 import os
 
+import pytest
+
 os.environ.setdefault("NAMZ_BUCKET", "test-bucket")
 
 from common import wire  # noqa: E402
 
 from api import handler as api  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_cloudwatch(monkeypatch):
+    """_device()が実CloudWatchへ問い合わせないようにする（既定はデータ無し扱い）。"""
+    monkeypatch.setattr(api.metrics, "latest_heap", lambda device_id: None)
 
 
 def _capture_query_range(monkeypatch, items):
@@ -102,3 +110,34 @@ def test_device_view_uptime_none_when_not_yet_recorded(monkeypatch):
     body = resp["body"]
     assert '"boot_epoch_us": null' in body
     assert '"uptime_s": null' in body
+
+
+def test_device_view_reports_reset_reason(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "reset_reason": "TASK_WDT"})
+    resp = api._device(2)
+    assert '"reset_reason": "TASK_WDT"' in resp["body"]
+
+
+def test_device_view_reset_reason_none_when_not_yet_recorded(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)
+    assert '"reset_reason": null' in resp["body"]
+
+
+def test_device_view_includes_heap_when_available(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    monkeypatch.setattr(api.metrics, "latest_heap", lambda did: {
+        "heap_free_bytes": 123456, "heap_maxblock_bytes": 45678, "heap_measured_at_us": 999,
+    })
+    resp = api._device(2)
+    body = resp["body"]
+    assert '"heap_free_bytes": 123456' in body
+    assert '"heap_maxblock_bytes": 45678' in body
+
+
+def test_device_view_omits_heap_when_unavailable(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)  # _no_cloudwatchフィクスチャによりlatest_heapはNoneを返す
+    body = resp["body"]
+    assert "heap_free_bytes" not in body

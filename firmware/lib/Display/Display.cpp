@@ -193,7 +193,13 @@ void Display::renderRebootHold(const String& clock, bool confirmed, uint32_t rem
   // idle/closing/active(紺/橙/赤)ともOTA更新中(紫)とも被らない黄色にし、
   // 「今は震度表示ではない・要注意」を遠目でも判別できるようにする。
   const uint16_t bg = TFT_YELLOW;
-  if (!bgInit_ || bg != bg_) paintFrame(bg);
+  // confirmed=false→trueの遷移は背景色(黄)が変わらないため、bg色不変チェック
+  // だけだとpaintFrameが省略され、行数・Y座標が違う前のレイアウトの残像が
+  // 「HOLD TO REBOOT」の上に「REBOOTING」が重なって見える形で残る。この遷移の
+  // 最初の1回だけ強制的に塗り直す。
+  bool forceRepaint = confirmed && !rebootHoldConfirmedShown_;
+  if (!bgInit_ || bg != bg_ || forceRepaint) paintFrame(bg);
+  rebootHoldConfirmedShown_ = confirmed;
   const uint16_t fg = contrastText(bg);
 
   tft_.setTextDatum(TC_DATUM);

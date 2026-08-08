@@ -23,7 +23,7 @@ import numpy as np
 
 from batch_uplink import devices, s3util
 
-from common import device_temp, events, store, wire
+from common import device_temp, events, metrics, store, wire
 from jismo.rounding import intensity_scale
 
 s3 = boto3.client("s3")
@@ -283,6 +283,10 @@ def _device_view(item: dict, now_us: int) -> dict:
         "boot_epoch_us": int(item["boot_epoch_us"]) if item.get("boot_epoch_us") else None,
         "uptime_s": ((now_us - int(item["boot_epoch_us"])) / 1e6)
                    if item.get("boot_epoch_us") else None,
+        # 直前の再起動理由(esp_reset_reason()、X-Namz-Reset-Reasonヘッダ経由。
+        # docs/log/2026-08-09-uplink-v2.0.0-sentinel-header-arrays.md)。
+        # boot_epoch_usと同じタイミングでしか更新されない(device_meta.record_boot_epoch)。
+        "reset_reason": item.get("reset_reason"),
     }
 
 
@@ -298,7 +302,17 @@ def _device(device_id: int):
     item = devices.get_device(device_id)
     if item is None:
         return _json(404, {"error": "device not found"})
-    return _json(200, {"device": _device_view(item, now_us),
+    view = _device_view(item, now_us)
+    # ヒープ空き容量(docs/design.md「送信の信頼性」未定事項4)。一覧(_devices)では
+    # デバイス数ぶんCloudWatch呼び出しが増えるので詳細ページ限定にしている。
+    # 直近データが無い(旧ファーム・未受信)場合は単に出さない。
+    try:
+        heap = metrics.latest_heap(device_id)
+        if heap:
+            view.update(heap)
+    except Exception as e:  # noqa: BLE001
+        print(f"metrics.latest_heap failed: {e!r}")
+    return _json(200, {"device": view,
                        "offline_after_s": OFFLINE_AFTER_S,
                        "lag_after_s": LAG_AFTER_S})
 

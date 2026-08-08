@@ -8,11 +8,11 @@ import pytest
 
 from common import device_meta
 
-_SET_ONE_FIELD = re.compile(r"^SET (\w+) = (:\w+)$")
+_SET_FIELD = re.compile(r"(\w+) = (:\w+)")
 
 
 class FakeTable:
-    """update_item だけの最小スタブ。単純な1フィールドのSET式だけ拾えれば十分。"""
+    """update_item だけの最小スタブ。"SET a = :x, b = :y, ..." 形式のSET式だけ拾えれば十分。"""
 
     def __init__(self):
         self.items: dict[int, dict] = {}
@@ -20,10 +20,11 @@ class FakeTable:
     def update_item(self, Key, UpdateExpression, ExpressionAttributeValues):  # noqa: N803
         device_id = Key["device_id"]
         item = self.items.setdefault(device_id, {"device_id": device_id})
-        m = _SET_ONE_FIELD.match(UpdateExpression)
-        assert m, f"unsupported UpdateExpression: {UpdateExpression}"
-        field, placeholder = m.groups()
-        item[field] = ExpressionAttributeValues[placeholder]
+        assert UpdateExpression.startswith("SET "), f"unsupported UpdateExpression: {UpdateExpression}"
+        fields = _SET_FIELD.findall(UpdateExpression)
+        assert fields, f"unsupported UpdateExpression: {UpdateExpression}"
+        for field, placeholder in fields:
+            item[field] = ExpressionAttributeValues[placeholder]
 
 
 @pytest.fixture
@@ -47,6 +48,19 @@ def test_record_sensor_type_overwrites_on_resend(table):
 def test_record_boot_epoch_writes_value(table):
     device_meta.record_boot_epoch(2, 1_700_000_000_000_000)
     assert table.items[2]["boot_epoch_us"] == 1_700_000_000_000_000
+
+
+def test_record_boot_epoch_without_reset_reason_does_not_write_field(table):
+    # 旧ファーム等、X-Namz-Reset-Reasonヘッダが無い場合は前回値を消さないよう
+    # フィールド自体を書かない。
+    device_meta.record_boot_epoch(2, 1_700_000_000_000_000)
+    assert "reset_reason" not in table.items[2]
+
+
+def test_record_boot_epoch_writes_reset_reason(table):
+    device_meta.record_boot_epoch(2, 1_700_000_000_000_000, reset_reason="TASK_WDT")
+    assert table.items[2]["boot_epoch_us"] == 1_700_000_000_000_000
+    assert table.items[2]["reset_reason"] == "TASK_WDT"
 
 
 def test_should_update_boot_epoch_true_when_unset():

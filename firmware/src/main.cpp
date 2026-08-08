@@ -12,6 +12,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
 #include <time.h>
@@ -78,7 +79,9 @@ static DeviceIdentity gIdentity;
 //   ingestが返し続ける（一回性ではない、消費しない）。
 static constexpr const char* kRestartHeader = "X-Namz-Restart";
 static constexpr const char* kOtaVersionHeader = "X-Namz-Ota-Version";
-static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHeader};
+// batch-uplink v2.0.0以降、watchResponseHeadersはnullptr終端の配列（argv方式）。
+// 本数を別引数で渡す必要はない。
+static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHeader, nullptr};
 
 // リクエスト側に乗せて送るヘッダ（batch-uplink v1.6.0のextraRequestHeaders）。
 // 今動いているビルド版数(kFwVersion)をingestへ渡し、devicesテーブルに記録させる。
@@ -99,14 +102,44 @@ static constexpr const char* kHeapFreeHeader = "X-Namz-Heap-Free";
 static constexpr const char* kHeapMaxblockHeader = "X-Namz-Heap-Maxblock";
 static char sHeapFreeBuf[16];
 static char sHeapMaxblockBuf[16];
+
+// 直前の再起動理由(esp_reset_reason())。WDT panic説（docs/log/2026-08-08-
+// wdt-panic-hypothesis.md）とヒープ枯渇説を実機データで切り分けるための可観測性。
+// 起動時に1回だけ確定し以後変わらない値だが、kExtraRequestHeaderValues[]の要素は
+// 静的初期化時にポインタの値をコピーして持つだけなので、単純な`const char*`変数を
+// 後からsetup()で別の文字列リテラルへ差し替えても配列側には反映されない
+// （sUptimeBuf等と違い固定アドレスのバッファではないため）。同じ「固定アドレスの
+// 中身だけ書き換える」やり方に揃え、バッファへコピーする。
+static constexpr const char* kResetReasonHeader = "X-Namz-Reset-Reason";
+static char sResetReasonBuf[16] = "UNKNOWN";
+
+static const char* resetReasonToString(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON: return "POWERON";
+    case ESP_RST_EXT: return "EXT";
+    case ESP_RST_SW: return "SW";
+    case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT: return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "UNKNOWN";
+  }
+}
+
 // Values側は実行時に書き換わる枠がある(sUptimeBuf・sHeapFreeBuf・sHeapMaxblockBuf)
 // ので配列自体はconstexprにできない（Uploaderは値をコピーせずポインタを保持するので、
-// 指す先の内容だけ書き換えればよい）。batch-uplink側の変更は不要——
-// Uploader::kMaxExtraRequestHeaders=4に対しここで使うのは4枠ちょうど。
+// 指す先の内容だけ書き換えればよい）。batch-uplink v2.0.0以降、namesはnullptr終端
+// （argv方式、本数の上限は無い）。valuesは同じ本数ぶん並べるだけで終端は不要
+// （ループはnamesの終端で止まる）。
 static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
-                                                  kHeapFreeHeader, kHeapMaxblockHeader};
+                                                  kHeapFreeHeader, kHeapMaxblockHeader,
+                                                  kResetReasonHeader, nullptr};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
-                                                   sHeapFreeBuf, sHeapMaxblockBuf};
+                                                   sHeapFreeBuf, sHeapMaxblockBuf,
+                                                   sResetReasonBuf};
 
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
@@ -496,6 +529,14 @@ void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
   Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
+#ifndef NAMZ_SENSOR_TEST
+  // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
+  // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
+  // 同じ#ifndefで囲まれている）。
+  snprintf(sResetReasonBuf, sizeof(sResetReasonBuf), "%s",
+           resetReasonToString(esp_reset_reason()));
+  Serial.printf("[boot] reset_reason=%s\n", sResetReasonBuf);
+#endif
 
   // デバイス識別情報・秘密・エンドポイントURLをNVSからロードする（docs/ota.md §7）。
   // 失敗時はdeviceId=0のまま返る。表示のIDだけはこの時点で使うが、実際に
@@ -543,8 +584,8 @@ void setup() {
   gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
-                           kWatchedHeaders, 2,
-                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 4,
+                           kWatchedHeaders,
+                           kExtraRequestHeaderNames, kExtraRequestHeaderValues,
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
   gUploader->begin();
 
@@ -588,33 +629,47 @@ void loop() {
 
 #ifndef NAMZ_SENSOR_TEST
   // ボタン長押しでの緊急手動再起動（config.hのkRebootHoldConfirmMs/
-  // kRebootHoldTriggerMs参照）。短押し(確認画面に入らずに離す)は従来どおり
-  // 画面反転のみ。押し続けてconfirm閾値を超えたら確認画面に切り替え、その時点
-  // でuploaderTask(Core0)へキューの先回り退避を指示する(gManualRebootArmed)。
+  // kRebootHoldTriggerMs参照）。
+  //
+  // 画面反転は元の挙動どおり押した瞬間(press edge)に常に行う。離した瞬間
+  // (release edge)を条件に入れると、離す瞬間の接点バウンスでrelease edgeが
+  // 複数回検出され、反転が偶数回起きて相殺され「効かなくなる」不具合を実機で
+  // 踏んだ（press edgeなら旧実装と同じで実績あり）。confirm閾値に達して
+  // 確認画面(黄)へ入る時にもう一度toggleFlip()し、押し始めの反転を打ち消す
+  // （今の画面を見たまま押し始めるため、押す前後で向きが変わって見えると
+  // 分かりづらいと指摘を受けた。打ち消すまでの一瞬だけ反転して見えるのは許容）。
+  //
+  // 押し続けてconfirm閾値を超えたら確認画面に切り替え、その時点で
+  // uploaderTask(Core0)へキューの先回り退避を指示する(gManualRebootArmed)。
   // さらにtrigger閾値まで押し続けたら実際の再起動を指示する
-  // (gManualRebootConfirmed)。confirm閾値未満で離せば何もせず通常表示に戻る
-  // （キャンセル。既にflushしていても実害は無い）。
+  // (gManualRebootConfirmed)。確認画面に入った後でも、trigger閾値に達する前に
+  // 離せば即座にキャンセルして通常表示に戻す（既にflushしていても実害は無い）。
   static uint32_t pressStartMs = 0;
-  static bool rebootArmed = false;  // このセッションでconfirm閾値を超えたか
+  static bool rebootArmed = false;  // 確認画面(黄)を出すべきか。離せば即falseに戻す
   bool pressed = digitalRead(kPinButtonFlip) == LOW;
   uint32_t nowMsButton = millis();
   uint32_t holdMs = 0;
   if (pressed && !prevPressed) {
     pressStartMs = nowMsButton;
     rebootArmed = false;
+    gDisplay.toggleFlip();
   }
   if (pressed) {
     holdMs = nowMsButton - pressStartMs;
     if (!rebootArmed && holdMs >= kRebootHoldConfirmMs) {
       rebootArmed = true;
       gManualRebootArmed = true;
+      // 押し始めのtoggleFlip()を打ち消し、確認画面(黄)は押す前の向きで出す
+      // （押しっぱなしの画面を見ている最中に反転すると分かりづらいと指摘を受けた。
+      // 打ち消すまでの一瞬だけ反転して見えるのは許容）。
+      gDisplay.toggleFlip();
     }
     if (rebootArmed && holdMs >= kRebootHoldTriggerMs) {
       gManualRebootConfirmed = true;
     }
   }
-  if (!pressed && prevPressed && !rebootArmed) {
-    gDisplay.toggleFlip();  // 確認画面に入らなかった短押しだけ画面反転
+  if (!pressed && prevPressed) {
+    rebootArmed = false;  // 確認画面のまま離したらキャンセル、通常表示に戻す
   }
   prevPressed = pressed;
 #else
