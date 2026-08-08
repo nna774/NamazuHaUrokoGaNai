@@ -67,6 +67,15 @@ static constexpr uint32_t kSpiClockHz = 8000000;  // 8MHz（ADXL355の上限10MH
 // GPIO0は起動時のストラップだが、起動後の押下ではブートローダに入らない。
 static constexpr int kPinButtonFlip = 0;
 
+// --- ボタン長押し: 緊急手動再起動 ---
+// 家庭内ネット瞬断でdevice1が繰り返し再起動していた件（WDT panic仮説、
+// docs/log/2026-08-08-wdt-panic-hypothesis.md）の暫定対策。ネットワーク越しの
+// リモート再起動が届かない状況（そもそも通信不調）でも、現地でボタンだけで
+// 安全に再起動できるようにする物理フェイルセーフ。
+// 短押し（kRebootHoldConfirmMs未満で離す）は従来どおり画面反転のみ。
+static constexpr uint32_t kRebootHoldConfirmMs = 2000;  // 確認画面へ切替 + キュー先回り退避
+static constexpr uint32_t kRebootHoldTriggerMs = 5000;  // さらに押し続けたら実際に再起動
+
 // 表示の「継続」判定（デバイス表示用。クラウドのセッションマージとは別物）。
 // 60秒窓の計測震度は揺れ停止後もしばらく高いままなので、"今揺れているか"は
 // 瞬時のフィルタ後合成加速度[gal]で判定する。これがしきい値を超えた最終時刻から
