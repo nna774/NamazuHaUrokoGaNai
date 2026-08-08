@@ -185,3 +185,41 @@ void Display::renderOtaUpdating(const String& clock) {
 
   tft_.setTextPadding(0);
 }
+
+void Display::renderRebootHold(const String& clock, bool confirmed, uint32_t remainSeconds) {
+  if (!ready_) return;
+  const int w = tft_.width();
+
+  // idle/closing/active(紺/橙/赤)ともOTA更新中(紫)とも被らない黄色にし、
+  // 「今は震度表示ではない・要注意」を遠目でも判別できるようにする。
+  const uint16_t bg = TFT_YELLOW;
+  // confirmed=false→trueの遷移は背景色(黄)が変わらないため、bg色不変チェック
+  // だけだとpaintFrameが省略され、行数・Y座標が違う前のレイアウトの残像が
+  // 「HOLD TO REBOOT」の上に「REBOOTING」が重なって見える形で残る。この遷移の
+  // 最初の1回だけ強制的に塗り直す。
+  bool forceRepaint = confirmed && !rebootHoldConfirmedShown_;
+  if (!bgInit_ || bg != bg_ || forceRepaint) paintFrame(bg);
+  rebootHoldConfirmedShown_ = confirmed;
+  const uint16_t fg = contrastText(bg);
+
+  tft_.setTextDatum(TC_DATUM);
+  tft_.setTextPadding(120);
+  tft_.setTextColor(fg, bg);
+  tft_.drawString(clock, w / 2, 6, 1);
+
+  tft_.setTextDatum(MC_DATUM);
+  tft_.setTextColor(fg, bg);
+  tft_.setTextPadding(w);
+  if (confirmed) {
+    tft_.drawString("REBOOTING", w / 2, 55, 4);
+    tft_.drawString("release is too late", w / 2, 90, 2);
+  } else {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "reboot in %lus", (unsigned long)remainSeconds);
+    tft_.drawString("HOLD TO REBOOT", w / 2, 40, 4);
+    tft_.drawString(buf, w / 2, 75, 2);
+    tft_.drawString("release to cancel", w / 2, 100, 2);
+  }
+
+  tft_.setTextPadding(0);
+}

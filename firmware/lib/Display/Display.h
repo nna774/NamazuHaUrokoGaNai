@@ -39,6 +39,14 @@ class Display {
   //          を兼ねる。
   void renderOtaUpdating(const String& clock);
 
+  // ボタン長押しによる緊急手動再起動の確認画面（config.hのkRebootHoldConfirmMs/
+  // kRebootHoldTriggerMs、main.cppのloop()参照）。ボタンを離せば呼ばれなくなり
+  // 通常表示に戻る（キャンセルはmain.cpp側の責務、この関数自体には無い）。
+  //  clock         : render()と同じ日時文字列（凍結検知を兼ねる）。
+  //  confirmed     : trueなら再起動確定後（Core0がキュー退避完了を待っている間）。
+  //  remainSeconds : confirmed=falseの間、あと何秒押し続けたら再起動するか。
+  void renderRebootHold(const String& clock, bool confirmed, uint32_t remainSeconds);
+
   // 震度階級のASCII表記（"0".."4","5-","5+","6-","6+","7"）。
   static const char* scaleAscii(float intensity);
 
@@ -57,4 +65,8 @@ class Display {
   bool bgInit_ = false;     // 背景を一度でも塗ったか（回転時にリセット）
   String lastClass_;        // 前回描いた震度階級（変化時のみ描き直してちらつき回避）
   uint32_t deviceId_ = 0;   // NAMAZUの下に出すデバイスID
+  // renderRebootHold: confirmed=falseとtrueでは背景色(黄)が同じまま行数・Y座標が
+  // 変わるため、bg色不変で背景の塗り直しを省くと前のレイアウトの残像が残る。
+  // confirmed=trueへ切り替わった最初の1回だけ強制的に塗り直すためのフラグ。
+  bool rebootHoldConfirmedShown_ = false;
 };
