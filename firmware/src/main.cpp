@@ -593,8 +593,10 @@ void loop() {
   // 画面反転は元の挙動どおり押した瞬間(press edge)に常に行う。離した瞬間
   // (release edge)を条件に入れると、離す瞬間の接点バウンスでrelease edgeが
   // 複数回検出され、反転が偶数回起きて相殺され「効かなくなる」不具合を実機で
-  // 踏んだ（press edgeなら旧実装と同じで実績あり）。長押し中に確認画面(黄)へ
-  // 入っても反転自体が先に起きるだけで実害は無い。
+  // 踏んだ（press edgeなら旧実装と同じで実績あり）。confirm閾値に達して
+  // 確認画面(黄)へ入る時にもう一度toggleFlip()し、押し始めの反転を打ち消す
+  // （今の画面を見たまま押し始めるため、押す前後で向きが変わって見えると
+  // 分かりづらいと指摘を受けた。打ち消すまでの一瞬だけ反転して見えるのは許容）。
   //
   // 押し続けてconfirm閾値を超えたら確認画面に切り替え、その時点で
   // uploaderTask(Core0)へキューの先回り退避を指示する(gManualRebootArmed)。
@@ -616,6 +618,10 @@ void loop() {
     if (!rebootArmed && holdMs >= kRebootHoldConfirmMs) {
       rebootArmed = true;
       gManualRebootArmed = true;
+      // 押し始めのtoggleFlip()を打ち消し、確認画面(黄)は押す前の向きで出す
+      // （押しっぱなしの画面を見ている最中に反転すると分かりづらいと指摘を受けた。
+      // 打ち消すまでの一瞬だけ反転して見えるのは許容）。
+      gDisplay.toggleFlip();
     }
     if (rebootArmed && holdMs >= kRebootHoldTriggerMs) {
       gManualRebootConfirmed = true;
