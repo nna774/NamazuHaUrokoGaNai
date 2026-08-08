@@ -283,6 +283,10 @@ def _device_view(item: dict, now_us: int) -> dict:
         "boot_epoch_us": int(item["boot_epoch_us"]) if item.get("boot_epoch_us") else None,
         "uptime_s": ((now_us - int(item["boot_epoch_us"])) / 1e6)
                    if item.get("boot_epoch_us") else None,
+        # 直前の再起動理由(esp_reset_reason()、X-Namz-Reset-Reasonヘッダ経由。
+        # docs/log/2026-08-09-uplink-v2.0.0-sentinel-header-arrays.md)。
+        # boot_epoch_usと同じタイミングでしか更新されない(device_meta.record_boot_epoch)。
+        "reset_reason": item.get("reset_reason"),
     }
 
 

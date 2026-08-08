@@ -112,6 +112,19 @@ def test_device_view_uptime_none_when_not_yet_recorded(monkeypatch):
     assert '"uptime_s": null' in body
 
 
+def test_device_view_reports_reset_reason(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "reset_reason": "TASK_WDT"})
+    resp = api._device(2)
+    assert '"reset_reason": "TASK_WDT"' in resp["body"]
+
+
+def test_device_view_reset_reason_none_when_not_yet_recorded(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)
+    assert '"reset_reason": null' in resp["body"]
+
+
 def test_device_view_includes_heap_when_available(monkeypatch):
     monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
     monkeypatch.setattr(api.metrics, "latest_heap", lambda did: {

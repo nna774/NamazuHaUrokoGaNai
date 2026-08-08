@@ -929,6 +929,7 @@ function renderDeviceInfo(d) {
     ['版数', fwVersionHtml(d.fw_version)],
     ['センサ', d.sensor || '不明'],
     ['稼働時間', d.uptime_s != null ? fmtAgo(d.uptime_s) : '不明'],
+    ['前回の再起動理由', d.reset_reason ? escapeHtml(d.reset_reason) : '不明'],
   ];
   const heapText = d.heap_free_bytes != null
     ? `空き${(d.heap_free_bytes / 1024).toFixed(0)}KB / 最大連続${(d.heap_maxblock_bytes / 1024).toFixed(0)}KB　`

@@ -46,14 +46,26 @@ def should_update_boot_epoch(prev_boot_epoch_us, new_boot_epoch_us: int) -> bool
     return abs(new_boot_epoch_us - int(prev_boot_epoch_us)) > BOOT_EPOCH_DRIFT_THRESHOLD_US
 
 
-def record_boot_epoch(device_id: int, boot_epoch_us: int) -> None:
+def record_boot_epoch(device_id: int, boot_epoch_us: int, reset_reason: str = "") -> None:
     """起動時刻(boot_epoch_us = batch_start_us - uptime_us)を記録する。
 
     呼び出し側(ingest)がBOOT_EPOCH_DRIFT_THRESHOLD_USを超えたズレ（＝再起動）を
     検知した時だけ呼ぶ想定。この差分検知自体が再起動検知になる（docs/uptime.md §3）。
+
+    reset_reasonはX-Namz-Reset-Reasonヘッダ(esp_reset_reason())の値。再起動を
+    検知した瞬間にしか意味を持たない値なので、同じUpdateItemに相乗りさせる
+    （追加の書き込みは発生しない）。空文字なら書かない（旧ファーム等、ヘッダが
+    無い場合に前回値を消さないため）。
     """
-    _table().update_item(
-        Key={"device_id": device_id},
-        UpdateExpression="SET boot_epoch_us = :b",
-        ExpressionAttributeValues={":b": int(boot_epoch_us)},
-    )
+    if reset_reason:
+        _table().update_item(
+            Key={"device_id": device_id},
+            UpdateExpression="SET boot_epoch_us = :b, reset_reason = :r",
+            ExpressionAttributeValues={":b": int(boot_epoch_us), ":r": reset_reason},
+        )
+    else:
+        _table().update_item(
+            Key={"device_id": device_id},
+            UpdateExpression="SET boot_epoch_us = :b",
+            ExpressionAttributeValues={":b": int(boot_epoch_us)},
+        )
