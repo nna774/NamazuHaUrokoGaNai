@@ -80,10 +80,22 @@ static constexpr const char* kFwVersionHeader = "X-Namz-Fw-Version";
 // サーバはraw/に保存せず、その場でboot_epoch_usの逆算にだけ使う。
 static constexpr const char* kUptimeHeader = "X-Namz-Uptime-Us";
 static char sUptimeBuf[24];  // int64 usを文字列化するバッファ（uploaderTaskが毎周更新）
-// Values側は1枠だけ実行時に書き換わる(sUptimeBuf)ので配列自体はconstexprにできない
-// （Uploaderは値をコピーせずポインタを保持するので、指す先の内容だけ書き換えればよい）。
-static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader};
-static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf};
+// ヒープ空き容量(docs/design.md「送信の信頼性」未定事項4)。TLS接続使い回し
+// (v1.7.0)がバックフィル中の断片化にどう効くか、実機のシリアルログ無しでも
+// サーバ側から追えるようにするための可観測性。maxblockは空き合計より断片化の
+// 兆候を直接示す(連続TLSハンドシェイクは大きな連続ブロックを要求するため)。
+static constexpr const char* kHeapFreeHeader = "X-Namz-Heap-Free";
+static constexpr const char* kHeapMaxblockHeader = "X-Namz-Heap-Maxblock";
+static char sHeapFreeBuf[16];
+static char sHeapMaxblockBuf[16];
+// Values側は実行時に書き換わる枠がある(sUptimeBuf・sHeapFreeBuf・sHeapMaxblockBuf)
+// ので配列自体はconstexprにできない（Uploaderは値をコピーせずポインタを保持するので、
+// 指す先の内容だけ書き換えればよい）。batch-uplink側の変更は不要——
+// Uploader::kMaxExtraRequestHeaders=4に対しここで使うのは4枠ちょうど。
+static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
+                                                  kHeapFreeHeader, kHeapMaxblockHeader};
+static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
+                                                   sHeapFreeBuf, sHeapMaxblockBuf};
 
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
@@ -419,9 +431,12 @@ static void uploaderTask(void*) {
       Serial.printf("[alert] I=%.1f peak=%.2fgal sent=%d\n", m.intensity, m.peak, ok);
     }
 
-    // 送信直前に稼働時間ヘッダを更新（Uploaderは値をコピーせずポインタを保持する
-    // ため、pump()がPOSTする直前の値を確実に使わせるにはこの位置で書く必要がある）。
+    // 送信直前に稼働時間・ヒープヘッダを更新（Uploaderは値をコピーせずポインタを
+    // 保持するため、pump()がPOSTする直前の値を確実に使わせるにはこの位置で書く
+    // 必要がある）。
     snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
+    snprintf(sHeapFreeBuf, sizeof(sHeapFreeBuf), "%u", (unsigned)ESP.getFreeHeap());
+    snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
     gUploader->pump();
     esp_task_wdt_reset();
 
@@ -503,7 +518,7 @@ void setup() {
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
                            kWatchedHeaders, 2,
-                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 2);
+                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 4);
   gUploader->begin();
 
   // OTA更新（docs/ota.md）。ArduinoOTA.handle()はuploaderTask（Core0）で回す。
