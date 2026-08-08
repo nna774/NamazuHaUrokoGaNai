@@ -588,20 +588,28 @@ void loop() {
 
 #ifndef NAMZ_SENSOR_TEST
   // ボタン長押しでの緊急手動再起動（config.hのkRebootHoldConfirmMs/
-  // kRebootHoldTriggerMs参照）。短押し(確認画面に入らずに離す)は従来どおり
-  // 画面反転のみ。押し続けてconfirm閾値を超えたら確認画面に切り替え、その時点
-  // でuploaderTask(Core0)へキューの先回り退避を指示する(gManualRebootArmed)。
+  // kRebootHoldTriggerMs参照）。
+  //
+  // 画面反転は元の挙動どおり押した瞬間(press edge)に常に行う。離した瞬間
+  // (release edge)を条件に入れると、離す瞬間の接点バウンスでrelease edgeが
+  // 複数回検出され、反転が偶数回起きて相殺され「効かなくなる」不具合を実機で
+  // 踏んだ（press edgeなら旧実装と同じで実績あり）。長押し中に確認画面(黄)へ
+  // 入っても反転自体が先に起きるだけで実害は無い。
+  //
+  // 押し続けてconfirm閾値を超えたら確認画面に切り替え、その時点で
+  // uploaderTask(Core0)へキューの先回り退避を指示する(gManualRebootArmed)。
   // さらにtrigger閾値まで押し続けたら実際の再起動を指示する
-  // (gManualRebootConfirmed)。confirm閾値未満で離せば何もせず通常表示に戻る
-  // （キャンセル。既にflushしていても実害は無い）。
+  // (gManualRebootConfirmed)。確認画面に入った後でも、trigger閾値に達する前に
+  // 離せば即座にキャンセルして通常表示に戻す（既にflushしていても実害は無い）。
   static uint32_t pressStartMs = 0;
-  static bool rebootArmed = false;  // このセッションでconfirm閾値を超えたか
+  static bool rebootArmed = false;  // 確認画面(黄)を出すべきか。離せば即falseに戻す
   bool pressed = digitalRead(kPinButtonFlip) == LOW;
   uint32_t nowMsButton = millis();
   uint32_t holdMs = 0;
   if (pressed && !prevPressed) {
     pressStartMs = nowMsButton;
     rebootArmed = false;
+    gDisplay.toggleFlip();
   }
   if (pressed) {
     holdMs = nowMsButton - pressStartMs;
@@ -613,8 +621,8 @@ void loop() {
       gManualRebootConfirmed = true;
     }
   }
-  if (!pressed && prevPressed && !rebootArmed) {
-    gDisplay.toggleFlip();  // 確認画面に入らなかった短押しだけ画面反転
+  if (!pressed && prevPressed) {
+    rebootArmed = false;  // 確認画面のまま離したらキャンセル、通常表示に戻す
   }
   prevPressed = pressed;
 #else
