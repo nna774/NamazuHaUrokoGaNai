@@ -23,6 +23,9 @@
     # 緊急地震速報/震源で答え合わせ(福島県沖 深さ60km 20:52:59発生)
     python detectlab.py --at "2026-07-24 20:53" --minutes 10 --band 0.3 1.5 \
         --eew "37.7,141.7,60,2026-07-24 20:52:59" --out /tmp/2053.png
+    # 2機重ね描き（方位較正なしで比較できる回転不変量＝STA/LTA・直線性のみ）
+    python detectlab.py --at "2026-08-08 03:41:32" --device 1 2 \
+        --eew "36.7,140.6,10,2026-08-08 03:41:32" --out /tmp/overlay.png
 """
 
 from __future__ import annotations
@@ -227,6 +230,25 @@ def window_report(vec: np.ndarray, rect: np.ndarray, fs: float, start_us: int,
     return rms, snr, wrect
 
 
+def analyze(data: np.ndarray, fs: float, start_us: int, band_range: tuple[float, float],
+           axes: str, sta_s: float, lta_s: float, thr: float, rect_win: float):
+    """バンドパス・STA/LTA・直線性をまとめて計算する（単一/重ね描き両モード共通）。
+
+    STA/LTA・直線性はどちらも振幅二乗和・共分散固有値という回転不変量から出る
+    （docs/device_overlay.md）。方位較正が無くても機体間でそのまま比較できる。
+    """
+    lo, hi = band_range
+    band = bandpass(data, fs, lo, hi)
+    nax = 2 if axes == "xy" else 3  # xy=水平のみ / xyz=3軸
+    bsel = band[:, :nax]
+    cf = (bsel ** 2).sum(axis=1)
+    ratio = sta_lta(cf, fs, sta_s, lta_s)
+    onsets = detect_onsets(ratio, fs, start_us, thr)
+    rect = rectilinearity(bsel, fs, rect_win)
+    vec = np.sqrt(cf)
+    return band, ratio, onsets, rect, vec
+
+
 # ---- 出力 ---------------------------------------------------------------
 
 def dump_csv(path: str, data: np.ndarray, start_us: int, fs: float) -> None:
@@ -326,6 +348,73 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
         plt.show()
 
 
+def plot_overlay(per_device, thr, arrivals, ref_us, out, show):
+    """複数デバイスのSTA/LTA・直線性を同一時間軸に重ねて描く。
+
+    生波形やスペクトログラムは軸の向きが機体ごとに違い重ねる意味が無いので出さない
+    （docs/device_overlay.md §2）。STA/LTA・直線性は回転不変量なので方位較正なしで
+    そのまま比較できる（同§3-c の考え方）。
+    """
+    import matplotlib
+
+    if not show:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager as fm
+
+    installed = {f.name for f in fm.fontManager.ttflist}
+    for jp in ("Hiragino Sans", "Hiragino Kaku Gothic Pro", "YuGothic",
+               "Noto Sans CJK JP", "IPAexGothic"):
+        if jp in installed:
+            plt.rcParams["font.family"] = jp
+            break
+    plt.rcParams["axes.unicode_minus"] = False
+
+    fig, axs = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    for i, (device_id, start_us, fs, ratio, rect, onsets) in enumerate(per_device):
+        color = colors[i % len(colors)]
+        t = (start_us - ref_us) / 1e6 + np.arange(len(ratio)) / fs
+        axs[0].plot(t, ratio, lw=0.7, color=color, label=f"device {device_id}")
+        axs[1].plot(t, rect, lw=0.7, color=color, label=f"device {device_id}")
+        for o in onsets:
+            ot = (o - ref_us) / 1e6
+            for a in axs:
+                a.axvline(ot, color=color, lw=0.8, alpha=0.6, ls="--")
+
+    axs[0].axhline(thr, ls="--", color="k", lw=0.8)
+    axs[0].set_ylabel("STA/LTA")
+    axs[0].set_title(f"STA/LTA比 重ね描き（閾値 {thr:g} 超で検出。回転不変量なので方位較正なしで比較可）",
+                     fontsize=9, loc="left")
+    axs[0].legend(loc="upper right", fontsize=8)
+
+    axs[1].axhline(0.6, ls=":", color="k", lw=0.8)
+    axs[1].set_ylim(0, 1)
+    axs[1].set_ylabel("直線性")
+    axs[1].set_title("直線性 重ね描き（1=直線偏光≒地震の実体波 / 0.5前後=等方ノイズ）",
+                     fontsize=9, loc="left")
+    xlabel = "t [s]  " + ("（発生時刻からの経過）" if arrivals else "（先頭デバイス窓頭からの経過）")
+    axs[1].set_xlabel(xlabel)
+
+    for label, e_us, l_us, color in arrivals:
+        e = (e_us - ref_us) / 1e6
+        l = (l_us - ref_us) / 1e6
+        for a in axs:
+            a.axvspan(e, l, color=color, alpha=0.13)
+        axs[0].annotate(label, ((e + l) / 2, axs[0].get_ylim()[1] * 0.85),
+                        color=color, ha="center", fontsize=9)
+
+    devices_note = ",".join(str(d) for d, *_ in per_device)
+    fig.suptitle(f"detectlab overlay  devices={devices_note}")
+    fig.tight_layout()
+    if out:
+        fig.savefig(out, dpi=110)
+        print(f"# saved {out}")
+    if show:
+        plt.show()
+
+
 # ---- CLI ----------------------------------------------------------------
 
 def at_to_us(s: str) -> int:
@@ -361,59 +450,24 @@ def main() -> int:
     p.add_argument("--eew", help='震源で答え合わせ。"緯度,経度,深さkm,発生時刻(JST)" '
                    '例 "37.7,141.7,60,2026-07-24 20:52:59"。P/S到達窓を重ね描き＋SNR/直線性を出す')
     p.add_argument("--station", help='観測点座標 "lat,lon"（既定は NAMZ_STATION_LATLON / 湯沢町）')
-    p.add_argument("--device", type=int, default=1,
-                   help="デバイスID（--at 系で必須。既定1）。混ぜると継ぎ目の段差が揺れに見える")
+    p.add_argument("--device", type=int, nargs="+", default=[1],
+                   help="デバイスID（--at 系で必須。既定1）。混ぜて読むと継ぎ目の段差が揺れに"
+                        "見えるので個別に読む。2つ以上指定すると重ね描き解析モード"
+                        "（--at/--at-us 限定。STA/LTA・直線性という回転不変量だけを重ねるので"
+                        "方位較正なしで比較できる）")
     p.add_argument("--bucket", help="rawバケット名（既定は NAMZ_RAW_BUCKET / terraform）")
     p.add_argument("--out", help="図の保存先PNG（無指定なら画面表示）")
     p.add_argument("--dump-csv", dest="dump", help="取得した生窓をCSV保存（再利用用）")
     p.add_argument("--show", action="store_true", help="--out 指定時も画面表示する")
     args = p.parse_args()
 
-    if args.csv:
-        data, start_us, fs = load_csv(args.csv)
-        device_id = None  # CSVは任意データなので--deviceの既定値は意味を持たない
-    elif args.event:
-        data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), args.event)
-        device_id = int(args.event.split("-", 1)[0])  # event_id先頭4桁=device
-    else:
-        center = at_to_us(args.at) if args.at else args.at_us
-        seconds = args.minutes * 60.0
-        end_us = int(center + seconds / 2 * 1e6)
-        data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
-                                            args.device)
-        device_id = args.device
+    if len(args.device) > 1 and not (args.at or args.at_us):
+        raise SystemExit("複数デバイスの重ね描きは --at / --at-us でのみ対応する"
+                         "（--event/--csv は単一データ源）")
 
-    n = data.shape[0]
-    if n == 0:
-        raise SystemExit("波形が空。時刻・バケット・データ保持期間を確認しろ。")
-
-    lo, hi = args.band
-    band = bandpass(data, fs, lo, hi)
-    nax = 2 if args.axes == "xy" else 3          # xy=水平のみ / xyz=3軸
-    bsel = band[:, :nax]
-    cf = (bsel ** 2).sum(axis=1)
-    ratio = sta_lta(cf, fs, args.sta, args.lta)
-    onsets = detect_onsets(ratio, fs, start_us, args.thr)
-    rect = rectilinearity(bsel, fs, args.rect_win)
-    vec = np.sqrt(cf)
-
-    t0 = datetime.fromtimestamp(start_us / 1e6, JST)
-    raw_rms = np.sqrt(np.mean((data - data.mean(axis=0)) ** 2))
-    bp_rms = np.sqrt(np.mean(band ** 2))
-    print(f"# start={t0:%Y-%m-%d %H:%M:%S JST}  fs={fs:.2f}Hz  N={n}  ({n / fs:.1f}s)")
-    print(f"# band={lo:g}-{hi:g}Hz  axes={args.axes}  raw_rms={raw_rms:.4f}gal"
-          f"  bp_rms={bp_rms:.4f}gal  STA/LTA peak={ratio.max():.2f}")
-    if onsets:
-        for o in onsets:
-            ot = datetime.fromtimestamp(o / 1e6, JST)
-            oi = min(len(rect) - 1, max(0, int(round((o - start_us) / 1e6 * fs))))
-            print(f"  onset候補: {ot:%Y-%m-%d %H:%M:%S.%f} JST  (t+{(o - start_us) / 1e6:.1f}s)"
-                  f"  直線性={rect[oi]:.2f}")
-    else:
-        print(f"  onset候補なし（閾値 {args.thr:g} 未達）。--thr を下げる/--band を変えると拾えることも。")
-
-    # --eew: 到達予測窓を計算し、背景比SNRと直線性で答え合わせ
+    # --eew の到達予測窓は全デバイス共通（同一地点に複数機を置く前提。EEWパースも1回でよい）。
     arrivals: list[tuple[str, int, int, str]] = []
+    origin_us = None
     if args.eew:
         eq_lat, eq_lon, depth, origin_us = parse_eew(args.eew)
         st_lat, st_lon = parse_station(args.station)
@@ -421,13 +475,36 @@ def main() -> int:
         p_win = arrival_window(hypo, origin_us, P_VEL_RANGE)
         s_win = arrival_window(hypo, origin_us, S_VEL_RANGE)
         arrivals = [("P窓", p_win[0], p_win[1], "C0"), ("S窓", s_win[0], s_win[1], "C3")]
-        # 背景RMS: 発生前[origin-150, origin-30]秒があればそれ、無ければ全体の中央値
+        og = datetime.fromtimestamp(origin_us / 1e6, JST)
+        print(f"# EEW: 震央({eq_lat},{eq_lon}) 深さ{depth:g}km  発生 {og:%H:%M:%S}"
+              f"  震央距離{epi:.0f}km 震源距離{hypo:.0f}km")
+
+    def report(dev_label: str, fs, start_us, band, ratio, onsets, rect, vec, raw):
+        lo, hi = args.band
+        n = raw.shape[0]
+        raw_rms = np.sqrt(np.mean((raw - raw.mean(axis=0)) ** 2))
+        bp_rms = np.sqrt(np.mean(band ** 2))
+        t0 = datetime.fromtimestamp(start_us / 1e6, JST)
+        prefix = f"# {dev_label} " if dev_label else "# "
+        print(f"{prefix}start={t0:%Y-%m-%d %H:%M:%S JST}  fs={fs:.2f}Hz  N={n}"
+              f"  ({n / fs:.1f}s)")
+        print(f"  band={lo:g}-{hi:g}Hz  axes={args.axes}  raw_rms={raw_rms:.4f}gal"
+              f"  bp_rms={bp_rms:.4f}gal  STA/LTA peak={ratio.max():.2f}")
+        if onsets:
+            for o in onsets:
+                ot = datetime.fromtimestamp(o / 1e6, JST)
+                oi = min(len(rect) - 1, max(0, int(round((o - start_us) / 1e6 * fs))))
+                print(f"    onset候補: {ot:%Y-%m-%d %H:%M:%S.%f} JST"
+                      f"  (t+{(o - start_us) / 1e6:.1f}s)  直線性={rect[oi]:.2f}")
+        else:
+            print(f"    onset候補なし（閾値 {args.thr:g} 未達）。"
+                  "--thr を下げる/--band を変えると拾えることも。")
+        if not args.eew:
+            return
         bg = window_report(vec, rect, fs, start_us,
                            origin_us - 150_000_000, origin_us - 30_000_000, 1.0)
         bg_rms = bg[0] if bg else float(np.sqrt(np.median(vec ** 2)))
-        og = datetime.fromtimestamp(origin_us / 1e6, JST)
-        print(f"# EEW: 震央({eq_lat},{eq_lon}) 深さ{depth:g}km  発生 {og:%H:%M:%S}"
-              f"  震央距離{epi:.0f}km 震源距離{hypo:.0f}km  背景RMS={bg_rms:.4f}gal")
+        print(f"    背景RMS={bg_rms:.4f}gal")
         for label, e_us, l_us, _ in arrivals:
             ea = datetime.fromtimestamp(e_us / 1e6, JST)
             la = datetime.fromtimestamp(l_us / 1e6, JST)
@@ -436,14 +513,61 @@ def main() -> int:
                 _, snr, wrect = r
                 verdict = "地震らしい" if (snr >= 1.5 and wrect >= 0.6) else \
                           "微妙(ノイズと分離できず)" if snr < 1.3 else "要検討"
-                print(f"  {label} {ea:%H:%M:%S}-{la:%H:%M:%S}  "
+                print(f"    {label} {ea:%H:%M:%S}-{la:%H:%M:%S}  "
                       f"SNR={snr:.2f}  直線性={wrect:.2f}  → {verdict}")
             else:
-                print(f"  {label} {ea:%H:%M:%S}-{la:%H:%M:%S}  （窓が解析範囲外）")
+                print(f"    {label} {ea:%H:%M:%S}-{la:%H:%M:%S}  （窓が解析範囲外）")
+
+    if args.csv:
+        data, start_us, fs = load_csv(args.csv)
+        device_id = None  # CSVは任意データなので--deviceの既定値は意味を持たない
+    elif args.event:
+        data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), args.event)
+        device_id = int(args.event.split("-", 1)[0])  # event_id先頭4桁=device
+    else:
+        device_id = args.device[0]
+        center = at_to_us(args.at) if args.at else args.at_us
+        seconds = args.minutes * 60.0
+        end_us = int(center + seconds / 2 * 1e6)
+
+        if len(args.device) > 1:
+            # 重ね描き: デバイスごとに個別読み込み・個別解析（混ぜると継ぎ目が揺れに見える）。
+            per_device = []
+            bucket = resolve_bucket(args.bucket)
+            for dev in args.device:
+                d_data, d_start, d_fs = load_s3_window(bucket, end_us, seconds, dev)
+                if d_data.shape[0] == 0:
+                    raise SystemExit(f"device {dev}: 波形が空。時刻・データ保持期間を確認しろ。")
+                d_band, d_ratio, d_onsets, d_rect, d_vec = analyze(
+                    d_data, d_fs, d_start, args.band, args.axes,
+                    args.sta, args.lta, args.thr, args.rect_win)
+                report(f"device={dev}", d_fs, d_start, d_band, d_ratio, d_onsets,
+                       d_rect, d_vec, d_data)
+                if args.dump:
+                    stem, dot, ext = args.dump.rpartition(".")
+                    dump_csv(f"{stem}.dev{dev}.{ext}" if dot else f"{args.dump}.dev{dev}",
+                             d_data, d_start, d_fs)
+                per_device.append((dev, d_start, d_fs, d_ratio, d_rect, d_onsets))
+            ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
+            plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
+                        show=args.show or not args.out)
+            return 0
+
+        data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
+                                            device_id)
+
+    n = data.shape[0]
+    if n == 0:
+        raise SystemExit("波形が空。時刻・バケット・データ保持期間を確認しろ。")
+
+    band, ratio, onsets, rect, vec = analyze(
+        data, fs, start_us, args.band, args.axes, args.sta, args.lta, args.thr, args.rect_win)
+    report("", fs, start_us, band, ratio, onsets, rect, vec, data)
 
     if args.dump:
         dump_csv(args.dump, data, start_us, fs)
 
+    lo, hi = args.band
     plot(data, band, fs, start_us, ratio, args.thr, onsets, lo, hi,
          rect, arrivals, args.out, show=args.show or not args.out,
          vec=vec, axes_label=args.axes, device_id=device_id)
