@@ -499,11 +499,16 @@ void setup() {
   connectWifi();
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
+  // ingest/alert先はLambda Function URL直（*.lambda-url.ap-northeast-1.on.aws、
+  // CloudFrontを介さない）。openssl s_clientで実機のチェーンを確認したところ
+  // leaf -> Amazon RSA 2048 M01 -> Amazon Root CA 1 で、OTA用に埋め込み済みの
+  // 同じルートCAで検証できる（ドメインは別だがどちらもAWS/ACM発行のため）。
   gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
                            kWatchedHeaders, 2,
-                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 2);
+                           kExtraRequestHeaderNames, kExtraRequestHeaderValues, 2,
+                           reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
   gUploader->begin();
 
   // OTA更新（docs/ota.md）。ArduinoOTA.handle()はuploaderTask（Core0）で回す。
