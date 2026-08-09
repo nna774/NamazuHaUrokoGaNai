@@ -21,6 +21,17 @@ bool Iis3dhhc::begin() {
 
 uint8_t Iis3dhhc::whoAmI() { return readReg(kWhoAmI); }
 
+bool Iis3dhhc::readTemperatureRaw(uint16_t& out) {
+  // OUT_TEMP_L/H は符号付き16bit（データシート DS12084、公式ドライバの
+  // iis3dhhc_temperature_raw_get()と同じ組み方）。℃への換算は
+  // lambda/common/wire.py の iis3dhhc_temp_c() で行う（ここではビット列のまま送る）。
+  uint8_t buf[2];
+  readRegs(kOutTempL, buf, sizeof(buf));
+  int16_t raw = static_cast<int16_t>(buf[0] | (buf[1] << 8));
+  out = static_cast<uint16_t>(raw);
+  return true;
+}
+
 bool Iis3dhhc::read(AccelSample& out) {
   uint8_t buf[6];
   readRegs(kOutXL, buf, sizeof(buf));

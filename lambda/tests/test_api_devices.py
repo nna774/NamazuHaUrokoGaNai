@@ -67,10 +67,13 @@ def test_device_temp_reports_raw_and_celsius_for_adxl355(monkeypatch):
     assert '"c":' in body  # ADXL355なので換算値も付く
 
 
-def test_device_temp_omits_celsius_for_unsupported_sensor(monkeypatch):
+def test_device_temp_reports_raw_and_celsius_for_iis3dhhc(monkeypatch):
     _capture_query_range(monkeypatch, [_item(1000, 1900, wire.SENSOR_TYPE_IIS3DHHC)])
     resp = api._device_temp(2, {})
-    assert '"c": null' in resp["body"]
+    body = resp["body"]
+    assert '"raw": 1900' in body
+    assert '"c":' in body  # IIS3DHHCも内蔵温度センサ対応済み
+    assert '"c": null' not in body
 
 
 def test_device_temp_passes_max_points_cap(monkeypatch):

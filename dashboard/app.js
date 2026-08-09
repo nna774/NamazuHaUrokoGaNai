@@ -1030,7 +1030,7 @@ async function showDevice(id) {
     const d = data.device || {};
     title.textContent = `デバイス ${String(d.device_id ?? id).padStart(4, '0')}`;
     renderDeviceInfo(d);
-    hasTemp = d.sensor === 'ADXL355';  // IIS3DHHCは温度センサを持たずトレイラー自体を送らない
+    hasTemp = d.sensor === 'ADXL355' || d.sensor === 'IIS3DHHC';  // 両方内蔵温度センサ対応済み
   } catch (e) {
     title.textContent = `デバイス ${padded}`;
     document.getElementById('device-info').innerHTML =
