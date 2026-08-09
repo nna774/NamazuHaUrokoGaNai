@@ -109,11 +109,12 @@ def test_adxl355_temp_intercept_is_not_the_adxl359_value():
 
 
 def test_iis3dhhc_temp_conversion():
-    # raw=0 が基準点で25℃（データシート DS12084 の公式換算式 raw/16+25）。
+    # raw=0 が基準点で25℃（データシート DS12292 §7.6: 16bit生値は12bit値が左詰め、
+    # よって raw/256+25。下位4bitは常にパディング0なので raw=256刻みで1℃動く）。
     assert wire.iis3dhhc_temp_c(0) == pytest.approx(25.0)
-    assert wire.iis3dhhc_temp_c(16) == pytest.approx(26.0)
+    assert wire.iis3dhhc_temp_c(256) == pytest.approx(26.0)
     # raw は符号付き16bitのビット列をuint16のまま運ぶ。負値（0x8000超）も符号拡張して扱う。
-    assert wire.iis3dhhc_temp_c(0x10000 - 16) == pytest.approx(24.0)
+    assert wire.iis3dhhc_temp_c(0x10000 - 256) == pytest.approx(24.0)
 
 
 def test_temp_c_for_adxl355_and_iis3dhhc():
