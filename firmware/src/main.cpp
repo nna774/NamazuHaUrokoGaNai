@@ -28,6 +28,19 @@
 #endif
 #include "Shindo.h"
 #include "TimeSync.h"
+
+// uploaderTaskのループ内、どの呼び出しの前後で最後に生きていたかを見るための
+// 一時デバッグログ。batch-uplink側のUPLINK_DEBUG_TIMINGと同じbuild_flagsで
+// 有効化する（既定オフ、コストゼロ）。device1の「postBatch()の1本目は成功する
+// のに2本目のログが一切出ない」調査用——pump()どころかそこへ到達する前の
+// どこかで詰まっている可能性を切り分ける。
+#ifdef UPLINK_DEBUG_TIMING
+#define LOOP_DEBUG_LOG(...) Serial.printf(__VA_ARGS__)
+#else
+#define LOOP_DEBUG_LOG(...) \
+  do {                      \
+  } while (0)
+#endif
 #include "Uploader.h"
 #include "config.h"
 
@@ -438,11 +451,14 @@ static void uploaderTask(void*) {
   // 明示的に餌をやる。ここを削ると回線が詰まった時に限って再起動する。
   for (;;) {
     esp_task_wdt_reset();
+    LOOP_DEBUG_LOG("[loop-debug] top t=%lld\n", (long long)esp_timer_get_time());
 
     // WiFi再接続
     if (WiFi.status() != WL_CONNECTED) {
+      LOOP_DEBUG_LOG("[loop-debug] before connectWifi t=%lld\n", (long long)esp_timer_get_time());
       connectWifi();
       esp_task_wdt_reset();
+      LOOP_DEBUG_LOG("[loop-debug] after connectWifi t=%lld\n", (long long)esp_timer_get_time());
     }
     // NTP再同期（間接: SNTPが自動pollするので明示不要だが接続回復時に備え）
     if (millis() - lastResync > kNtpResyncSeconds * 1000UL) {
@@ -452,7 +468,9 @@ static void uploaderTask(void*) {
     // OTA更新の待ち受け（LAN内push）。通常は着信確認だけの軽い呼び出しだが、
     // 実際に転送が始まると完了までこの呼び出し内でブロックする
     // （otaOnProgressでWDTを養う）。
+    LOOP_DEBUG_LOG("[loop-debug] before ota.handle t=%lld\n", (long long)esp_timer_get_time());
     ArduinoOTA.handle();
+    LOOP_DEBUG_LOG("[loop-debug] after ota.handle t=%lld\n", (long long)esp_timer_get_time());
 
     // batchQueue -> uploader
     Batch* b = nullptr;
@@ -481,7 +499,9 @@ static void uploaderTask(void*) {
     snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
     snprintf(sHeapFreeBuf, sizeof(sHeapFreeBuf), "%u", (unsigned)ESP.getFreeHeap());
     snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
+    LOOP_DEBUG_LOG("[loop-debug] before pump t=%lld\n", (long long)esp_timer_get_time());
     gUploader->pump();
+    LOOP_DEBUG_LOG("[loop-debug] after pump t=%lld\n", (long long)esp_timer_get_time());
     esp_task_wdt_reset();
 
     // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、RAMキューを
