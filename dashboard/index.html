@@ -84,7 +84,7 @@
   <main>
     <section id="live" class="active">
       <div class="row">
-        <label>デバイス:
+        <label id="live-device-label">デバイス:
           <select id="live-device" title="波形は1デバイスぶんだけ表示する"></select>
         </label>
         <label>表示範囲:
@@ -109,7 +109,7 @@
             <option value="2000">±2000 gal</option>
           </select>
         </label>
-        <label>軸:
+        <label id="live-axes-label">軸:
           <span id="live-axes">
             <label style="color:#e74c3c"><input type="checkbox" id="live-ax-x" checked> X</label>
             <label style="color:#2ecc71"><input type="checkbox" id="live-ax-y" checked> Y</label>
@@ -118,12 +118,21 @@
         </label>
         <label><input type="checkbox" id="autorefresh" checked> 自動更新</label>
       </div>
+      <div class="row">
+        <label id="live-overlay-wrap" title="「1分」表示中のみ。2機以上を選ぶと重ね表示に切り替わる（傾き・相対方位較正が済んだ機だけ選べる）">
+          重ね表示: <span id="live-overlay-checks" class="muted">（較正済みの機がまだ無い）</span>
+        </label>
+      </div>
       <div id="live-status" class="muted status-line"></div>
       <div id="live-intensity" class="status-line"></div>
       <canvas id="live-canvas"></canvas>
-      <p class="muted">縦軸: 加速度 [gal]。x=赤 y=緑 z=青。範囲が広いときは min/max エンベロープ表示。
+      <p class="muted" id="live-axes-help">縦軸: 加速度 [gal]。x=赤 y=緑 z=青。範囲が広いときは min/max エンベロープ表示。
         ドラッグで時間方向に拡大（その区間を取り直すので細かくなる。自動更新は止まる）。
         ダブルクリックか「ライブ」で戻る。</p>
+      <p class="muted" id="live-overlay-help" style="display:none">重ね表示: 選んだ機の姿勢較正値（傾き・相対方位、
+        <code>tools/calibrate_orientation.py --write</code> で書き込み済みのもの）で回転してから
+        UD（鉛直、実線）・H1/H2（回転後の水平2軸、破線/点線）を機ごとの色で重ねて描く。
+        相対方位はまだ真北ではなく基準機からの相対値。ドラッグ拡大は非対応。</p>
       <p class="muted">概算震度は「1分」表示時のみ、取得済みの生波形からブラウザ内で計算する
         参考値（気象庁計測震度のFIR近似・追加のサーバ通信なし）。イベント一覧の確定値とは
         算出経路が異なるため、僅かにずれることがある。</p>

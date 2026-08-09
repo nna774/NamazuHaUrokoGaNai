@@ -144,3 +144,30 @@ def test_device_view_omits_heap_when_unavailable(monkeypatch):
     resp = api._device(2)  # _no_cloudwatchフィクスチャによりlatest_heapはNoneを返す
     body = resp["body"]
     assert "heap_free_bytes" not in body
+
+
+def test_device_view_reports_orientation_calibration(monkeypatch):
+    from decimal import Decimal
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {
+        "device_id": did,
+        "tilt_up": [Decimal("0.01"), Decimal("-0.02"), Decimal("0.9997")],
+        "tilt_deg": Decimal("0.85"),
+        "azimuth_deg": Decimal("-7.9"),
+        "calibration_ref_device": 1,
+    })
+    resp = api._device(2)
+    body = resp["body"]
+    assert '"tilt_up": [0.01, -0.02, 0.9997]' in body
+    assert '"tilt_deg": 0.85' in body
+    assert '"azimuth_deg": -7.9' in body
+    assert '"calibration_ref_device": 1' in body
+
+
+def test_device_view_orientation_calibration_none_when_not_yet_calibrated(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)
+    body = resp["body"]
+    assert '"tilt_up": null' in body
+    assert '"tilt_deg": null' in body
+    assert '"azimuth_deg": null' in body
+    assert '"calibration_ref_device": null' in body

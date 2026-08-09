@@ -287,6 +287,15 @@ def _device_view(item: dict, now_us: int) -> dict:
         # docs/log/2026-08-09-uplink-v2.0.0-sentinel-header-arrays.md)。
         # boot_epoch_usと同じタイミングでしか更新されない(device_meta.record_boot_epoch)。
         "reset_reason": item.get("reset_reason"),
+        # 姿勢較正(tools/calibrate_orientation.py --write、docs/device_overlay.md §3.b)。
+        # tilt_up は raw sensor frame での重力方向の単位ベクトル、azimuth_deg は
+        # calibration_ref_device の水平基底に揃えるための回転角(度)。未較正はnull
+        # （ダッシュボードの重ね表示モードはここが無い機体を対象外にする）。
+        "tilt_up": [float(v) for v in item["tilt_up"]] if item.get("tilt_up") else None,
+        "tilt_deg": float(item["tilt_deg"]) if item.get("tilt_deg") is not None else None,
+        "azimuth_deg": float(item["azimuth_deg"]) if item.get("azimuth_deg") is not None else None,
+        "calibration_ref_device": int(item["calibration_ref_device"])
+                                  if item.get("calibration_ref_device") is not None else None,
     }
 
 
