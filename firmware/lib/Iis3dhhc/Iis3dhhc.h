@@ -1,7 +1,7 @@
 #pragma once
 // IIS3DHHC (STMicroelectronics) SPIドライバ。ライブラリ非依存でレジスタ直叩き。
 //
-// 主要仕様（ST データシート DS12084 参照）:
+// 主要仕様（ST データシート DS12292 参照）:
 //   - フルスケール固定 ±2.5g、16bit -> 0.076 mg/LSB
 //   - 出力データレート 1.1kHz 固定（本システムは100Hzでポーリング）
 //   - SPI モード3 (CPOL=1, CPHA=1)、最大 ~10MHz

@@ -52,14 +52,20 @@ def adxl355_temp_c(raw: int) -> float:
     return 25.0 + (raw - ADXL355_TEMP_AT_25C) / ADXL355_TEMP_LSB_PER_DEGC
 
 
-# IIS3DHHC の内蔵温度（データシート DS12084、OUT_TEMP_L/H）。
-# 換算式: 温度[℃] = raw/16 + 25（公式ドライバ iis3dhhc_from_lsb_to_celsius() と同じ）。
+# IIS3DHHC の内蔵温度（データシート DS12292 §7.6, OUT_TEMP_L/H）。
+# 実体は12bit値(Temp[11:0])で、16bitの中に**左詰め**（OUT_TEMP_Lの下位4bitは常に0の
+# パディング）。TSDr=16 digit/°C、0(12bit値)=25℃基準。よって16bit生値をそのまま
+# 使う場合は raw/256 + 25（= 12bit値へ4bit右シフトしてから/16と同じ）。
+# 実測でもraw(例: 2816=0x0B00)の下位4bitは常に0で、この左詰め仕様と一致する。
+# 公式ドライバ iis3dhhc_from_lsb_to_celsius()（raw/16+25）は12bit値を渡す前提の
+# 関数であり、16bit生値のまま渡すと16倍過大に出る（実機投入後に発覚・訂正）。
+#
 # raw は符号付き16bitだが、ファームはビット列のままuint16として送る
 # （firmware/lib/Iis3dhhc/Iis3dhhc.cpp参照）ので、ここで符号拡張してから使う。
 def iis3dhhc_temp_c(raw: int) -> float:
-    """IIS3DHHC の温度生値を℃へ。"""
+    """IIS3DHHC の温度生値(16bit左詰め)を℃へ。"""
     signed = raw - 0x10000 if raw >= 0x8000 else raw
-    return signed / 16.0 + 25.0
+    return signed / 256.0 + 25.0
 
 
 def temp_c_for(sensor_type: int, raw: int | None) -> float | None:
