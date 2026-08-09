@@ -197,7 +197,19 @@ static void samplingTask(void*) {
     esp_task_wdt_reset();
 
     AccelSample rd;
-    if (!gSensor.read(rd)) continue;
+    static bool sReadFailing = false;
+    if (!gSensor.read(rd)) {
+      if (!sReadFailing) {
+        sReadFailing = true;
+        LOOP_DEBUG_LOG("[loop-debug] gSensor.read() started failing t=%lld\n",
+                        (long long)esp_timer_get_time());
+      }
+      continue;
+    } else if (sReadFailing) {
+      sReadFailing = false;
+      LOOP_DEBUG_LOG("[loop-debug] gSensor.read() recovered t=%lld\n",
+                      (long long)esp_timer_get_time());
+    }
     accX += rd.x;
     accY += rd.y;
     accZ += rd.z;
@@ -219,12 +231,29 @@ static void samplingTask(void*) {
 #else
     // NTP同期前はタイムスタンプが無効(1970年)になるのでサンプルを捨てる。
     // 起動直後の数秒ぶんを失うだけで、24/365運用では無視できる。
-    if (!timesync::isSynced()) continue;
+    if (!timesync::isSynced()) {
+      static bool sSyncLost = false;
+      if (!sSyncLost) {
+        sSyncLost = true;
+        LOOP_DEBUG_LOG("[loop-debug] timesync::isSynced() false t=%lld\n",
+                        (long long)esp_timer_get_time());
+      }
+      continue;
+    }
 
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
       cur = namzwire::newBatch(kBatchSamples, gSensor.sampleFormat());
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
+        static bool sNewBatchFailing = false;
+        if (!sNewBatchFailing) {
+          sNewBatchFailing = true;
+          LOOP_DEBUG_LOG(
+              "[loop-debug] newBatch invalid, retrying next sample heap_free=%u maxblock=%u "
+              "t=%lld\n",
+              (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+              (long long)esp_timer_get_time());
+        }
         delete cur;
         cur = nullptr;
       } else {
