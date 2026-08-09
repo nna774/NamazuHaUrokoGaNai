@@ -180,20 +180,24 @@ static QueueHandle_t gAlertQueue;  // AlertMsg
 // malloc()の実際の要求(MALLOC_CAP_8BIT基準)を過大報告し、ヒープに余裕があるように
 // 見えるのにnewBatch()が失敗する現象を観測した
 // (docs/log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md §11)。
-// 【実験中・暫定値】同時生存数の理論上限「組み立て中(1) + gBatchQueueの深さ(4)
-// + kMaxRamBatches」ぶん(esp32devで7本≒126KB)を静的確保しようとしたら、
-// dram0_0_seg(malloc()が実際に使うMALLOC_CAP_8BIT領域、8bitアクセス可能な
-// DRAMのみ。IRAM分は含まれない)がリンク時に約108KBオーバーフローした。
-// 実測でこのチップのdram0_0_seg空き余地は約18.5KBしか無いと判明
-// (docs/log/2026-08-10-newbatch-buffer-pool-handoff.md)。ひとまず1本
-// (=組み立て中の分だけ)に絞って挙動を見る。バックログが`gBatchQueue`/
-// `Uploader.ram_`へ積み上がる局面ではプールが即座に枯渇しmallocへ
-// フォールバックする(=元のnewBatch()失敗が起きうる局面はまだ救えない)。
-static constexpr size_t kBatchPoolSlots = 1;
+//
+// 同時生存数の理論上限「組み立て中(1) + gBatchQueueの深さ + kMaxRamBatches」ぶん
+// (esp32devで7本≒126KB)を`static uint8_t[][]`(=.dram0.bss)で確保しようとしたら
+// リンカが`dram0_0_seg`をオーバーフローさせた。memory.ldのコメントに答えがあった:
+// このリージョンの宣言サイズ(約121KB)はROM起動時の一時使用と衝突しないよう
+// 静的配置(.data/.bss)だけに課された保守的な制限で、"本来は0x50000(320KB)ある。
+// この余剰分は実行時のヒープでは使える"と明記されている。つまり静的配列ではなく
+// setup()で1回だけmalloc()すれば、この制限を受けない
+// (docs/log/2026-08-10-newbatch-buffer-pool-handoff.md で実機確認済み)。
+// WiFi/TLS等が動き出す前(=ヒープが一番連続している時)に確保するため、
+// setup()の先頭付近で確保する。スロット数とRAM予算の実測はconfig.hの
+// kMaxRamBatches側のコメント、および`pio run -e pool-probe`(使い捨て
+// 診断ビルド)参照。
+static constexpr size_t kBatchPoolSlots = 1 + kBatchQueueDepth + kMaxRamBatches;
 static constexpr size_t kBatchBufferBytes =
     kWireHeaderSize + kBatchSamples * kBatchRecordBytes + namzwire::kMaxTrailerBytes;
-static uint8_t sBatchPool[kBatchPoolSlots][kBatchBufferBytes];
-static QueueHandle_t gBufferPool;  // uint8_t*（sBatchPoolの各行の先頭を積む）
+static uint8_t* sBatchPool = nullptr;  // malloc(kBatchPoolSlots * kBatchBufferBytes)
+static QueueHandle_t gBufferPool;      // uint8_t*（sBatchPoolの各スロット先頭を積む）
 
 static void releaseBatchBufferToPool(void* ctx, uint8_t* buf) {
   xQueueSendToBack(static_cast<QueueHandle_t>(ctx), &buf, 0);
@@ -711,14 +715,23 @@ void setup() {
         "sizing is wrong.\n",
         (unsigned)kBatchRecordBytes, (unsigned)namzwire::sampleBytes(gSensor.sampleFormat()));
   }
+  // static配列ではなくmalloc()で確保する（理由は宣言側のコメント参照。
+  // dram0_0_segの静的配置向け制限を受けないようにするため）。WiFi/TLS等が
+  // まだ何も確保していない、ヒープが一番連続しているこの時点で確保する。
+  sBatchPool = static_cast<uint8_t*>(malloc(kBatchPoolSlots * kBatchBufferBytes));
+  if (!sBatchPool) {
+    Serial.println("[pool] BUG: buffer pool malloc failed, pooling disabled");
+  }
   gBufferPool = xQueueCreate(kBatchPoolSlots, sizeof(uint8_t*));
-  for (size_t i = 0; i < kBatchPoolSlots; ++i) {
-    uint8_t* slot = sBatchPool[i];
+  for (size_t i = 0; sBatchPool && i < kBatchPoolSlots; ++i) {
+    uint8_t* slot = sBatchPool + i * kBatchBufferBytes;
     xQueueSendToBack(gBufferPool, &slot, 0);
   }
-  Serial.printf("[pool] batch buffer pool: %u slots x %u B = %u B\n",
+  Serial.printf("[pool] batch buffer pool: %u slots x %u B = %u B (%s) free_heap=%u maxblock_8bit=%u\n",
                 (unsigned)kBatchPoolSlots, (unsigned)kBatchBufferBytes,
-                (unsigned)(kBatchPoolSlots * kBatchBufferBytes));
+                (unsigned)(kBatchPoolSlots * kBatchBufferBytes), sBatchPool ? "ok" : "FAILED",
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
   connectWifi();
   timesync::begin(kNtpServer1, kNtpServer2,

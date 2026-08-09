@@ -195,21 +195,62 @@ sdkconfig.h`で確認、`CONFIG_SPIRAM_BOOT_INIT`も未定義なので`psramInit
 **PSRAM無し、確定。** この診断ビルド(`env:psram-probe`)はコミットに残す
 （今後別の予備基板やハード更新を検討する時に再利用できる）。
 
-### 未決着のまま持ち帰り
+## 続報2: 「静的配列」が間違いだったと判明し、malloc()方式で解決した（同日）
 
-複数本ぶんの静的プールが不可能・PSRAMも無いと分かった今、選択肢は3つ:
+上の「複数本ぶんの静的プールは原理的に不可能」という結論は、**プールを
+`static uint8_t[][]`（＝`.dram0.bss`）で確保しようとしていたのが原因**で、
+ユーザーの指摘（「DRAM小さいね、staticが小さいだけでヒープはあるのでは」）で
+見直した。
 
-1. **design.mdの予備案（mbedTLSの確保専用固定プール化）へ切り替える。**
-   `mbedtls_platform_set_calloc_free()`でTLSハンドシェイクの一時確保を
-   専用プールへ差し替える——`Batch`のバッファ自体はmallocのまま。断片化の
-   発生源をTLS側と見て、そちらを直接塞む方向
-2. 1スロットだけの中途半端なプールで妥協する。残りDRAM余白をほぼ食い潰す
-   割に、今回問題になったバックログ局面では効かない
-3. プール化自体を諦め、`newBatch()`失敗時の次サンプル再試行（今の挙動、
-   一度は自然回復した実績がある）に任せる
+実際にリンカスクリプト(`tools/sdk/esp32/ld/memory.ld`)を読むと、答えが
+コメントに書いてあった:
 
-**まだ決めていない。** `batch-uplink`側の外部バッファ機能(PR #13)は
-選択肢2でのみ使うので、1か3を選ぶなら実装済みだが未使用のまま残る形になる
-（マージ判断も含めて保留）。firmware側のプール実装(`kBatchPoolSlots=1`の
-暫定値)・`kMaxRamBatches=2`への変更は、この判断が決まるまでコミットに
-残すが**まだ実機投入しない**。
+```
+Note: Length of this section *should* be 0x50000, and this extra DRAM is
+available in heap at runtime. However due to static ROM memory usage at
+this 176KB mark, the additional static memory temporarily cannot be used.
+```
+
+`dram0_0_seg`の宣言サイズ(約121KB)は、ROM起動時の一時使用と衝突しないよう
+**静的配置(.data/.bss)だけに課された保守的な制限**で、本来のDRAMは
+0x50000(320KB)ある。この差分は実行時のヒープ(`malloc()`)では普通に使える、
+と明記されていた。つまり静的配列をやめ、`setup()`で1回だけ`malloc()`すれば
+この制限を受けない。
+
+### 実機で検証し、6スロットで確定した
+
+`Batch`の外部バッファプールと同じサイズを`malloc()`するだけの使い捨てビルド
+(`firmware/src/pool_probe_main.cpp`、`env:pool-probe`/`env:adxl355-pool-probe`)
+を作り、予備基板に書き込んで実測した(NVS未プロビジョニングでもmain.cppの
+halt前に試せるよう独立ビルドにした)。
+
+- 7スロット(126448B、理論上限そのまま)は**失敗**（`malloc() -> NULL`）。
+  この時点の`maxblock_8bit=114676`に対し126448は収まらない
+- 6スロット(108384B)は**成功**。確保前`free_heap=350920, maxblock=114676`、
+  確保後も`free_heap=242520, maxblock=110580`が残り、この後のWiFi/TLS/
+  Uploader構築に十分な余裕がある。全域read/write検証も通した
+- esp32dev/adxl355両envで同じ結果（バッファサイズが両方18064Bで揃っているため）
+
+**6スロット(＝`kMaxRamBatches=1`)を採用し、firmware側を最終化した。**
+`main.cpp`の`sBatchPool`を`static uint8_t[][]`から`malloc()`一発確保へ書き換え、
+`setup()`冒頭（WiFi/TLS等が何も確保していない、ヒープが一番連続している時点）で
+確保するようにした。`config.h`の`kMaxRamBatches`を2→1に下げ、実測値と根拠を
+コメントに残した。`env:pool-probe`は使い捨てず、`config.h`を変えた時の
+実機再検証ツールとして残す。`pio run -e esp32dev -e adxl355`のリンク成功、
+`firmware/test/run.sh`（wireバイト等価テスト）も確認した。
+
+### 決着
+
+複数本ぶんのバッファプール化は**実現できた**。`batch-uplink`の外部バッファ
+機能([PR #13](https://github.com/nna774/batch-uplink/pull/13)、v2.4.0)を
+採用する方針が確定し、mbedTLS専用プール化・プール化断念といった代替案は
+不要になった。ただし**実機（device1/device2）への投入はまだ**——ここまでは
+予備基板とホストビルドでの検証のみ。
+
+## 次に何が可能になったか（続報2時点）
+
+「静的配列」という実装選択の誤りに気づけたことで、DRAM予算の問題は解消し、
+当初の設計（固定バッファプールで`newBatch()`のmalloc/free churnを無くす）を
+そのまま実現できる見通しが立った。次はfirmwareを実機（device1またはdevice2）へ
+投入し、`[pool]`ログでプールが実際に機能しているか、`newBatch invalid`ログが
+出なくなるかを確認すること。`batch-uplink` PR #13のマージ判断もまだ残っている。

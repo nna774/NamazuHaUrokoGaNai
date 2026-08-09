@@ -37,15 +37,20 @@ static constexpr uint32_t kBatchSamples = kSampleRateHz * kBatchSeconds;
 // データは落ちない。
 //
 // この値は main.cpp の固定バッファプール(kBatchPoolSlots = 組み立て中1本 +
-// gBatchQueue深さ4 + ここ)のサイズも決める——プールは静的配列で全スロットぶん
-// 前もって確保するため、ここを上げるとRAM静的消費が直接その分増える
-// （1本18KB強、両センサとも同じ重さ）。平常運転では ram_ がここまで埋まる
-// ことはほぼ無い(Uploader::pump()が毎ループ即座に送ろうとするため)ので、
-// 引き上げてもflash書き込み頻度は増えない——増えるのはバックログが実際に
-// 積み上がった時にLittleFSへ逃げ始めるタイミングだけ(早まる方向)。
-// 実機のRAM予算はheapテレメトリ(X-Namz-Heap-Free、CloudWatch)で見て
-// 調整すること。詳細はdocs/log/2026-08-10-newbatch-buffer-pool-handoff.md。
-static constexpr uint32_t kMaxRamBatches = 2;
+// gBatchQueue深さ4 + ここ)のスロット数も決める。プールはsetup()内でmalloc()
+// して使い回す（静的配列ではない。dram0_0_segの静的配置向け制限に引っかかった
+// 経緯はdocs/log/2026-08-10-newbatch-buffer-pool-handoff.md参照）。平常運転では
+// ram_ がここまで埋まることはほぼ無い(Uploader::pump()が毎ループ即座に送ろうと
+// するため)ので、引き上げてもflash書き込み頻度は増えない——増えるのはバック
+// ログが実際に積み上がった時にLittleFSへ逃げ始めるタイミングだけ(早まる方向)。
+//
+// 値=1(=プール6スロット、108384B)は実機(予備基板、esp32dev/adxl355両env)で
+// setup()冒頭(WiFi/TLS等が何も確保していない時点)でのmalloc()成功を確認済み
+// （その時点のfree_heap=350920, maxblock=114676、確保後はfree_heap=242520,
+// maxblock=110580が残り、WiFi/TLS等に十分な余裕がある）。7スロット(126448B)は
+// 同じ条件でmalloc()がNULLを返すと確認済み(maxblock=114676に対し126448は
+// 収まらない)。この値を上げる時は`pio run -e pool-probe`で実機再検証すること。
+static constexpr uint32_t kMaxRamBatches = 1;
 static constexpr const char* kSpillDir = "/spill";
 
 // --- リアルタイム検知 ---
