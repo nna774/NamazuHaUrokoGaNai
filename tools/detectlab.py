@@ -383,6 +383,18 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show):
             for a in axs:
                 a.axvline(ot, color=color, lw=0.8, alpha=0.6, ls="--")
 
+    def sec_to_clock(x):
+        return [datetime.fromtimestamp(ref_us / 1e6 + v, JST) for v in x]
+
+    top = axs[0].secondary_xaxis(
+        "top",
+        functions=(lambda s: s, lambda s: s),
+    )
+    top.set_xticks(axs[0].get_xticks())
+    top.set_xticklabels([dt.strftime("%H:%M:%S") for dt in sec_to_clock(axs[0].get_xticks())],
+                        fontsize=8)
+    top.set_xlabel("実時刻 [JST]", fontsize=8)
+
     axs[0].axhline(thr, ls="--", color="k", lw=0.8)
     axs[0].set_ylabel("STA/LTA")
     axs[0].set_title(f"STA/LTA比 重ね描き（閾値 {thr:g} 超で検出。回転不変量なので方位較正なしで比較可）",
@@ -394,7 +406,9 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show):
     axs[1].set_ylabel("直線性")
     axs[1].set_title("直線性 重ね描き（1=直線偏光≒地震の実体波 / 0.5前後=等方ノイズ）",
                      fontsize=9, loc="left")
-    xlabel = "t [s]  " + ("（発生時刻からの経過）" if arrivals else "（先頭デバイス窓頭からの経過）")
+    ref_dt = datetime.fromtimestamp(ref_us / 1e6, JST)
+    ref_note = "発生時刻" if arrivals else "先頭デバイス窓頭"
+    xlabel = f"t [s]  （{ref_note} {ref_dt:%Y-%m-%d %H:%M:%S} JST からの経過）"
     axs[1].set_xlabel(xlabel)
 
     for label, e_us, l_us, color in arrivals:
@@ -406,7 +420,8 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show):
                         color=color, ha="center", fontsize=9)
 
     devices_note = ",".join(str(d) for d, *_ in per_device)
-    fig.suptitle(f"detectlab overlay  devices={devices_note}")
+    fig.suptitle(f"detectlab overlay  devices={devices_note}  "
+                 f"{ref_note}={ref_dt:%Y-%m-%d %H:%M:%S} JST")
     fig.tight_layout()
     if out:
         fig.savefig(out, dpi=110)
