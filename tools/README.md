@@ -91,6 +91,49 @@ python promote_event.py --onset "2026-07-28 16:29:00" --dry-run   # 書き込ま
 計測震度）を確認してから実行するのが安全。書き込み系なので api(参照専用)ではなく手元から
 S3/DynamoDB を直接操作する（`flag_event.py` と同じ思想）。
 
+## 複数機の傾き・相対方位較正（`calibrate_orientation.py`）
+
+[device_overlay.md](../docs/device_overlay.md) §3.b の実装。据え付け直後に複数機を
+同時に人工加振（机を叩く等）すると、各機がそれをイベントとして記録する。そのイベントIDを
+渡すと、静穏区間の重力DCから**傾き**、タップ直後の水平粒子運動の主軸フィットから
+**相対方位**（基準機に対してどれだけ回っているか）を出す。
+
+```bash
+export NAMZ_EVENTS_TABLE=namazu-events
+export NAMZ_DEVICES_TABLE=namazu-devices
+
+# 表示のみ（書き込みなし）。基準機は既定で最小のdevice_id
+python calibrate_orientation.py 0001-59541742 0002-59541742
+
+# namazu-devices に書き込む（確認プロンプトあり。-y で省略）
+python calibrate_orientation.py 0001-59541742 0002-59541742 --write
+```
+
+出力例:
+
+```
+基準デバイス: 0001
+
+device   tilt_deg  azimuth_deg  coherence   lag_ms  event
+000001      0.854        0.000      (ref)        -  0001-59541742
+000002      0.472       -7.889      0.981      -26  0002-59541742
+```
+
+- `tilt_deg` は各機独立（重力DCだけで決まる。相手の機体は不要）。
+- `azimuth_deg` は基準機に対する相対値。基準機自身は定義上0。
+- `coherence`（0〜1）はタップ波形の回転フィットの当てはまり具合。**0.7未満は警告が出る**
+  （タップが弱い／2機が剛結できていない疑い）。実測（2026-08-09、机を叩くテスト）では
+  タップ直後±0.2〜0.5秒の窓に絞ると0.98まで上がった（反響が乗る前の初動が最も素直）。
+- `lag_ms` は両機の検出onset時刻の差（クロック・検出アルゴリズムの違い。方位の値自体には
+  影響しない診断用の値）。
+- `--write` で書き込むのは `tilt_up`（raw sensor frameでの重力方向、単位ベクトル）・
+  `tilt_deg`・`azimuth_deg`・`calibration_ref_device`・`calibrated_at_us`・
+  `calibration_events`（使ったイベントIDのCSV）。**毎回全体を上書きする**ので、
+  据え付けを直したりデータが増えたりしたら同じコマンドを新しいイベントIDで叩けばよい。
+- 3台以上を同時に叩いた場合はイベントIDを並べるだけでよい（全機が `--ref` に揃う）。
+- 前提: 各イベントが `events/<id>/` に永久保存されていること（`waveform_prefix` が
+  DynamoDBに記録されている。確定イベントなら detect Lambda が自動でやる）。
+
 ## ノイズに埋もれた小地震の炙り出し（`detectlab.py`）
 
 時間波形1本では環境ノイズ（足音・ファン・交通）のRMSに埋もれて見えない弱い揺れを、

@@ -143,11 +143,20 @@ DC で決まるが、**水平面内の回転1自由度（方位）は決まら�
   （[tools/detectlab.py](../tools/detectlab.py) の `--eew`）なので、各機の「北ズレ」が
   **絶対値で**決まる。
 - **できること**: N/E/UD に回して符号付きで重ねられる。多点化した時の本筋はこれ。
-- **実装**: 一度決めたら `namazu-devices`（[lambda/common/devices.py](../lambda/common/devices.py)）に
-  `azimuth_deg` と傾きを持たせて恒久化する。
-- **現時点の判断**: **2号機の据え付けが仮**なので、本据え付け
-  （[adxl355.md](adxl355.md) §7）を通してからやる。仮置きのまま較正しても据え付け直しで
-  無効になる。方位も傾きも据え付けで変わる量である以上、これは動かせない前提だ。
+- **実装済み(2026-08-09)**: [tools/calibrate_orientation.py](../tools/calibrate_orientation.py)。
+  複数機を同時に人工加振したイベントIDを渡すと、静穏区間の重力DCから傾き、タップ直後の
+  水平粒子運動の主軸フィット(ラグ探索つきProcrustes回転)から基準機への相対方位を出し、
+  `--write` で `namazu-devices`（[lambda/common/device_meta.py](../lambda/common/device_meta.py)）に
+  `tilt_up`（raw sensor frameでの重力方向、単位ベクトル）・`tilt_deg`・`azimuth_deg`
+  （基準機は定義上0）・`calibration_ref_device`・`calibrated_at_us`・`calibration_events`
+  を書く。毎回全体を上書きするので、据え付け直しやデータ追加のたびに叩き直せる
+  （詳細は [tools/README.md](../tools/README.md#複数機の傾き相対方位較正calibrate_orientationpy)）。
+- **1号機・2号機の実測(2026-08-09、机を叩くテスト)**: 傾き 1号機0.85°／2号機0.47°
+  （どちらもほぼ水平）、相対方位 2号機を-7.9°回すと1号機に一致（タップ直後±0.2〜0.5秒の
+  窓でコヒーレンス0.98）。両機は据え付け時にほぼ同じ向きに揃えられていたことになる。
+- **まだ絶対方位(真の北)は決まっていない**。ここで決まるのは機体間の相対値だけ。
+  絶対方位が要る時（N/E表示等）は実イベントのP波初動を使う（このセクション冒頭の
+  「実イベント」参照）。
 
 ### c. 震度で比べる（姿勢問題を回避する）
 
@@ -187,5 +196,7 @@ DC で決まるが、**水平面内の回転1自由度（方位）は決まら�
 
 - 震度ビューの計算をどこでやるか（api Lambda で連続震度を返す / ダッシュボード側で計算）。
   60秒窓の移動計算を毎回サーバでやると S3 スキャンが増える。
-- 方位較正の主軸推定を何で書くか（`tools/` の較正スクリプト → `namazu-devices` へ書き込み）。
-  書き込み系は api を通さない方針（[CLAUDE.md](../CLAUDE.md)）なので `tools/` 側になる。
+- `namazu-devices` に書いた `tilt_up`/`azimuth_deg` をダッシュボード側でどう使うか
+  （a: 方位不変モードの表示、b: N/E/UDでの重ね描き）はまだ未着手。較正値自体は
+  [tools/calibrate_orientation.py](../tools/calibrate_orientation.py) で書けるようになった
+  （上の §3.b 参照）。
