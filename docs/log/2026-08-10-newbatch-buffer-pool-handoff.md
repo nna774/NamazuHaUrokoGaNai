@@ -121,3 +121,95 @@ deleteをやめる」を文字通り実装すると`Uploader::enqueue(Batch*)`�
 「所有権契約を変えない」実装方針の妥当性を相互確認できた。次にやるべきことは
 プールのスロット数見積もりと`external-buffer-batch`ブランチでの実装そのもの
 （着手はユーザー判断待ち）。
+
+## 続報: batch-uplink側を実装し、DRAM予算の壁に当たった（同日）
+
+### 実装したこと
+
+- `batch-uplink`の`external-buffer-batch`ブランチに、上で固めたドラフト通り
+  `Batch`の外部バッファ+解放コールバック版コンストラクタを実装した
+  （`Batch::ReleaseFn`は生の関数ポインタ+`void*`。`std::function`はキャプチャ付き
+  ラムダが内部でヒープを取りうるため不採用）。ホストg++のテスト(`test/run.sh`)に
+  外部バッファ版のケースを追加、既存分と合わせて0 failure。
+  [batch-uplink PR #13](https://github.com/nna774/batch-uplink/pull/13)を作成し、
+  マージ前提で`v2.4.0`タグを先行して切った（v2.1.0/v2.2.0の前例と同じやり方）。
+- Namaz側(`firmware/`)に、起動時に静的配列+`QueueHandle_t`で組んだ固定バッファ
+  プール(`sBatchPool`/`gBufferPool`/`newPooledBatch()`)を実装し、
+  `samplingTask`の`namzwire::newBatch()`呼び出しを差し替えた。プールが尽きた時は
+  素朴なmalloc版へフォールバックする安全策も入れた。`platformio.ini`・
+  `terraform/build_lambda.sh`のpinはv2.4.0へ揃えた（ついでに気づいた、
+  v2.2.0→v2.3.0のfirmware側だけの先行bumpでterraform側が置き去りになっていた
+  drift も今回のv2.4.0で解消した）。
+
+### DRAM予算が理論値よりずっと小さいと判明
+
+同時生存数の理論上限（組み立て中1+`gBatchQueue`深さ4+`kMaxRamBatches`、
+esp32dev機で7本≒126KB）ぶんを静的確保しようとしたところ、リンカが
+`region 'dram0_0_seg' overflowed by 107984 bytes`で即死した。
+
+原因を実測した。`xtensa-esp32-elf-size -A firmware.elf`でプール追加前の
+`.dram0.data`(25772B)+`.dram0.bss`(80328B)=106100Bと、オーバーフロー量から
+逆算すると、**`dram0_0_seg`（`malloc()`が実際に使うMALLOC_CAP_8BIT領域。
+IRAM分は含まない）の総容量は約124.5KiB、うち既存firmwareが約106KBを既に
+静的に使っており、残り約18.5KBしか無い**と分かった。
+
+これは前回引き継いだ実測（`ESP.getMaxAllocHeap()`のMALLOC_CAP_INTERNAL基準
+45044と実際の`malloc()`が使えるMALLOC_CAP_8BIT基準17396の乖離）を裏付ける
+形になった——実行時に報告される`heap_free`(78240等)はIRAMの余りをヒープに
+転用した分まで合算した数字で、`malloc()`が本当に使える8bitアクセス可能な
+DRAMだけで見ると、そもそも数十KB規模の予算しか無い。18KBのバッチバッファは
+その予算の大部分を最初から占める。
+
+**複数本ぶんの静的プールは、このハードのDRAM予算では原理的に不可能**と
+実測で確定した。試しにプールを1本(≒18KB)だけに絞ったところビルドは通ったが
+（`.dram0.bss`が98400Bまで増え、残り約392バイトしか無いところまで使い切る）、
+バックログが`gBatchQueue`/`Uploader.ram_`へ積み上がる局面（＝元の`newBatch()`
+失敗が実際に起きた局面）ではプールが即座に枯渇しmallocへフォールバックする
+ため、**本命の障害は救えない**。平常運転時のmalloc/free頻度を下げる程度の
+効果しか無く、他の用途に残るDRAM余白をほぼ食い潰すコストに見合うかは疑問。
+
+### PSRAMは無いと実機で確定した
+
+ユーザーから「部品を足せば使えるか」と聞かれたが、PSRAMはWROVER系モジュールが
+製造時にESP32ダイと専用SPI配線（GPIO16/17相当、信号品質が要る高速配線）を
+同じ缶の中で結線しているもので、**組み立て済みのWROOM系基板へ後から
+ジャンパ線で足せる部品ではない**。載せ替えるなら基板ごと（WROVER搭載の
+別ボード）が必要になる。
+
+念のため実機でも確認した。`psramInit()`/`psramFound()`/`ESP.getPsramSize()`を
+呼ぶだけの使い捨てビルド(`firmware/src/psram_probe_main.cpp`、
+`platformio.ini`の`[env:psram-probe]`)を作り、本番機と同型の予備基板
+（USBで接続、`/dev/cu.usbserial-5B320272871`）に書き込んで実測した。
+このプロジェクトが使っている`esp32dev`ボードのSDK(`qio_qspi`等)は
+`CONFIG_SPIRAM=1`で常にビルドされている（`tools/sdk/esp32/qio_qspi/include/
+sdkconfig.h`で確認、`CONFIG_SPIRAM_BOOT_INIT`も未定義なので`psramInit()`は
+スタブではなく実際にSPIで話しかける実装が動く）ため、特別なボード設定変更は
+不要だった。結果:
+
+```
+[psram-probe] psramInit() -> 0
+[psram-probe] psramFound() -> 0
+[psram-probe] ESP.getPsramSize() -> 0 bytes
+```
+
+**PSRAM無し、確定。** この診断ビルド(`env:psram-probe`)はコミットに残す
+（今後別の予備基板やハード更新を検討する時に再利用できる）。
+
+### 未決着のまま持ち帰り
+
+複数本ぶんの静的プールが不可能・PSRAMも無いと分かった今、選択肢は3つ:
+
+1. **design.mdの予備案（mbedTLSの確保専用固定プール化）へ切り替える。**
+   `mbedtls_platform_set_calloc_free()`でTLSハンドシェイクの一時確保を
+   専用プールへ差し替える——`Batch`のバッファ自体はmallocのまま。断片化の
+   発生源をTLS側と見て、そちらを直接塞む方向
+2. 1スロットだけの中途半端なプールで妥協する。残りDRAM余白をほぼ食い潰す
+   割に、今回問題になったバックログ局面では効かない
+3. プール化自体を諦め、`newBatch()`失敗時の次サンプル再試行（今の挙動、
+   一度は自然回復した実績がある）に任せる
+
+**まだ決めていない。** `batch-uplink`側の外部バッファ機能(PR #13)は
+選択肢2でのみ使うので、1か3を選ぶなら実装済みだが未使用のまま残る形になる
+（マージ判断も含めて保留）。firmware側のプール実装(`kBatchPoolSlots=1`の
+暫定値)・`kMaxRamBatches=2`への変更は、この判断が決まるまでコミットに
+残すが**まだ実機投入しない**。

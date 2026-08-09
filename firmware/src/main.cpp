@@ -52,10 +52,15 @@ static SPIClass gSpi(VSPI);
 static constexpr int kPinCsSensor = kPinCsAdxl355;
 static constexpr const char* kSensorName = "ADXL355";
 static Adxl355 gSensor(gSpi, kPinCsSensor, kSpiClockHz);
+// バッチバッファプールのスロットサイズを起動前（静的配列）に決めるための複製。
+// Adxl355::sampleFormat()(=1, int32)と対応。食い違いはsetup()の実行時チェックで検知する。
+static constexpr size_t kBatchRecordBytes = 3 * sizeof(int32_t);
 #else
 static constexpr int kPinCsSensor = kPinCsIis3dhhc;
 static constexpr const char* kSensorName = "IIS3DHHC";
 static Iis3dhhc gSensor(gSpi, kPinCsSensor, kSpiClockHz);
+// Iis3dhhc::sampleFormat()(=0, int16)と対応。
+static constexpr size_t kBatchRecordBytes = 3 * sizeof(int16_t);
 #endif
 static Shindo gShindo;
 static Display gDisplay;
@@ -165,8 +170,52 @@ struct AlertMsg {
   float peak;
 };
 
+static constexpr size_t kBatchQueueDepth = 4;  // xQueueCreate()に渡す実際の深さと揃える
 static QueueHandle_t gBatchQueue;  // Batch*
 static QueueHandle_t gAlertQueue;  // AlertMsg
+
+// --- バッチバッファの固定プール ---
+// namzwire::newBatch()(=Batchの内部malloc)を毎バッチ回すと、長時間稼働で
+// ヒープ断片化を起こしうる。実機でESP.getMaxAllocHeap()(MALLOC_CAP_INTERNAL基準)が
+// malloc()の実際の要求(MALLOC_CAP_8BIT基準)を過大報告し、ヒープに余裕があるように
+// 見えるのにnewBatch()が失敗する現象を観測した
+// (docs/log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md §11)。
+// 【実験中・暫定値】同時生存数の理論上限「組み立て中(1) + gBatchQueueの深さ(4)
+// + kMaxRamBatches」ぶん(esp32devで7本≒126KB)を静的確保しようとしたら、
+// dram0_0_seg(malloc()が実際に使うMALLOC_CAP_8BIT領域、8bitアクセス可能な
+// DRAMのみ。IRAM分は含まれない)がリンク時に約108KBオーバーフローした。
+// 実測でこのチップのdram0_0_seg空き余地は約18.5KBしか無いと判明
+// (docs/log/2026-08-10-newbatch-buffer-pool-handoff.md)。ひとまず1本
+// (=組み立て中の分だけ)に絞って挙動を見る。バックログが`gBatchQueue`/
+// `Uploader.ram_`へ積み上がる局面ではプールが即座に枯渇しmallocへ
+// フォールバックする(=元のnewBatch()失敗が起きうる局面はまだ救えない)。
+static constexpr size_t kBatchPoolSlots = 1;
+static constexpr size_t kBatchBufferBytes =
+    kWireHeaderSize + kBatchSamples * kBatchRecordBytes + namzwire::kMaxTrailerBytes;
+static uint8_t sBatchPool[kBatchPoolSlots][kBatchBufferBytes];
+static QueueHandle_t gBufferPool;  // uint8_t*（sBatchPoolの各行の先頭を積む）
+
+static void releaseBatchBufferToPool(void* ctx, uint8_t* buf) {
+  xQueueSendToBack(static_cast<QueueHandle_t>(ctx), &buf, 0);
+}
+
+// namzwire::newBatch()相当だが、プールから借りる版。プールが尽きた場合
+// (kBatchPoolSlotsの見積もりが崩れた時の保険。想定運転では起きないはず)は
+// 素朴なmalloc版へフォールバックする。
+static Batch* newPooledBatch(uint32_t capacitySamples, uint8_t sampleFormat) {
+  uint8_t* buf = nullptr;
+  if (xQueueReceive(gBufferPool, &buf, 0) != pdTRUE) {
+    static bool sPoolExhaustedLogged = false;
+    if (!sPoolExhaustedLogged) {
+      sPoolExhaustedLogged = true;
+      Serial.println("[pool] buffer pool exhausted, falling back to malloc (sizing bug?)");
+    }
+    return namzwire::newBatch(capacitySamples, sampleFormat);
+  }
+  return new Batch(buf, kBatchBufferBytes, capacitySamples, namzwire::sampleBytes(sampleFormat),
+                    kWireHeaderSize, namzwire::kMaxTrailerBytes,
+                    releaseBatchBufferToPool, gBufferPool);
+}
 
 static char gOtaHostname[16];  // "namazu-<id>"
 #endif
@@ -245,7 +294,7 @@ static void samplingTask(void*) {
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
       static bool sNewBatchFailing = false;
-      cur = namzwire::newBatch(kBatchSamples, gSensor.sampleFormat());
+      cur = newPooledBatch(kBatchSamples, gSensor.sampleFormat());
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
         if (!sNewBatchFailing) {
           sNewBatchFailing = true;
@@ -649,8 +698,28 @@ void setup() {
     }
   }
 
-  gBatchQueue = xQueueCreate(4, sizeof(Batch*));
+  gBatchQueue = xQueueCreate(kBatchQueueDepth, sizeof(Batch*));
   gAlertQueue = xQueueCreate(4, sizeof(AlertMsg));
+
+  // kBatchRecordBytes(コンパイル時の複製)がgSensor.sampleFormat()の実際の値と
+  // 食い違うと、プールのスロットが小さすぎる/大きすぎるまま静的確保されてしまう。
+  // 小さすぎる場合はBatchの借用コンストラクタがinvalidを返し続け実質プール無効化、
+  // 大きすぎる場合はRAMの無駄遣いで済むが、どちらも気付けるようにログだけ出す。
+  if (namzwire::sampleBytes(gSensor.sampleFormat()) != kBatchRecordBytes) {
+    Serial.printf(
+        "[pool] BUG: kBatchRecordBytes=%u but sampleFormat()->%u bytes. buffer pool "
+        "sizing is wrong.\n",
+        (unsigned)kBatchRecordBytes, (unsigned)namzwire::sampleBytes(gSensor.sampleFormat()));
+  }
+  gBufferPool = xQueueCreate(kBatchPoolSlots, sizeof(uint8_t*));
+  for (size_t i = 0; i < kBatchPoolSlots; ++i) {
+    uint8_t* slot = sBatchPool[i];
+    xQueueSendToBack(gBufferPool, &slot, 0);
+  }
+  Serial.printf("[pool] batch buffer pool: %u slots x %u B = %u B\n",
+                (unsigned)kBatchPoolSlots, (unsigned)kBatchBufferBytes,
+                (unsigned)(kBatchPoolSlots * kBatchBufferBytes));
+
   connectWifi();
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
@@ -681,9 +750,8 @@ void setup() {
 
   // バッチ1本のRAM量はセンサのサンプル幅で倍違う（int16 18KB / int32 36KB）。
   // kMaxRamBatches が実機のヒープに収まっているかを起動時に見えるようにしておく。
-  Serial.printf("[mem] free heap %u maxblock %u, batch %u B x %u\n",
-                ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
-                (unsigned)(kBatchSamples * (gSensor.sampleFormat() == 1 ? 12 : 6)),
+  Serial.printf("[mem] free heap %u maxblock %u, batch %u B x %u\n", ESP.getFreeHeap(),
+                ESP.getMaxAllocHeap(), (unsigned)(kBatchSamples * kBatchRecordBytes),
                 (unsigned)kMaxRamBatches);
 
   // 測定タスクは Core1 に高優先度で固定

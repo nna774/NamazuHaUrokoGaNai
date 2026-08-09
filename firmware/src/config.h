@@ -32,15 +32,20 @@ static constexpr uint32_t kBatchSamples = kSampleRateHz * kBatchSeconds;
 
 // --- 送信キュー / ローカルバッファ ---
 // RAM上に保持する未送信バッチ数。これを超えたら LittleFS へ退避する。
-// ADXL355 は 18KB/本(15秒×12B)で int16 機と同じ重さだが、本数は少なめにしておく。
 // WiFi断からの復旧時、溜まったバッチを抱えたまま TLS ハンドシェイクをやることになる
 // ため、ここを高くすると復旧できないまま詰まる。溢れたぶんは LittleFS へ逃げるので
 // データは落ちない。
-#ifdef NAMZ_SENSOR_ADXL355
-static constexpr uint32_t kMaxRamBatches = 3;
-#else
-static constexpr uint32_t kMaxRamBatches = 6;
-#endif
+//
+// この値は main.cpp の固定バッファプール(kBatchPoolSlots = 組み立て中1本 +
+// gBatchQueue深さ4 + ここ)のサイズも決める——プールは静的配列で全スロットぶん
+// 前もって確保するため、ここを上げるとRAM静的消費が直接その分増える
+// （1本18KB強、両センサとも同じ重さ）。平常運転では ram_ がここまで埋まる
+// ことはほぼ無い(Uploader::pump()が毎ループ即座に送ろうとするため)ので、
+// 引き上げてもflash書き込み頻度は増えない——増えるのはバックログが実際に
+// 積み上がった時にLittleFSへ逃げ始めるタイミングだけ(早まる方向)。
+// 実機のRAM予算はheapテレメトリ(X-Namz-Heap-Free、CloudWatch)で見て
+// 調整すること。詳細はdocs/log/2026-08-10-newbatch-buffer-pool-handoff.md。
+static constexpr uint32_t kMaxRamBatches = 2;
 static constexpr const char* kSpillDir = "/spill";
 
 // --- リアルタイム検知 ---
