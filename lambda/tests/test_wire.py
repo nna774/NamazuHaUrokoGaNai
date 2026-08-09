@@ -108,13 +108,21 @@ def test_adxl355_temp_intercept_is_not_the_adxl359_value():
     assert wire.ADXL355_TEMP_AT_25C == 1885.0
 
 
-def test_temp_c_for_only_adxl355():
+def test_iis3dhhc_temp_conversion():
+    # raw=0 が基準点で25℃（データシート DS12084 の公式換算式 raw/16+25）。
+    assert wire.iis3dhhc_temp_c(0) == pytest.approx(25.0)
+    assert wire.iis3dhhc_temp_c(16) == pytest.approx(26.0)
+    # raw は符号付き16bitのビット列をuint16のまま運ぶ。負値（0x8000超）も符号拡張して扱う。
+    assert wire.iis3dhhc_temp_c(0x10000 - 16) == pytest.approx(24.0)
+
+
+def test_temp_c_for_adxl355_and_iis3dhhc():
     assert wire.temp_c_for(wire.SENSOR_TYPE_ADXL355, 1900) == pytest.approx(wire.adxl355_temp_c(1900))
-    assert wire.temp_c_for(wire.SENSOR_TYPE_IIS3DHHC, 1900) is None
+    assert wire.temp_c_for(wire.SENSOR_TYPE_IIS3DHHC, 1900) == pytest.approx(wire.iis3dhhc_temp_c(1900))
     assert wire.temp_c_for(wire.SENSOR_TYPE_ADXL355, None) is None
 
 
-def test_temp_c_only_for_adxl355():
+def test_temp_c_for_adxl355_and_iis3dhhc_via_meta():
     meta_adxl = wire.parse(build_batch(
         version=2, sensor_type=wire.SENSOR_TYPE_ADXL355,
         trailer=tlv(wire.TRAILER_SENSOR_TEMP, struct.pack("<H", 1900)))).meta
@@ -123,7 +131,7 @@ def test_temp_c_only_for_adxl355():
     meta_iis = wire.parse(build_batch(
         version=2, sensor_type=wire.SENSOR_TYPE_IIS3DHHC,
         trailer=tlv(wire.TRAILER_SENSOR_TEMP, struct.pack("<H", 1900)))).meta
-    assert wire.temp_c(meta_iis) is None  # IIS3DHHCは換算式を持たない(そもそも積まない想定)
+    assert wire.temp_c(meta_iis) == pytest.approx(wire.iis3dhhc_temp_c(1900))
 
 
 def test_temp_c_none_without_trailer():

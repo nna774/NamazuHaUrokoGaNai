@@ -52,15 +52,29 @@ def adxl355_temp_c(raw: int) -> float:
     return 25.0 + (raw - ADXL355_TEMP_AT_25C) / ADXL355_TEMP_LSB_PER_DEGC
 
 
+# IIS3DHHC の内蔵温度（データシート DS12084、OUT_TEMP_L/H）。
+# 換算式: 温度[℃] = raw/16 + 25（公式ドライバ iis3dhhc_from_lsb_to_celsius() と同じ）。
+# raw は符号付き16bitだが、ファームはビット列のままuint16として送る
+# （firmware/lib/Iis3dhhc/Iis3dhhc.cpp参照）ので、ここで符号拡張してから使う。
+def iis3dhhc_temp_c(raw: int) -> float:
+    """IIS3DHHC の温度生値を℃へ。"""
+    signed = raw - 0x10000 if raw >= 0x8000 else raw
+    return signed / 16.0 + 25.0
+
+
 def temp_c_for(sensor_type: int, raw: int | None) -> float | None:
     """(sensor_type, 生値) から℃へ。換算式が無いセンサ種別や生値が無ければ None。
 
     `common.device_temp` に記録した DynamoDB アイテムのように、BatchMeta を経由
     しない場所（既に raw/sensor_type だけが手元にある場所）から呼ぶための実体。
     """
-    if raw is None or sensor_type != SENSOR_TYPE_ADXL355:
+    if raw is None:
         return None
-    return adxl355_temp_c(raw)
+    if sensor_type == SENSOR_TYPE_ADXL355:
+        return adxl355_temp_c(raw)
+    if sensor_type == SENSOR_TYPE_IIS3DHHC:
+        return iis3dhhc_temp_c(raw)
+    return None
 
 
 def temp_c(meta: BatchMeta) -> float | None:

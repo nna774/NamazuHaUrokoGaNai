@@ -22,6 +22,7 @@ class Iis3dhhc : public AccelSensor {
   float scaleMgPerLsb() const override { return 0.076f; }
   uint8_t sensorType() const override { return 0; /* kSensorIis3dhhc */ }
   uint8_t sampleFormat() const override { return 0; /* int16 */ }
+  bool readTemperatureRaw(uint16_t& out) override;
 
   uint8_t whoAmI();
 
@@ -30,6 +31,7 @@ class Iis3dhhc : public AccelSensor {
   static constexpr uint8_t kWhoAmI = 0x0F;
   static constexpr uint8_t kWhoAmIValue = 0x11;
   static constexpr uint8_t kCtrlReg1 = 0x20;
+  static constexpr uint8_t kOutTempL = 0x25;  // OUT_TEMP_L/H, IF_ADD_INCで連続読み可
   static constexpr uint8_t kOutXL = 0x28;
   static constexpr uint8_t kReadBit = 0x80;
 
