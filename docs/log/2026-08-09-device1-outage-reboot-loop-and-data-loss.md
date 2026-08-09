@@ -242,10 +242,63 @@ newBatch invalid, retrying next sample heap_free=78520 maxblock=45044 t=15407816
 一般ヒープには余裕があるように見えても、特定の種類のメモリだけ枯渇している
 のかもしれない。**未解明、調査継続中。**
 
+### 11. `newBatch()`失敗の正体を実測で特定: `MALLOC_CAP_INTERNAL`と`MALLOC_CAP_8BIT`の乖離
+
+`config.h`に既に前例があった。ADXL355機のバッチ長を半分にした理由として
+「mbedTLSのハンドシェイクがBIGNUM確保に失敗した（実機で`BIGNUM - Memory
+allocation failed`）」というコメントが残っている。TLSハンドシェイクは
+大きな一時バッファを確保・解放するので、接続失敗を繰り返す＝まさに障害中に
+ヒープが断片化する、という前例と同じ筋がここでも疑わしい。
+
+`ESP.getMaxAllocHeap()`は内部で`heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)`
+を呼んでいる（`Esp.cpp`で確認済み）。一方`Batch`のバッファは素の`malloc()`——
+実際に要求しているcapabilityは`MALLOC_CAP_8BIT`のはず。ESP32の内蔵RAMは
+8bitアクセス可能なDRAM/D-IRAMと、32bit単位でしかアクセスできないIRAM専用
+領域が混在するため、**`INTERNAL`基準の最大空きブロックは、`malloc()`が実際に
+使える`8BIT`基準の最大空きブロックより大きく見えることがありうる**、という
+仮説を立てた。
+
+検証のため`main.cpp`の`newBatch invalid`ログに
+`heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)`を並べて出すよう
+計装を追加（`#include <esp_heap_caps.h>`）し、再ビルド・再フラッシュして
+同じ手順（正常運転を数サイクル確認→ルーターで全断）で再試験した。
+
+```
+[loop-debug] newBatch invalid, retrying next sample heap_free=78240 maxblock_internal=45044 maxblock_8bit=17396 t=523314067
+```
+
+**確定した。** `maxblock_internal`(45044)は必要な18038バイトの倍以上あるのに、
+`maxblock_8bit`(17396)は**18038に対して642バイトだけ足りない**。
+`ESP.getMaxAllocHeap()`は`malloc()`が実際に使える量を2.6倍近く過大報告して
+おり、これが「ヒープに余裕があるように見えるのに`newBatch()`が失敗する」の
+直接の原因だった。断片化そのものの発生源（mbedTLSの一時確保か、他の要因か）
+は未特定だが、**症状の正体は理論ではなく実測で切り分けられた。**
+
+なお同じ再試験の前半で、ネットワークを切ったまま起動した場合に
+`samplingTask`側のログが一切出ない（バッチが全く作られない）という
+別の混乱があった。これはバグではなく、`timesync::isSynced()`(=SNTP同期)が
+ネット無しでは完了せず、`samplingTask`が同期待ちで`continue`し続けるだけ
+という想定通りの挙動だった（`TimeSync.cpp`は`esp_sntp`そのもの）。
+ネットを戻すとSNTPが同期し、バッチ形成が正常に再開することを確認した。
+
+対策の方向性として、`Batch`のバッファを毎回`malloc`/`delete`するのではなく
+固定サイズのバッファを静的に確保して使い回す案を検討した。`Uploader`は
+バッチの所有権を受け取り自身で`delete`する契約（`enqueue()`のコメントに
+明記）なので、素朴に「使い回す」だけだと解放タイミングで衝突する。
+`Batch`に外部バッファ用コンストラクタと解放コールバック(`onRelease`)を
+追加し、**ラッパーオブジェクト自体の`new`/`delete`はUploader側そのまま
+（所有権の契約は変えない）にしつつ、内部の生バッファだけプールへ返す**
+設計まで固めたが、**実装はまだ行っていない**（batch-uplinkに新ブランチ
+`external-buffer-batch`を作っただけで、コミットはゼロ）。次にやるなら
+そこから。
+
 ## 次に考えないといけないこと
 
-- **`namzwire::newBatch()`が何を要求していて何が枯渇しているのか**（heap
-  capability、あるいは別の要因）を特定する。現在の最優先課題
+- **`newBatch()`失敗の直接原因(`MALLOC_CAP_INTERNAL`と`8BIT`の乖離)は特定できた。**
+  次は対策の実装——`Batch`に外部バッファ+解放コールバックを追加し、
+  `samplingTask`側に固定バッファプールを持たせる案を設計済み（batch-uplink
+  `external-buffer-batch`ブランチ、コミットはまだ無し）。RAM予算（プールの
+  スロット数）の検討も未了
 - 本命の「無期限無応答・パニック無し」ハングは意図的な全断では再現できなかった
   （全断は`TASK_WDT`で自己回復するとわかった）。次に自然発生した時に備え、
   デバッグ計装は既定有効のまま残す

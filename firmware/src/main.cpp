@@ -12,6 +12,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
@@ -243,20 +244,30 @@ static void samplingTask(void*) {
 
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
+      static bool sNewBatchFailing = false;
       cur = namzwire::newBatch(kBatchSamples, gSensor.sampleFormat());
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
-        static bool sNewBatchFailing = false;
         if (!sNewBatchFailing) {
           sNewBatchFailing = true;
+          // ESP.getMaxAllocHeap()はMALLOC_CAP_INTERNAL基準。malloc()（Batchの内部で
+          // 使っている）が実際に要求するのはMALLOC_CAP_8BIT。内蔵RAMには8BIT不可な
+          // 領域(IRAM専用部分)も含まれるので、両者が食い違えば「INTERNAL基準では
+          // 空きがあるのにmalloc()が失敗する」という現象の説明になる。実測で切り分ける。
           LOOP_DEBUG_LOG(
-              "[loop-debug] newBatch invalid, retrying next sample heap_free=%u maxblock=%u "
-              "t=%lld\n",
+              "[loop-debug] newBatch invalid, retrying next sample heap_free=%u maxblock_internal=%u "
+              "maxblock_8bit=%u t=%lld\n",
               (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
               (long long)esp_timer_get_time());
         }
         delete cur;
         cur = nullptr;
       } else {
+        if (sNewBatchFailing) {
+          sNewBatchFailing = false;
+          LOOP_DEBUG_LOG("[loop-debug] newBatch recovered t=%lld\n",
+                          (long long)esp_timer_get_time());
+        }
         cur->begin(ts);
         // 温度はバッチ先頭の1点だけ載せる。架台の熱ドリフトは分〜時間の時定数で
         // 動くので、30秒に1点あれば傾きは追える。
