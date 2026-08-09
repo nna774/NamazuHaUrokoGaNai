@@ -192,11 +192,18 @@ DC で決まるが、**水平面内の回転1自由度（方位）は決まら�
 - 波形の組み立ては device_id で絞る（[intensity_pitfalls.md](intensity_pitfalls.md) の
   混在事故）。重ね描きは「1本に連結」ではなく「2本を別系列として描く」こと。
 
+## ダッシュボードでの利用（実装済み・2026-08-09）
+
+ライブ画面の「1分」表示限定で、較正済み（`tilt_up` 書き込み済み）の機を2台以上チェックすると
+b方式（回転済みの水平2軸）で重ね描きするモードを追加した
+（[dashboard/README.md](../dashboard/README.md#重ね表示（ライブ・1分限定）) 参照）。
+api の `/devices` が `tilt_up`/`tilt_deg`/`azimuth_deg`/`calibration_ref_device` を返し、
+UD・回転後のh1/h2への変換・サンプルクロック独立への対応（共通グリッドへの線形補間）は
+すべてクライアント側（`dashboard/app.js`）で行う（震度概算と同じ設計、追加のAPIは無い）。
+選んだ機の `calibration_ref_device` が食い違う組み合わせは重ねられないのでエラー表示にする。
+
 ## 未決事項
 
 - 震度ビューの計算をどこでやるか（api Lambda で連続震度を返す / ダッシュボード側で計算）。
-  60秒窓の移動計算を毎回サーバでやると S3 スキャンが増える。
-- `namazu-devices` に書いた `tilt_up`/`azimuth_deg` をダッシュボード側でどう使うか
-  （a: 方位不変モードの表示、b: N/E/UDでの重ね描き）はまだ未着手。較正値自体は
-  [tools/calibrate_orientation.py](../tools/calibrate_orientation.py) で書けるようになった
-  （上の §3.b 参照）。
+  60秒窓の移動計算を毎回サーバでやると S3 スキャンが増える（§3-c、まだ未着手）。
+- a方式（方位不変・UD+H合成、符号を失う）はまだ未実装。今回実装したのはbのみ。

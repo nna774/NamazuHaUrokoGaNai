@@ -439,6 +439,201 @@ function computeIntensity(x, y, z, fs) {
   return { intensity, scale: intensityScale(intensity), a0 };
 }
 
+// --- 重ね表示（「1分」ライブ限定。tools/calibrate_orientation.py --write が
+// namazu-devices に書いた傾き(tilt_up)・相対方位(azimuth_deg)で複数機を回転し、
+// UD(鉛直)・H1/H2(回転後の水平2軸)を重ねて描く。docs/device_overlay.md §3.b）。
+const OVERLAY_DEVICE_COLORS = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#e67e22'];
+const OVERLAY_CHANNEL_DASH = { ud: [], h1: [6, 4], h2: [1, 3] };
+
+function meanOf(arr) {
+  return arr.reduce((s, v) => s + v, 0) / (arr.length || 1);
+}
+
+// up(重力方向の単位ベクトル、raw sensor frame)から (h1,h2,up) 基底を作る。
+// tools/calibrate_orientation.py の frame_from_up と同一手順（同じ機体・据え付けなら
+// 常に同じ基底になるので azimuth_deg の意味とズレない）。
+function frameFromUp(up) {
+  const ref = Math.abs(up[0]) > 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const d = ref[0] * up[0] + ref[1] * up[1] + ref[2] * up[2];
+  let h1 = [ref[0] - d * up[0], ref[1] - d * up[1], ref[2] - d * up[2]];
+  const n1 = Math.hypot(h1[0], h1[1], h1[2]);
+  h1 = [h1[0] / n1, h1[1] / n1, h1[2] / n1];
+  const h2 = [
+    up[1] * h1[2] - up[2] * h1[1],
+    up[2] * h1[0] - up[0] * h1[2],
+    up[0] * h1[1] - up[1] * h1[0],
+  ];
+  return { h1, h2, up };
+}
+
+// 生の x/y/z[gal] を UD/h1/h2 へ回転する。窓内平均を重力DC近似として引く
+// （drawWaveform の DC 除去と同じ近似）。cal.azimuthDeg ぶん水平2軸を回して
+// calibration_ref_device の水平基底へ揃える（回転の向きは下のtheta参照）。
+function rotateToChannels(x, y, z, cal) {
+  const { h1, h2, up } = frameFromUp(cal.tiltUp);
+  const n = x.length;
+  const mx = meanOf(x), my = meanOf(y), mz = meanOf(z);
+  const ud = new Float64Array(n), a1 = new Float64Array(n), a2 = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - mx, dy = y[i] - my, dz = z[i] - mz;
+    a1[i] = dx * h1[0] + dy * h1[1] + dz * h1[2];
+    a2[i] = dx * h2[0] + dy * h2[1] + dz * h2[2];
+    ud[i] = dx * up[0] + dy * up[1] + dz * up[2];
+  }
+  // fit_relative_azimuth(tools/calibrate_orientation.py)の実際の向きを確認したところ
+  // v_ref ≈ Rot(-azimuth_deg)・v_other だった（docstringの文言だけでは符号が確定しないため
+  // 実装を合成データで検算して確かめた）。よって -azimuth_deg 分だけ回す。
+  const theta = -(cal.azimuthDeg || 0) * Math.PI / 180;
+  const c = Math.cos(theta), s = Math.sin(theta);
+  const rh1 = new Float64Array(n), rh2 = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    rh1[i] = c * a1[i] - s * a2[i];
+    rh2[i] = s * a1[i] + c * a2[i];
+  }
+  return { ud, h1: rh1, h2: rh2 };
+}
+
+// 複数機の実測時間範囲の共通部分を、代表機(id最小)のサンプル間隔で刻んだ時刻配列を作る。
+// サンプルクロックは機ごとに独立（docs/device_overlay.md 実装メモ）なので、重ねるには
+// 共通グリッドへのリサンプルが要る。重なる範囲が無ければ null。
+function buildOverlayGrid(waveforms, ids) {
+  const base = waveforms[ids[0]];
+  const stepUs = 1e6 / base.fs;
+  let lo = -Infinity, hi = Infinity;
+  for (const id of ids) {
+    const wf = waveforms[id];
+    lo = Math.max(lo, wf.start_us);
+    hi = Math.min(hi, wf.start_us + (wf.n - 1) * (1e6 / wf.fs));
+  }
+  if (!(hi > lo)) return null;
+  const n = Math.max(2, Math.floor((hi - lo) / stepUs) + 1);
+  const t = new Float64Array(n);
+  for (let i = 0; i < n; i++) t[i] = lo + i * stepUs;
+  return t;
+}
+
+// t[] の各時刻における値を、機自身のサンプル列(srcStartUs起点・srcFs間隔)から線形補間する。
+function interpOnto(t, srcStartUs, srcFs, srcArr) {
+  const n = t.length, m = srcArr.length;
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const pos = (t[i] - srcStartUs) / 1e6 * srcFs;
+    const i0 = Math.max(0, Math.min(m - 2, Math.floor(pos)));
+    const f = Math.max(0, Math.min(1, pos - i0));
+    out[i] = srcArr[i0] * (1 - f) + srcArr[i0 + 1] * f;
+  }
+  return out;
+}
+
+// data = { ids, waveforms:{id:wf}, cals:{id:{tiltUp,azimuthDeg,refDevice}} }
+function drawOverlay(cv, data, fixedRange) {
+  const { ctx, w, h } = fitCanvas(cv);
+  ctx.clearRect(0, 0, w, h);
+  const pad = PAD;
+  const plotW = w - pad * 2, plotH = h - pad * 2;
+
+  const t = buildOverlayGrid(data.waveforms, data.ids);
+  if (!t) {
+    ctx.fillStyle = '#888';
+    ctx.fillText('重なる時間範囲が無い', pad, h / 2);
+    return;
+  }
+  const n = t.length;
+
+  const series = {};
+  let lo = Infinity, hi = -Infinity;
+  for (const id of data.ids) {
+    const wf = data.waveforms[id];
+    const ch = rotateToChannels(wf.x, wf.y, wf.z, data.cals[id]);
+    const s = {
+      ud: interpOnto(t, wf.start_us, wf.fs, ch.ud),
+      h1: interpOnto(t, wf.start_us, wf.fs, ch.h1),
+      h2: interpOnto(t, wf.start_us, wf.fs, ch.h2),
+    };
+    series[id] = s;
+    for (const k of ['ud', 'h1', 'h2']) {
+      for (const v of s[k]) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    }
+  }
+
+  const dataPeak = Math.max(Math.abs(lo), Math.abs(hi));
+  let clipped = 0;
+  if (fixedRange > 0) {
+    if (dataPeak > fixedRange) clipped = dataPeak;
+    lo = -fixedRange; hi = fixedRange;
+  } else {
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const margin = (hi - lo) * 0.1 || 1;
+    lo -= margin; hi += margin;
+  }
+  const yr = hi - lo;
+  const X = i => pad + (n <= 1 ? 0 : (i / (n - 1)) * plotW);
+  const Y = v => {
+    const c = Math.max(lo, Math.min(hi, v));
+    return pad + plotH - ((c - lo) / yr) * plotH;
+  };
+
+  ctx.strokeStyle = 'rgba(128,128,128,.35)';
+  ctx.beginPath(); ctx.moveTo(pad, Y(0)); ctx.lineTo(w - pad, Y(0)); ctx.stroke();
+  ctx.fillStyle = '#888'; ctx.font = '11px system-ui';
+  ctx.fillText(hi.toFixed(2), 2, Y(hi) + 4);
+  ctx.fillText(lo.toFixed(2), 2, Y(lo) + 4);
+
+  if (clipped) {
+    ctx.fillStyle = '#e67e22';
+    ctx.textAlign = 'right';
+    ctx.fillText(`レンジ外 実測±${clipped.toFixed(0)} gal`, w - pad, pad + 28);
+    ctx.textAlign = 'left';
+  }
+
+  data.ids.forEach((id, idx) => {
+    ctx.strokeStyle = OVERLAY_DEVICE_COLORS[idx % OVERLAY_DEVICE_COLORS.length];
+    for (const k of ['ud', 'h1', 'h2']) {
+      ctx.setLineDash(OVERLAY_CHANNEL_DASH[k]);
+      ctx.lineWidth = k === 'ud' ? 1.6 : 1;
+      ctx.beginPath();
+      series[id][k].forEach((v, i) => { const x = X(i), y = Y(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+  });
+  ctx.setLineDash([]);
+
+  // 凡例は機の色のみ（UD実線/H1破線/H2点線の意味は下の説明文に出す。線6本ぶんの
+  // テキストを並べると凡例だけで幅を食うため）。
+  ctx.font = '12px system-ui';
+  let lx = w - pad - data.ids.reduce((s, id) => s + ctx.measureText(String(id).padStart(4, '0')).width + 8, -8);
+  data.ids.forEach((id, idx) => {
+    const text = String(id).padStart(4, '0');
+    ctx.fillStyle = OVERLAY_DEVICE_COLORS[idx % OVERLAY_DEVICE_COLORS.length];
+    ctx.fillText(text, lx, pad + 12);
+    lx += ctx.measureText(text).width + 8;
+  });
+
+  // 横軸（時刻目盛り + 薄いグリッド線）。drawWaveform と同じ間引き方。
+  if (n > 1) {
+    const startUs = t[0], endUs = t[n - 1];
+    const spanSec = (endUs - startUs) / 1e6;
+    const fmt = us => {
+      const d = new Date(us / 1000);
+      return spanSec >= 600
+        ? d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+        : d.toLocaleTimeString('ja-JP');
+    };
+    const nticks = Math.max(2, Math.min(6, Math.floor(plotW / 80)));
+    ctx.font = '11px system-ui';
+    for (let k = 0; k < nticks; k++) {
+      const f = k / (nticks - 1);
+      const x = pad + f * plotW;
+      ctx.strokeStyle = 'rgba(128,128,128,.18)';
+      ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, pad + plotH); ctx.stroke();
+      ctx.fillStyle = '#888';
+      ctx.textAlign = k === 0 ? 'left' : k === nticks - 1 ? 'right' : 'center';
+      ctx.fillText(fmt(startUs + f * (endUs - startUs)), x, h - 8);
+    }
+    ctx.textAlign = 'left';
+  }
+}
+
 // --- ライブ / 指定時刻 ---
 let liveTimer = null;
 let lastLiveWaveform = null;  // 縦軸切替時の再描画用（再フェッチしない）
@@ -448,9 +643,30 @@ let liveZoom = null;          // ドラッグ拡大 {fromUs, toUs}。固定窓�
 // ズーム時は区間を /recent で取り直すが、取得窓はAPIの最小幅(0.1分)等で指定より
 // 広いことがあるので、表示は常に指定区間へ切り出す。
 function displayedLiveWf() {
+  if (overlayActive()) return null;  // 重ね表示中はドラッグ拡大非対応（getWfがnullなら発火しない）
   const wf = lastLiveWaveform;
   if (!wf || !wf.n || wf.n <= 1 || !liveZoom) return wf;
   return sliceWaveform(wf, liveZoom.fromUs, liveZoom.toUs);
+}
+
+// 「1分」表示かつ2機以上が重ね表示チェック済みなら重ね表示モード。
+function overlayActive() {
+  const sel = document.getElementById('minutes');
+  return !!sel && sel.value === '1' && liveOverlayIds.length >= 2;
+}
+
+// 通常表示⇄重ね表示の切り替えでUIの出し分けを揃える（軸チェック・デバイス選択は
+// 重ね表示では使わないので隠し、説明文も対応するほうだけ出す）。
+function updateLiveModeUi() {
+  const active = overlayActive();
+  const axHelp = document.getElementById('live-axes-help');
+  const ovHelp = document.getElementById('live-overlay-help');
+  if (axHelp) axHelp.style.display = active ? 'none' : '';
+  if (ovHelp) ovHelp.style.display = active ? '' : 'none';
+  const devLabel = document.getElementById('live-device-label');
+  const axLabel = document.getElementById('live-axes-label');
+  if (devLabel) devLabel.style.display = active ? 'none' : '';
+  if (axLabel) axLabel.style.display = active ? 'none' : '';
 }
 
 // raw/ の保持日数（terraform の raw_retention_days と一致させる）。開始時刻ピッカーの
@@ -478,6 +694,7 @@ function setStartSec(sec) {
 }
 
 function redrawLive() {
+  if (overlayActive()) { redrawLiveOverlay(); return; }
   if (!lastLiveWaveform) return;
   const yrange = Number(document.getElementById('yrange').value) || 0;
   drawWaveform(document.getElementById('live-canvas'), displayedLiveWf(), yrange, visibleAxes('live'));
@@ -499,11 +716,35 @@ function updateLiveIntensity(wf) {
     + `<span class="muted"> 計測震度 ${r.intensity.toFixed(1)}・クライアント側の参考値（気象庁確定値ではない）</span>`;
 }
 
+// 重ね表示版の概算震度。計測震度は回転・符号反転に不変(design.md「向きは自由」)なので、
+// 較正の有無に関わらず機ごとの生のx/y/zからそのまま計算できる。
+function updateLiveIntensityMulti(waveforms) {
+  const el = document.getElementById('live-intensity');
+  if (!el) return;
+  if (!waveforms) { el.innerHTML = ''; return; }
+  const parts = Object.keys(waveforms).map(Number).sort((a, b) => a - b).map(id => {
+    const wf = waveforms[id];
+    const label = String(id).padStart(4, '0');
+    if (!wf || wf.mode !== 'raw') return `<span class="muted">[${label}] 概算震度: 計算できません</span>`;
+    const r = computeIntensity(wf.x, wf.y, wf.z, wf.fs);
+    if (!r) return `<span class="muted">[${label}] 概算震度: データが少なく計算できません</span>`;
+    return `[${label}] 概算震度 ${scaleBadge(r.scale, false)}`
+      + `<span class="muted"> 計測震度 ${r.intensity.toFixed(1)}</span>`;
+  });
+  el.innerHTML = parts.join('　');
+}
+
 // 波形は1デバイスぶんだけ引く。混ぜると継ぎ目の段差が揺れに見える（api側も絞る）。
 // 選択の真実は liveDeviceId 側に置く。<select> の選択肢は /devices を引くまで
 // 空なので、DOM を真実にすると URL 復元と埋め込みの順序に依存してしまう。
 let liveDeviceId = null;
 let liveDevices = [];
+
+// 重ね表示。真実は liveOverlayIds（チェック済みdevice_id、2件以上で有効）に置く。
+// liveDeviceCal は /devices から拾った較正済み機の { tiltUp, azimuthDeg, refDevice }。
+let liveOverlayIds = [];
+let liveDeviceCal = {};
+let lastLiveOverlay = null;  // 縦軸切替時の再描画用（再フェッチしない）
 
 function liveDeviceParam() {
   return liveDeviceId ? '&device=' + encodeURIComponent(liveDeviceId) : '';
@@ -514,7 +755,8 @@ async function fillLiveDevices() {
   if (!sel) return;
   try {
     const data = await apiGet('/devices');
-    const ids = (data.devices || []).map(d => Number(d.device_id)).sort((a, b) => a - b);
+    const all = data.devices || [];
+    const ids = all.map(d => Number(d.device_id)).sort((a, b) => a - b);
     if (ids.join() !== liveDevices.join()) {
       liveDevices = ids;
       sel.innerHTML = ids.map(id =>
@@ -525,9 +767,103 @@ async function fillLiveDevices() {
       liveDeviceId = ids.length ? String(ids[0]) : null;
     }
     if (liveDeviceId) sel.value = liveDeviceId;
+
+    // 重ね表示の対象は較正済み(tilt_up書き込み済み)の機だけ。
+    liveDeviceCal = {};
+    for (const d of all) {
+      if (d.tilt_up) {
+        liveDeviceCal[Number(d.device_id)] = {
+          tiltUp: d.tilt_up, azimuthDeg: d.azimuth_deg || 0, refDevice: d.calibration_ref_device,
+        };
+      }
+    }
+    renderOverlayChecks();
   } catch (e) {
     // デバイス一覧が引けなくても波形表示は続ける（api 側が最若番を選ぶ）。
   }
+}
+
+// 重ね表示のチェックボックス群を較正済みの機で作り直す。選択の真実は liveOverlayIds
+// （他の live* 状態と同じ設計）。「1分」以外では触れないよう disabled にする。
+function renderOverlayChecks() {
+  const wrap = document.getElementById('live-overlay-checks');
+  if (!wrap) return;
+  const calIds = Object.keys(liveDeviceCal).map(Number).sort((a, b) => a - b);
+  if (calIds.length < 2) {
+    wrap.className = 'muted';
+    wrap.textContent = '（較正済みの機が2台に満たない）';
+    updateLiveModeUi();
+    return;
+  }
+  const oneMin = document.getElementById('minutes').value === '1';
+  wrap.className = oneMin ? '' : 'muted';
+  const dis = oneMin ? '' : 'disabled';
+  wrap.innerHTML = calIds.map(id => {
+    const checked = liveOverlayIds.includes(id) ? 'checked' : '';
+    return `<label style="margin-right:8px"><input type="checkbox" class="live-overlay-check" `
+      + `data-id="${id}" ${checked} ${dis}> ${String(id).padStart(4, '0')}</label>`;
+  }).join('') + (oneMin ? '' : ' 「1分」表示でのみ有効');
+  wrap.querySelectorAll('.live-overlay-check').forEach(cb => {
+    cb.onchange = () => {
+      liveOverlayIds = Array.from(wrap.querySelectorAll('.live-overlay-check:checked'))
+        .map(el => Number(el.dataset.id)).sort((a, b) => a - b);
+      liveZoom = null;  // 重ね表示はドラッグ拡大非対応。切り替え時に解除しておく
+      location.hash = liveHash();
+    };
+  });
+  updateLiveModeUi();
+}
+
+// 重ね表示モードの再取得・再描画。ドラッグ拡大は非対応(displayedLiveWfがnullを返す)。
+async function refreshLiveOverlay() {
+  const status = document.getElementById('live-status');
+  const minutes = document.getElementById('minutes').value;
+  const sec = startSec();
+  const ids = liveOverlayIds.slice().sort((a, b) => a - b);
+  try {
+    status.textContent = '取得中…';
+    const cals = ids.map(id => liveDeviceCal[id]);
+    if (cals.some(c => !c)) throw new Error('選択した機に較正値が無い');
+    if (new Set(cals.map(c => c.refDevice)).size > 1) {
+      throw new Error('選択した機の較正基準がバラバラ（重ねられない）');
+    }
+    const waveforms = {};
+    await Promise.all(ids.map(async id => {
+      waveforms[id] = await apiGet('/recent?minutes=' + minutes
+        + (sec ? '&start=' + sec * 1e6 : '') + '&device=' + id);
+    }));
+    if (ids.some(id => waveforms[id].mode !== 'raw')) {
+      throw new Error('データが多く生波形が取れない（対象範囲を確認しろ）');
+    }
+    lastLiveOverlay = { ids, waveforms, cals: Object.fromEntries(ids.map((id, i) => [id, cals[i]])) };
+    redrawLiveOverlay();
+    updateLiveIntensityMulti(waveforms);
+    const dev = ids.map(id => String(id).padStart(4, '0')).join('+');
+    if (sec) {
+      const from = new Date(sec * 1000).toLocaleString('ja-JP');
+      status.textContent = `重ね表示[${dev}]: ${from} から ${minutes}分`;
+    } else {
+      status.textContent = `重ね表示[${dev}] 更新: ` + new Date().toLocaleTimeString('ja-JP');
+    }
+  } catch (e) {
+    lastLiveOverlay = null;
+    redrawLiveOverlay();
+    updateLiveIntensityMulti(null);
+    status.textContent = 'エラー: ' + e.message;
+  }
+}
+
+function redrawLiveOverlay() {
+  const cv = document.getElementById('live-canvas');
+  if (!lastLiveOverlay) {
+    const { ctx, w, h } = fitCanvas(cv);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#888';
+    ctx.fillText('データなし', PAD, h / 2);
+    return;
+  }
+  const yrange = Number(document.getElementById('yrange').value) || 0;
+  drawOverlay(cv, lastLiveOverlay, yrange);
 }
 
 async function refreshLive() {
@@ -535,6 +871,8 @@ async function refreshLive() {
   const minutes = document.getElementById('minutes').value;
   const sec = startSec();
   await fillLiveDevices();
+  updateLiveModeUi();
+  if (overlayActive()) { await refreshLiveOverlay(); return; }
   try {
     status.textContent = '取得中…';
     if (liveZoom) {
@@ -1081,7 +1419,8 @@ function liveHash() {
   const sec = startSec();
   const t = liveZoom ? `&t=${Math.round(liveZoom.fromUs)}-${Math.round(liveZoom.toUs)}` : '';
   const d = liveDeviceId ? `&d=${liveDeviceId}` : '';
-  return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}${sec ? `&s=${sec}` : ''}${t}${d}`;
+  const overlay = liveOverlayIds.length ? `&overlay=${liveOverlayIds.join(',')}` : '';
+  return `live?m=${m}&auto=${auto}&r=${r}&ax=${axesStr('live')}${sec ? `&s=${sec}` : ''}${t}${d}${overlay}`;
 }
 
 // イベント一覧のデバイス絞り込みのハッシュ表現（全機は既定なので省く）
@@ -1158,6 +1497,9 @@ function route() {
     setStartSec(params.s ? parseInt(params.s, 10) : null);
     liveZoom = parseZoomParam(params.t);  // t が無ければズーム解除
     if (params.d) liveDeviceId = params.d;
+    liveOverlayIds = params.overlay
+      ? params.overlay.split(',').map(Number).filter(Number.isFinite)
+      : [];
     showView('live');
     refreshLive();
     scheduleLive();
@@ -1194,7 +1536,7 @@ window.addEventListener('load', () => {
   // URLは replaceState で更新して hashchange→route(=再取得) を発火させない。
   document.getElementById('yrange').onchange = () => {
     history.replaceState(null, '', '#' + liveHash());
-    if (lastLiveWaveform) redrawLive(); else refreshLive();
+    if (overlayActive() ? lastLiveOverlay : lastLiveWaveform) redrawLive(); else refreshLive();
   };
   // 詳細の縦軸レンジは取得済みデータの再描画にすぎないので再フェッチしない。
   // URLは replaceState で更新して hashchange→route(=再取得) を発火させない。
@@ -1268,6 +1610,7 @@ window.addEventListener('load', () => {
     for (const a of AXES) document.getElementById(`live-ax-${a}`).checked = true;
     startInput.value = '';
     liveZoom = null;
+    liveOverlayIds = [];
     document.getElementById('events-all').checked = false;
     eventsDeviceId = 'all';
     eventsPageNum = 1;
