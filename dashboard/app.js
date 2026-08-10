@@ -1228,14 +1228,17 @@ function showDevicesMode(detail) {
   document.getElementById('device-detail').style.display = detail ? 'block' : 'none';
 }
 
-// バージョン文字列はビルド時のgit短縮hash(tools/get_fw_version.py)なので、
-// そのままGitHubのコミットへのリンクにできる。
+// バージョン文字列はビルド時のgit短縮hash(firmware/get_fw_version.py)なので、
+// GitHubのコミットへのリンクにできる。ただし作業ツリーが汚れていた場合は
+// 末尾に"-dirty"が付き、それを含めたままリンクを組むとハッシュとして存在せず404になる
+// ので、リンク先はそこを削った短縮hashにする（表示文字列自体は"-dirty"付きのまま）。
 const GITHUB_REPO_URL = 'https://github.com/nna774/NamazuHaUrokoGaNai';
 
 function fwVersionHtml(v) {
   if (!v) return '—';
   const safe = escapeHtml(v);
-  return `<a href="${GITHUB_REPO_URL}/commit/${safe}" target="_blank" rel="noopener">${safe}</a>`;
+  const commit = escapeHtml(v.replace(/-dirty$/, ''));
+  return `<a href="${GITHUB_REPO_URL}/commit/${commit}" target="_blank" rel="noopener">${safe}</a>`;
 }
 
 // このプロジェクトはリージョン固定(ap-northeast-1、CLAUDE.md)。ヒープテレメトリの
