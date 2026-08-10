@@ -1598,6 +1598,7 @@ window.addEventListener('load', () => {
   document.getElementById('reload-devices').onclick = () => refreshDevices();
   document.getElementById('devices-auto').onchange = () => scheduleDevices();
   document.getElementById('device-back').onclick = () => { location.hash = 'devices'; };
+  document.getElementById('reload-device').onclick = () => { if (currentDeviceId != null) showDevice(currentDeviceId); };
   // 期間の変更は取り直しが要るので再フェッチする（縦軸レンジ等の再描画のみとは違う）。
   document.getElementById('device-temp-hours').onchange = () => {
     if (currentDeviceId == null) return;
