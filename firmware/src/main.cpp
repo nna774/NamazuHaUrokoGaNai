@@ -185,6 +185,13 @@ static QueueHandle_t gAlertQueue;  // AlertMsg
 // 用意した領域を借りる版のBatchコンストラクタ(Batch.h、外部バッファ+解放
 // コールバック)を使う。
 //
+// XXX: これで隔離できるのはBatch本体だけ。断片化しうるmalloc(18032)のもう一方、
+// batch-uplink Uploader::pump()内のspill読み込み用バッファ(malloc(len)→POST→
+// free()、こちらは`firmware/`側からは手が出せない)はまだ未対応のまま残っている。
+// また実機確認できたのはspillが空の定常状態のみで、spillに未送信分が大量に
+// 溜まった状態からの復旧局面（過去に実際に詰まった状況そのもの）はまだ未検証
+// （docs/log/2026-08-10-batch-ram-pool.md）。「これで直った」と早合点しないこと。
+//
 // スロット数はkMaxRamBatchesちょうど（+1で組み立て中の1本ぶん）に抑える。
 // 以前の並行セッションの試み(docs/log/2026-08-10-newbatch-buffer-pool-handoff.md
 // 「続報3」)は「組み立て中1+gBatchQueue深さ4+kMaxRamBatches」の合計(当時7本
