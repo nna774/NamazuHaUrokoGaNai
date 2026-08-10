@@ -355,6 +355,14 @@ static void samplingTask(void*) {
         if (xQueueSend(gBatchQueue, &cur, 0) != pdTRUE) {
           // 送信タスクが詰まっている: uploaderに直接渡す代わりに破棄回避のため待たない。
           // batchQueueは十分な深さを持たせている前提。溢れたら最古を諦める。
+          // XXX(2026-08-10 診断用・恒久化するなら整理すること): この経路は
+          // Uploaderへ一度も渡らないままバッチを握りつぶすため、droppedCount()
+          // にもカウントされずログも一切無い、完全にサイレントな喪失経路だった。
+          // newBatch stuck診断と同じ調査(internetを断って再現)の一環で、
+          // 実際に踏まれているか確認するためログを足す。
+          Serial.printf(
+              "[sampling] gBatchQueue full, dropping oldest queued batch "
+              "(uploaderTask stuck too long?)\n");
           Batch* dropped = nullptr;
           if (xQueueReceive(gBatchQueue, &dropped, 0) == pdTRUE) delete dropped;
           xQueueSend(gBatchQueue, &cur, 0);
