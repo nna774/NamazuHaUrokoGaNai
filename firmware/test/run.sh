@@ -30,3 +30,12 @@ g++ -std=gnu++17 -Wall -Wextra -Werror \
 
 echo "batch-uplink: $(basename "$(dirname "$UPLINK")")/$(basename "$UPLINK")"
 "$OUT/test_batch_bytes"
+
+# TlsMemPoolCore は Arduino/mbedTLS 非依存の純粋なポインタ演算部分なので、
+# 同じくホストのg++でコンパイルできる(TlsMemPool.cppはこれの薄いアダプタ)。
+g++ -std=gnu++17 -Wall -Wextra -Werror \
+  -I "$LIB/TlsMemPool" \
+  -o "$OUT/test_tls_mem_pool" \
+  "$HERE/test_tls_mem_pool.cpp" "$LIB/TlsMemPool/TlsMemPoolCore.cpp"
+
+"$OUT/test_tls_mem_pool"
