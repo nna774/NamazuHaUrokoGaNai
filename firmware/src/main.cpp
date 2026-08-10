@@ -28,6 +28,9 @@
 #include "Iis3dhhc.h"
 #endif
 #include "Shindo.h"
+#ifdef NAMZ_TLS_ALLOC_PROBE
+#include "TlsAllocProbe.h"
+#endif
 #include "TimeSync.h"
 #include "TlsMemPool.h"
 #include "Uploader.h"
@@ -477,6 +480,9 @@ static void uploaderTask(void*) {
     snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
     gUploader->pump();
     esp_task_wdt_reset();
+#ifdef NAMZ_TLS_ALLOC_PROBE
+    tlsallocprobe::printIfChanged();
+#endif
 
     // バックログ年齢の表示用値をここ(Core0)で計算してpublishする。
     // loop()(Core1)から直接呼ぶとLittleFSへ別コアから同時アクセスすることになり
@@ -539,8 +545,14 @@ void setup() {
   Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
   // WiFi/Uploaderより前、mbedTLSが一度も呼ばれていないうちにフックする
   // （後から差し替えても、既にそれ以前の呼び出しで確保済みの分は追えない）。
-  // 理由・設計はTlsMemPool.h参照。
+  // mbedtls_platform_set_calloc_free()はグローバルフック1系統しか持てないため、
+  // 計測プローブ(素通しラッパー)と本番プールは排他——プローブ有効時はプールを
+  // 使わない(理由・設計はTlsMemPool.h参照)。
+#ifdef NAMZ_TLS_ALLOC_PROBE
+  tlsallocprobe::install();
+#else
   tlsmempool::install();
+#endif
 #ifndef NAMZ_SENSOR_TEST
   // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
   // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
