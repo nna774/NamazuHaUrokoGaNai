@@ -1,5 +1,7 @@
 #include "Display.h"
 
+#include <cstring>
+
 #include "ClassFont.h"
 
 void Display::begin(uint32_t deviceId) {
@@ -22,7 +24,7 @@ void Display::applyRotation() {
 void Display::paintFrame(uint16_t bg) {
   bg_ = bg;
   bgInit_ = true;
-  lastClass_ = "";  // 全面を塗るので中央の震度階級も次のrenderで描き直させる
+  lastClass_[0] = '\0';  // 全面を塗るので中央の震度階級も次のrenderで描き直させる
   tft_.fillScreen(bg);
   tft_.setTextDatum(TL_DATUM);
   tft_.setTextColor(contrastText(bg), bg);
@@ -61,9 +63,9 @@ const char* Display::scaleAscii(float i) {
   return "7";
 }
 
-void Display::render(float intensity, float peakGal, bool wifi, const String& ip,
-                     uint32_t backlog, uint32_t backlogAgeS, const String& status,
-                     uint16_t bgColor, const String& clock) {
+void Display::render(float intensity, float peakGal, bool wifi, const char* ip,
+                     uint32_t backlog, uint32_t backlogAgeS, const char* status,
+                     uint16_t bgColor, const char* clock) {
   if (!ready_) return;
   const int w = tft_.width();
   const int h = tft_.height();
@@ -98,8 +100,9 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
   const char* cls = scaleAscii(intensity);
   // MC_DATUM のベースラインは classY + ascent/2。字面はそこから1px下まで出る。
   const int classBottom = classY + kClassFontAscent / 2 + 2;
-  if (lastClass_ != cls) {
-    lastClass_ = cls;
+  if (strcmp(lastClass_, cls) != 0) {
+    strncpy(lastClass_, cls, sizeof(lastClass_) - 1);
+    lastClass_[sizeof(lastClass_) - 1] = '\0';
     tft_.setFreeFont(&ClassFont);
     tft_.setTextDatum(MC_DATUM);
     tft_.setTextColor(fg, bg);
@@ -151,8 +154,8 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
       snprintf(buf, sizeof(buf), "buf:%lu %lum", (unsigned long)backlog,
                (unsigned long)(backlogAgeS / 60));
     }
-  } else if (wifi && ip.length()) {
-    snprintf(buf, sizeof(buf), "%s", ip.c_str());
+  } else if (wifi && ip[0] != '\0') {
+    snprintf(buf, sizeof(buf), "%s", ip);
   } else {
     buf[0] = '\0';
   }
@@ -162,7 +165,7 @@ void Display::render(float intensity, float peakGal, bool wifi, const String& ip
   tft_.setTextPadding(0);
 }
 
-void Display::renderOtaUpdating(const String& clock) {
+void Display::renderOtaUpdating(const char* clock) {
   if (!ready_) return;
   const int w = tft_.width();
 
@@ -186,7 +189,7 @@ void Display::renderOtaUpdating(const String& clock) {
   tft_.setTextPadding(0);
 }
 
-void Display::renderRebootHold(const String& clock, bool confirmed, uint32_t remainSeconds) {
+void Display::renderRebootHold(const char* clock, bool confirmed, uint32_t remainSeconds) {
   if (!ready_) return;
   const int w = tft_.width();
 

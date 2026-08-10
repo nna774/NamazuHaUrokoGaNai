@@ -27,9 +27,9 @@ class Display {
   //              自動でコントラスト色を選ぶので、どの背景でも文字は消えない。
   //  clock     : 上中央に出す日時文字列（"07/14 12:34:56" 等）。毎フレーム
   //              更新されるので、フリーズしていないことの目視確認にもなる。
-  void render(float intensity, float peakGal, bool wifi, const String& ip,
-              uint32_t backlog, uint32_t backlogAgeS, const String& status,
-              uint16_t bgColor, const String& clock);
+  void render(float intensity, float peakGal, bool wifi, const char* ip,
+              uint32_t backlog, uint32_t backlogAgeS, const char* status,
+              uint16_t bgColor, const char* clock);
 
   // OTA更新中の専用画面。測定タスクが止まっている間は震度・WiFi・バックログ等の
   // 値が意味を持たない（更新中固定表示になる）ので、render()を呼ばずこちらに
@@ -37,7 +37,7 @@ class Display {
   // 遠目でも「今は震度表示ではない」と分かるようにする。
   //  clock : render()と同じ日時文字列。凍結検知（フリーズしていれば止まって見える）
   //          を兼ねる。
-  void renderOtaUpdating(const String& clock);
+  void renderOtaUpdating(const char* clock);
 
   // ボタン長押しによる緊急手動再起動の確認画面（config.hのkRebootHoldConfirmMs/
   // kRebootHoldTriggerMs、main.cppのloop()参照）。ボタンを離せば呼ばれなくなり
@@ -45,7 +45,7 @@ class Display {
   //  clock         : render()と同じ日時文字列（凍結検知を兼ねる）。
   //  confirmed     : trueなら再起動確定後（Core0がキュー退避完了を待っている間）。
   //  remainSeconds : confirmed=falseの間、あと何秒押し続けたら再起動するか。
-  void renderRebootHold(const String& clock, bool confirmed, uint32_t remainSeconds);
+  void renderRebootHold(const char* clock, bool confirmed, uint32_t remainSeconds);
 
   // 震度階級のASCII表記（"0".."4","5-","5+","6-","6+","7"）。
   static const char* scaleAscii(float intensity);
@@ -63,7 +63,9 @@ class Display {
   bool ready_ = false;
   uint16_t bg_ = 0;         // 現在の背景色
   bool bgInit_ = false;     // 背景を一度でも塗ったか（回転時にリセット）
-  String lastClass_;        // 前回描いた震度階級（変化時のみ描き直してちらつき回避）
+  // 前回描いた震度階級（変化時のみ描き直してちらつき回避）。scaleAscii()の
+  // 返り値は最長2文字("5-"等)+終端なので3で足りるが、余裕を見て4。
+  char lastClass_[4] = "";
   uint32_t deviceId_ = 0;   // NAMAZUの下に出すデバイスID
   // renderRebootHold: confirmed=falseとtrueでは背景色(黄)が同じまま行数・Y座標が
   // 変わるため、bg色不変で背景の塗り直しを省くと前のレイアウトの残像が残る。
