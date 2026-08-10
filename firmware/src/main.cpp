@@ -411,6 +411,11 @@ static void pauseSamplingForOta() {
   while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) gUploader->enqueue(b);
   size_t flushed = gUploader->flushToSpill();
   Serial.printf("[ota] flushed %u batch(es) to spill\n", (unsigned)flushed);
+  // ingest向けの使い回し接続を閉じてからOTA取得へ進む。開けたままだと、
+  // これから張るOTA先(CloudFront)向けの新規TLS接続と2本同時に生きてしまい、
+  // TlsMemPool(単一TLS接続前提でサイズを見積もった固定プール)を超えうる
+  // （batch-uplink v2.9.0でUploader::closeConnection()を公開して対応）。
+  gUploader->closeConnection();
 }
 
 // 成功時はESP.restart()するのでここは通らない。失敗時は測定を止めたままに
