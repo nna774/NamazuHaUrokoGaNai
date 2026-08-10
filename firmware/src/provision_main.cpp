@@ -1,5 +1,5 @@
 // NVS(Preferences)へデバイス識別情報・秘密・エンドポイントURLを書き込むだけの
-// 専用ビルド（docs/ota.md §7）。通常のfirmware(main.cpp)とは排他で、
+// 専用ビルド（docs/ota.md §2）。通常のfirmware(main.cpp)とは排他で、
 // platformio.iniの[env:provision]/[env:adxl355-provision]だけがこれをビルドする。
 //
 // 使い方:
@@ -22,7 +22,6 @@ void setup() {
   id.wifiSsid = kProvWifiSsid;
   id.wifiPass = kProvWifiPass;
   id.hmacSecret = kProvHmacSecret;
-  id.otaPassword = kProvOtaPassword;
   id.ingestUrl = kProvIngestUrl;
   id.alertUrl = kProvAlertUrl;
   id.apiUrl = kProvApiUrl;

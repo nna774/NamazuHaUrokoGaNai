@@ -97,12 +97,12 @@ python ../tools/backtest.py cap.csv
 
 ### OTA更新（USBを繋がず無線で焼く）
 
-詳細は [docs/ota.md](../docs/ota.md)。ArduinoOTA(LAN内push)。
+詳細は [docs/ota.md](../docs/ota.md)。HTTPSプル型（デバイスが自分で取得しにいく）。
+`tools/publish_ota.sh`でビルド〜配布、`tools/request_ota.py`で更新を許可する。
 
 ```bash
-NAMZ_OTA_PASSWORD="$(python ../tools/provision_device.py ota-password --id 2)" \
-    pio run -e "$(python ../tools/provision_device.py env --id 2)-ota" -t upload \
-    --upload-port namazu-2.local     # or IPアドレス直指定
+../tools/publish_ota.sh "$(python ../tools/provision_device.py env --id 2)"
+python ../tools/request_ota.py request 2 <version>
 ```
 
 ### 書き込めない時

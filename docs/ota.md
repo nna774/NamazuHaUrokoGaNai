@@ -1,16 +1,18 @@
 # OTA更新
 
-ファームの無線更新。2026-08-06 に §2-A（ArduinoOTA、LAN内push）と
-§7（HTTPSプル型、外出先からの更新・無人運用向け）の両方を実装した。
-push型はdevice 2へのUSB書き込み・起動・OTAリスナー起動
-（`[ota] ready as namazu-2.local`）までは実機で確認できたが、**push本体
-（`espota`での転送）は自宅ネットワークの構成により母艦から直接は届かなかった**
-（§5「ネットワーク分離」参照）。実装自体の不具合ではなく、試す場所を選ぶ運用上の
-制約。pull型は**実機での動作確認はまだ**（firmwareビルド全env・
-`firmware/test/run.sh`・`pytest lambda/tests tools/tests` は確認済み）。
+ファームの無線更新。**現在の方式はHTTPSプル型（デバイス自身が取得しにいく）のみ。**
+
+2026-08-06にLAN内push型（ArduinoOTA、母艦から`espota`で焼く）とHTTPSプル型を
+両方実装したが、push型は自宅ネットワークのVLAN分離で母艦からの転送がデバイスに
+一度も届かず（§3「実装時の落とし穴」参照）、実用にならないまま放置されていた。
+2026-08-10、実際に使っていない機能を削るとDRAM/Flashが空くかという調査（震度計算の
+静的バッファ削減と同じ流れ）の一環でpush型一式を撤去した。詳細は
+[log/2026-08-10-drop-lan-push-ota.md](log/2026-08-10-drop-lan-push-ota.md)。
+
+pull型は2026-08-06にdevice1(esp32dev)・device2(adxl355)両方で実際に自己更新
+（旧バージョン→再ビルド版）まで成功している。
 関連: [リモート再起動](remote_restart.md)（コマンドラインから再起動要求を送る作戦。
-更新後に確認してから確定させる運用の足場になる。今回の実装で使う `flushToSpill()`
-はリモート再起動側にも配線し、待ち時間を短縮した）。
+`flushToSpill()`を共有する）。
 
 ## 1. 土台の棚卸し（実装前から整っていたもの）
 
@@ -23,131 +25,41 @@ push型はdevice 2へのUSB書き込み・起動・OTAリスナー起動
 
 `platformio.ini` に `board_build.partitions` の指定は無く、ボード既定をそのまま使っている。
 
-## 2. 採用した方式: ArduinoOTA（LAN内からpush）
+## 2. 採用した方式: HTTPSプル型（外出先からの更新・無人運用向け）
 
-母艦から `espota`（`pio run -t upload --upload-port ...`）で投げる。デバイス側は
-送信タスク（Core0, `uploaderTask`）で `ArduinoOTA.handle()` を回す。測定タスク
-（Core1・優先度10）を巻き込まない側に置くのが要点。
+2026-08-06に実装。デバイスがバッチ送信のたびにサーバへ更新有無を問い合わせ
+（後述のトリガー）、あれば`HTTPUpdate`で取得・書き込みする。運用者が対象デバイスと
+同じLANにいる必要が無いのが利点で、デバイス発信の経路なので後述のネットワーク
+分離の影響も受けない。
 
-HTTPSプル型（`esp_https_ota`。外出先からの更新・無人運用向け）は§7で実装した。
-デバイス発信の経路なので、母艦からのpush転送を阻むネットワーク分離（§5）の
-影響を受けないという利点もある。
-
-## 3. 使い方
+### 使い方
 
 ```bash
-# デバイスごとのOTAパスワードを引いて焼く（tools/devices.json が単一の真実）
-NAMZ_OTA_PASSWORD="$(python tools/provision_device.py ota-password --id 2)" \
-    pio run -e "$(python tools/provision_device.py env --id 2)-ota" -t upload \
-    --upload-port namazu-2.local
+# ビルド〜CloudFrontへの配布
+tools/publish_ota.sh esp32dev            # ADXL355機は adxl355
+
+# 対象デバイスに更新を許可する（tools/devices.json が単一の真実）
+python tools/provision_device.py env --id 2   # 焼くべきenv名の確認
+python tools/request_ota.py request 2 <version>
+python tools/request_ota.py list              # 状態確認
+python tools/request_ota.py cancel 2          # 取り消し
 ```
 
-`namazu-<id>.local` はデバイスがmDNSで自分に付ける名前（`ArduinoOTA.setHostname()`）。
-IPアドレス直指定でもよい（デバイスのTFTに表示されている）。
+新規デバイスや既存デバイスの識別情報払い出しには`tools/provision_device.py provision-h`
+（NVS書き込み用の`secrets_provision.h`を生成）を使う。デバイス識別情報のNVS化に
+ついては§2.1参照。
 
-新規デバイスや既存デバイスの鍵払い出しには `ota_password` フィールドが要る
-（`tools/provision_device.py add` が自動生成、`provision-h` でNVS書き込み用の
-`secrets_provision.h` に出る。デバイス識別情報のNVS化については§7参照）。
-
-## 4. 安全な停止シーケンス（実装済み）
-
-**フラッシュ書き込み中はキャッシュが無効になり、両コアの命令フェッチが止まる。**
-100Hz の `esp_timer` は転送中に確実に取りこぼす。放置すると再起動でRAM上のバッチが
-消え、「2xxが返るまでバッチを捨てない」という `Uploader` の不変条件を自分で破る。
-
-対策として batch-uplink に `Uploader::flushToSpill()`（[v1.4.0](https://github.com/nna774/batch-uplink/releases/tag/v1.4.0)、
-[PR#4](https://github.com/nna774/batch-uplink/pull/4)）を追加した。RAMキューを
-即座に全部LittleFSへ退避するオプトインAPIで、`dropOldestWhenFull`/`watchResponseHeader`
-と同じ設計思想（Electabuzz側の挙動は変えない）。
-
-`firmware/src/main.cpp` の `ArduinoOTA.onStart()` コールバックで:
-
-1. `esp_timer_stop(gSampleTimer)` — 測定タイマーを止める
-2. `esp_task_wdt_delete(gSamplingTask)` — タイマーが止まると測定タスクは自分で
-   `esp_task_wdt_reset()` を呼べなくなるため、転送が終わるまでウォッチドッグの
-   監視対象から一時的に外す
-3. `gBatchQueue` の残りを `gUploader` へ吸い出し、`flushToSpill()` でLittleFSへ退避
-
-`onProgress()` コールバックで毎回 `esp_task_wdt_reset()` を呼ぶ。ArduinoOTAの転送は
-`uploaderTask`（Core0、10秒タイムアウトのタスクウォッチドッグ登録あり）のループ内で
-`ArduinoOTA.handle()` 呼び出し1回にブロックして完結するため、これをしないと長い
-転送でタスクウォッチドッグが落ちる。
-
-`onEnd()` は不要——ArduinoOTAは成功時に自分で `ESP.restart()` する
-（`setRebootOnSuccess()` の既定が `true`）。`onError()` でのみ測定タイマーと
-ウォッチドッグ登録を復旧する。
-
-**TFT表示もこのシーケンスに連動させている。** 測定タイマーが止まると
-`gDispIntensity` 等は最後の値のまま凍るため、震度画面を出し続けると
-「更新中で止まっている」のか「地震計が本当に固まった」のか目視で区別できない。
-`pauseSamplingForOta()`（push/pull共通）で立てる`gOtaInProgress`フラグを`loop()`が
-見て、震度画面の代わりに`Display::renderOtaUpdating()`（紫背景 + "OTA UPDATING"）
-を出す。日時だけは`loop()`側で毎フレーム計算し続けるので、更新中画面でも
-フリーズ検知の役目は保てる。失敗時は`resumeSamplingAfterOtaFailure()`でフラグを
-戻す。成功時は`ESP.restart()`で暗黙にリセットされる。
-
-## 5. 実装時の落とし穴（このプロジェクト固有）
-
-- **ロールバックは期待しない。** Arduino core の既定ビルドは
-  `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` が入っておらず、新イメージは書けた時点で
-  有効扱いになる。自動で前のスロットへ戻ることはない。最後の砦は物理アクセス。
-- **パーティションテーブル自体はOTAで変えられない。** app スロットを広げたくなった時
-  （`min_spiffs` 等への変更）はUSBで焼き直しになる。実装後のファームは約1,063KB
-  （esp32devスロットの81.1%、余裕約242KB）で、ArduinoOTA追加分は約38KB。
-  **USBが楽なうちにレイアウトを決めておく**のが安い。
-- **env が機種ごとに違う**（IIS3DHHC機は `esp32dev`、ADXL355機は `adxl355`）。OTA用envも
-  `esp32dev-ota`/`adxl355-ota` に分けた。env は `python tools/provision_device.py env --id N`
-  で引ける。
-- **正常なOTAなら欠測通知は鳴らない。** 1MBの転送は数十秒、閾値は300秒。逆に鳴ったら
-  本当に失敗しているということ。
-- **`Update.begin()` によるパーティション消去は `onStart` コールバックより前に走る。**
-  数百ms〜数秒かかりうるが、`onStart`発火前なのでこちらの停止シーケンスはまだ効かず、
-  この間の測定タイマー取りこぼしは避けられない（数サンプル〜1秒程度の欠落は許容）。
-  タスクウォッチドッグに触れるほど長くなる兆候が実機で見えたら、OTA中だけ
-  ウォッチドッグ設定を緩める対応を検討する。
-- **`upload_flags` のパスワードは `${sysenv.NAMZ_OTA_PASSWORD}` 経由。** platformio.ini に
-  平文で書かない（NVSの秘密情報と同じ扱い）。`upload_port` はデバイスごとに違うので
-  `--upload-port` で毎回指定する（platformio.ini には書いていない）。
-- **ネットワーク分離で母艦から push が届かないことがある。** device 2 は
-  `unnamed_network_g`（`10.255.255.0/24`）に居るが、母艦のMacは別セグメント
-  （`10.8.30.0/24`）。2026-08-06に実際に試したところ:
-  - `ping 10.255.255.1`（デバイス側ゲートウェイ）は通る（ttl=63、1ホップ挟んでルーティング
-    はされている）
-  - `namazu-2.local` のmDNS解決は失敗（`Host ... Not Found`）
-  - IP直指定でも `espota` のUDP招待（ポート3232）に**無応答**（`No response from the ESP`）
-
-  ICMPは通るのにUDP往復が通らないのは、SSID名の `_g`（ゲスト回線らしき命名）が示す
-  とおり**VLAN間のクライアント分離**が疑わしい（デバイスの発信＝AWSへのHTTPS送信は
-  素通り、他ホストからの着信だけ塞がれる構成）。デバイス側のOTAサーバ自体は起動ログ
-  で稼働を確認済みなので、ファーム実装の問題ではない。
-  **試す時は `unnamed_network_g` に実際に接続した端末（スマホ・同SSID上のPC）から
-  `espota` を叩くか、ルータ/APの当該SSID設定でクライアント分離を確認すること。**
-
-## 6. 未着手
-
-- **push OTA転送そのものの実機確認**（次回、`unnamed_network_g` に接続した端末から。§5参照）。
-- **pull型OTAの実機確認**（次回訪問時。手元のWiFiから外れた環境で試すのが理想）。
-- HTTPSプル型のロールバック（§7「今回は見送った」参照）。
-
-## 7. HTTPSプル型（外出先からの更新・無人運用向け）
-
-2026-08-06に実装した。**実機での動作確認はまだ**（firmwareビルド全env・
-`firmware/test/run.sh`・`pytest lambda/tests tools/tests`は確認済み）。前提:
-LAN内push（§2）は運用者が対象デバイスと同じLANにいる必要がある。外出先からの
-更新・無人運用にはデバイス自身がHTTPSで取得（pull）する方式が要る。
-
-### 前提として先に片付けた: バイナリの秘密情報の分離（NVS化）
+### 2.1 前提として先に片付けた: バイナリの秘密情報の分離（NVS化）
 
 当初「`ota/<env>/<version>.bin`を1本、CloudFrontで公開する」という配布物の作戦を
 立てたが、**現状のファーム構成のままでは成立しない**と判明した。
 
 旧`secrets.h`（`tools/provision_device.py`が生成）は、WiFi SSID/パスワード・
-デバイス固有のHMAC鍵（バッチ投稿の認証に使う）・ArduinoOTA認証パスワードを
-`static constexpr const char*`の文字列リテラルとして持っていた。コンパイラは
-これを暗号化も難読化もしないので、焼いた`firmware.bin`には平文のまま入る。
-push型（LAN内espota）は送り返す相手が秘密の持ち主自身なので問題にならなかったが、
-pull型で「envごとに1本を不特定多数が読めるURLに置く」設計は、公開した瞬間その
-1台の家WiFiとなりすまし投稿の鍵を世界に漏らすことになる。
+デバイス固有のHMAC鍵（バッチ投稿の認証に使う）を`static constexpr const char*`の
+文字列リテラルとして持っていた。コンパイラはこれを暗号化も難読化もしないので、
+焼いた`firmware.bin`には平文のまま入る。pull型で「envごとに1本を不特定多数が
+読めるURLに置く」設計は、公開した瞬間その1台の家WiFiとなりすまし投稿の鍵を
+世界に漏らすことになる。
 
 対策としてデバイス識別情報・秘密・エンドポイントURLをコンパイル時定数から
 **NVS(Preferences)**へ移した（`firmware/lib/DeviceIdentity/`）。OTAはapp
@@ -168,11 +80,11 @@ pio run -e esp32dev -t upload --upload-port <USBポート>     # 続けて通常
 なった。旧`secrets.h`/`secrets.h.example`は削除し、`tools/provision_device.py`の
 `secrets-h`コマンドは`provision-h`に置き換えた。
 
-### トリガー: リモート再起動と同じ「バッチ送信レスポンスへの便乗」（自律ポーリングは不採用）
+### 2.2 トリガー: リモート再起動と同じ「バッチ送信レスポンスへの便乗」（自律ポーリングは不採用）
 
 配布物（S3/CloudFront上のbin）の書き込み権限が万一侵害された場合、無人運用中の
-全機へ運用者の操作なしにコードが流し込める経路になるとpushより一段階ブラスト
-半径が大きい。そこで「運用者が明示的に許可した時だけ取得する」設計にした。
+全機へ運用者の操作なしにコードが流し込める経路になると一段階ブラスト半径が
+大きい。そこで「運用者が明示的に許可した時だけ取得する」設計にした。
 
 作戦時点の方針どおり、[リモート再起動](remote_restart.md)と同じ「バッチ送信
 レスポンスへの便乗」を踏襲した。
@@ -190,19 +102,12 @@ pio run -e esp32dev -t upload --upload-port <USBポート>     # 続けて通常
   書き込み失敗で古いバージョンのまま再起動しても、次のバッチ送信で再び
   気づいて再試行する。
 
-実装当初は`Uploader::watchResponseHeader`が**単一ヘッダしか監視できず**、
-再起動要求(`X-Namz-Restart`)と共存させられないという制約にぶつかった。ここで
-batch-uplinkに触れずに済ませようとapi Lambdaへの独立GETに設計変更したが、
-これは「うまくいかなかったら別設計に変える」を無断でやってしまったやり直し
-——**batch-uplinkの拡張は最初から許容範囲**だった。
-[batch-uplink v1.5.0](https://github.com/nna774/batch-uplink/releases/tag/v1.5.0)
-で`Uploader`を複数ヘッダ監視に対応させ（`watchResponseHeaders`配列 + `lastResponseHeaderValue(name)`。
-`kMaxWatchedHeaders=4`まで）、当初案どおりバッチ送信のたびに両方のヘッダを
-一緒に読む設計に作り直した。`firmware/platformio.ini`の`lib_deps`と
-`terraform/build_lambda.sh`の`UPLINK_VERSION`をv1.5.0へ揃えて上げてある
-（CLAUDE.mdの不変条件）。
+`Uploader::watchResponseHeaders`（複数ヘッダ監視、`kMaxWatchedHeaders=4`まで）で
+再起動要求(`X-Namz-Restart`)と共存させている（[batch-uplink v1.5.0](https://github.com/nna774/batch-uplink/releases/tag/v1.5.0)）。
+`firmware/platformio.ini`の`lib_deps`と`terraform/build_lambda.sh`の
+`UPLINK_VERSION`をこのタグへ揃えて上げてある（CLAUDE.mdの不変条件）。
 
-### 配布物: 既存CloudFrontに相乗り
+### 2.3 配布物: 既存CloudFrontに相乗り
 
 新規ドメイン/ACM証明書を作らず、ダッシュボード配信で使っている既存の
 S3バケット（`aws_s3_bucket_policy`が`${bucket.arn}/*`とバケット全体を対象に
@@ -215,35 +120,54 @@ ota/<env>/<version>.bin      # 例: ota/esp32dev/a1b2c3d.bin
 ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファームは未検証。後述）
 ```
 
-`env`は`esp32dev`/`adxl355`（センサ・ボードの組。espota用の`-ota` envは
-アップロード方式が違うだけで中身は同じビルドなのでここには出てこない）。
-`tools/publish_ota.sh esp32dev`でビルド〜アップロードまで行う（作業ツリーが
-汚れていたら既定で拒否、`--allow-dirty`で強制可）。
+`env`は`esp32dev`/`adxl355`（センサ・ボードの組）。`tools/publish_ota.sh esp32dev`
+でビルド〜アップロードまで行う（作業ツリーが汚れていたら既定で拒否、
+`--allow-dirty`で強制可）。
 
-### バージョン識別: ビルド時にgit短縮hashを埋め込む
+### 2.4 バージョン識別: ビルド時にgit短縮hashを埋め込む
 
 `firmware/get_fw_version.py`（extra_script）が`git rev-parse --short HEAD`を
 `NAMZ_FW_VERSION`へ、env名から`NAMZ_OTA_ENV`（esp32dev/adxl355）を注入する。
 作業ツリーが汚れていたら`-dirty`サフィックスを付け、未コミット状態を配布版として
-掴む事故に気付けるようにする。起動シリアルログにも出す
-（[memo.md](../memo.md)の残タスク「起動時のログにバージョン/hash」を解消）。
+掴む事故に気付けるようにする。起動シリアルログにも出す。
 
-### ダウンロード: HTTPUpdate + push型と同じ安全停止シーケンス
+### 2.5 安全な停止シーケンス
 
-- 更新対象を見つけたら、push型（§4）と同じ手順でRAMキューを退避する
-  （`pauseSamplingForOta()`に共通化: 測定タイマー停止→測定タスクをWDT監視から
-  外す→`flushToSpill()`）。
-- 取得はArduino-ESP32の`HTTPUpdate`（`httpUpdate.update(client, url)`。内部は
-  `WiFiClientSecure`+`HTTPClient`、書き込みはArduinoOTAと同じ`Update.h`）。
-  `onProgress`コールバックで毎回`esp_task_wdt_reset()`を呼ぶ（ArduinoOTAの
-  `onProgress`と同じ役割。ブロッキングAPIそのままだと進行中にWDTを養えない）。
-  `rebootOnUpdate(false)`にして再起動はこちらで制御する。
-- 成功なら`ESP.restart()`。失敗系は測定タイマー・WDT登録を復旧して測定続行
-  （push型`onError`と同じ）し、1分のバックオフを置いて次回のバッチ送信時の
-  チェックでリトライする（後述、実機で踏んだ不具合）。
+**フラッシュ書き込み中はキャッシュが無効になり、両コアの命令フェッチが止まる。**
+100Hz の `esp_timer` は転送中に確実に取りこぼす。放置すると再起動でRAM上のバッチが
+消え、「2xxが返るまでバッチを捨てない」という `Uploader` の不変条件を自分で破る。
 
-**TLS検証は実機で2段階の失敗を踏んでからルートCA埋め込みに落ち着いた**
-（2026-08-06、device2実機）:
+対策として batch-uplink に `Uploader::flushToSpill()`（[v1.4.0](https://github.com/nna774/batch-uplink/releases/tag/v1.4.0)、
+[PR#4](https://github.com/nna774/batch-uplink/pull/4)）を追加した。RAMキューを
+即座に全部LittleFSへ退避するオプトインAPIで、`dropOldestWhenFull`/`watchResponseHeader`
+と同じ設計思想（Electabuzz側の挙動は変えない）。
+
+`firmware/src/main.cpp` の `checkAndPerformPullOta()` が更新対象を見つけた時点で:
+
+1. `pauseSamplingForOta()` を呼ぶ:
+   1. `esp_timer_stop(gSampleTimer)` — 測定タイマーを止める
+   2. `esp_task_wdt_delete(gSamplingTask)` — タイマーが止まると測定タスクは
+      自分で`esp_task_wdt_reset()`を呼べなくなるため、転送が終わるまで
+      ウォッチドッグの監視対象から一時的に外す
+   3. `gBatchQueue` の残りを `gUploader` へ吸い出し、`flushToSpill()` でLittleFSへ退避
+2. 取得はArduino-ESP32の`HTTPUpdate`（`httpUpdate.update(client, url)`。内部は
+   `WiFiClientSecure`+`HTTPClient`、書き込みは`Update.h`）。`onProgress`
+   コールバックで毎回`esp_task_wdt_reset()`を呼ぶ（ブロッキングAPIそのままだと
+   進行中にWDTを養えない）。`rebootOnUpdate(false)`にして再起動はこちらで制御する。
+3. 成功なら`ESP.restart()`。失敗系は`resumeSamplingAfterOtaFailure()`で測定
+   タイマー・WDT登録を復旧して測定続行し、1分のバックオフを置いて次回のバッチ
+   送信時のチェックでリトライする（後述、実機で踏んだ不具合）。
+
+**TFT表示もこのシーケンスに連動させている。** 測定タイマーが止まると
+`gDispIntensity` 等は最後の値のまま凍るため、震度画面を出し続けると
+「更新中で止まっている」のか「地震計が本当に固まった」のか目視で区別できない。
+`pauseSamplingForOta()`で立てる`gOtaInProgress`フラグを`loop()`が見て、震度画面の
+代わりに`Display::renderOtaUpdating()`（紫背景 + "OTA UPDATING"）を出す。日時だけは
+`loop()`側で毎フレーム計算し続けるので、更新中画面でもフリーズ検知の役目は保てる。
+
+### 2.6 TLS検証
+
+**実機で2段階の失敗を踏んでからルートCA埋め込みに落ち着いた**（2026-08-06、device2実機）:
 
 1. 当初はESP-IDFの低レベルAPI(`esp_https_ota_begin`/`perform`/`finish` +
    `esp_http_client_config_t.crt_bundle_attach = arduino_esp_crt_bundle_attach`)
@@ -272,7 +196,7 @@ ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファー�
 できる。バージョン文字列を取り違えて誤った版を公開する運用ミス対策としては、
 `.sha256`は`publish_ota.sh`が生成し運用者が手元で目視確認する用途に留めた）。
 
-### 実機で踏んだ不具合: 失敗時の高頻度リトライで測定が止まった
+### 2.7 実機で踏んだ不具合: 失敗時の高頻度リトライで測定が止まった
 
 トリガー(`X-Namz-Ota-Version`)は`Uploader`がキャッシュする最終成功レスポンスの
 値で、失敗直後は同じ値のまま変わらない。当初の実装はこの値を見て「不一致なら
@@ -280,10 +204,10 @@ ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファー�
 `uploaderTask`のループ周期（約50ms＋ネットワーク待ち）ごとに取得を再試行する
 高頻度リトライになり、そのたびに`pauseSamplingForOta()`で測定タイマーが
 止まったまま実質戻らず、**実測が止まった**（device2実機で欠測を招いた。原因は
-上記1のTLS失敗）。1分のバックオフ（`checkAndPerformPullOta`内の
+上記2.6の1のTLS失敗）。1分のバックオフ（`checkAndPerformPullOta`内の
 `static uint32_t sNextAttemptMs`）を追加して解消した。
 
-### 停滞の検知: watchdog Lambdaに通知を追加
+### 2.8 停滞の検知: watchdog Lambdaに通知を追加
 
 `pending_ota_version`は一回性ではなく「あるべき状態」として持ち続けるため、
 証明書検証失敗のような問題が起きてもデバイスは（測定を止めずに）黙って
@@ -297,28 +221,60 @@ ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファー�
 拾う。`tools/request_ota.py request`が`pending_ota_requested_at_us`を、
 `cancel`が`ota_stuck_notified_at_us`含め一式を消す。
 
-### ロールバック: 今回は見送った
+### 2.9 ロールバック: 見送ったまま
 
-push型（§5）で書いた「ロールバックは期待しない、最後の砦は物理アクセス」は
-pull型でも変わっていない。無人トリガーで焼き損じた場合に自動で前スロットへ
-戻れる`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`は本来pull型でこそ価値が出るが、
-これはbootloaderのsdkconfig変更を伴い、**実際にロールバックが発動する
-ところまで確認しないと安全側に効いているか判断できない**（設定を間違えると
-起動そのものが壊れうる）。今回は他の実機不具合（TLS・リトライ）の修正で
-手一杯になったため見送った。次に実機を触る機会に、push型の実機確認
-（§6の残タスク）と合わせて検討する。
+「ロールバックは期待しない、最後の砦は物理アクセス」という割り切りは変わって
+いない。Arduino core の既定ビルドは`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`が
+入っておらず、新イメージは書けた時点で有効扱いになる。自動で前のスロットへ
+戻ることはない。無人トリガーで焼き損じた場合に自動で前スロットへ戻れる
+この設定は本来pull型でこそ価値が出るが、bootloaderのsdkconfig変更を伴い、
+**実際にロールバックが発動するところまで確認しないと安全側に効いているか
+判断できない**（設定を間違えると起動そのものが壊れうる）ため見送っている。
 
-### 未決事項・既知の割り切り
+## 3. 過去に検討したLAN内push（ArduinoOTA）と、撤去した理由
 
-- **ロールバック未実装**（上記）。実機確認のタイミングでやる。
+2026-08-06に`ArduinoOTA`（母艦から`espota`で焼く）も実装し、device 2への
+USB書き込み・起動・OTAリスナー起動（`namazu-2.local`のmDNS広告）までは実機で
+確認できたが、**push本体（`espota`での転送）は自宅ネットワークの構成により
+母艦から一度も届かなかった**:
+
+- `ping 10.255.255.1`（デバイス側ゲートウェイ）は通る（ttl=63、1ホップ挟んで
+  ルーティングはされている）
+- `namazu-2.local` のmDNS解決は失敗（`Host ... Not Found`）
+- IP直指定でも `espota` のUDP招待（ポート3232）に**無応答**（`No response from the ESP`）
+
+ICMPは通るのにUDP往復が通らないのは、SSID名の `_g`（ゲスト回線らしき命名）が
+示すとおり**VLAN間のクライアント分離**が疑わしい（デバイスの発信＝AWSへの
+HTTPS送信は素通り、他ホストからの着信だけ塞がれる構成）。デバイス側のOTAサーバ
+自体は起動ログで稼働を確認済みなので、ファーム実装の問題ではなくネットワーク
+構成上の制約だった。試すには`unnamed_network_g`に実際に接続した端末（スマホ・
+同SSID上のPC）から`espota`を叩くか、ルータ/APの当該SSID設定でクライアント
+分離を確認する必要があったが、pull型が実機で確実に動くと確認できた
+（§2冒頭）ため、この制約を回避してまでpush型を通す動機が無いまま放置されていた。
+
+2026-08-10、「実際に届かず使っていない機能はDRAM/Flashの無駄では」という調査で
+撤去した。`ArduinoOTA`本体・専用コールバック・`platformio.ini`の`-ota` env・
+`DeviceIdentity`の`otaPassword`(NVS)・`tools/provision_device.py`の
+`ota-password`コマンドを一式削除。静的RAMで約3.9KB、Flashで約39KB空いた
+（`pauseSamplingForOta()`/`resumeSamplingAfterOtaFailure()`はpull型と共有の
+安全停止シーケンスなのでそのまま残した）。詳細は
+[log/2026-08-10-drop-lan-push-ota.md](log/2026-08-10-drop-lan-push-ota.md)。
+
+もし将来LAN内pushを復活させる必要が出たら、まずこのVLAN分離を解消（対象SSIDの
+クライアント分離設定を外す、または母艦を同じVLANに置く）してから、
+このセクションと過去の実装コミット（`docs/log/2026-08-06-ota-arduino-ota.md`他）
+を参照して作り直すことになる。
+
+## 4. 未決事項・既知の割り切り
+
+- **ロールバック未実装**（§2.9）。実機確認のタイミングでやる。
 - **段階的ロールアウト**（1台だけ先に上げて様子見）は`pending_ota_version`を
   デバイス単位で持つ設計なので自然に表現できる（`request_ota.py`はdevice_id
   必須）。運用手順としては既に可能。
 - device1・device2とも実チップは16MB（`partitions_16mb.csv`、`[env:esp32dev]`base側で
-  指定）。パーティションサイズ差はビルドenv差に吸収されるので、pull型固有の対応は
-  不要（push型と同じ扱い）。NVSプロビジョニングも対象機と同じbase env
-  (`provision`/`adxl355-provision`)からextendsしてパーティション表を揃えている
-  （provision専用ビルドで誤って4MB既定に巻き戻すとspill容量が壊れるため）。
+  指定）。パーティションサイズ差はビルドenv差に吸収される。NVSプロビジョニングも
+  対象機と同じbase env(`provision`/`adxl355-provision`)からextendsしてパーティション表を
+  揃えている（provision専用ビルドで誤って4MB既定に巻き戻すとspill容量が壊れるため）。
 - ~~`pending_ota_version`を「消費しない」方針の副作用: 一致を確認した後もサーバ側
   の値が残り続けるため、後からUSBで別バージョンへ焼き直すと、デバイスが「要求と
   食い違う」と判断して勝手に元のバージョンへ戻す~~

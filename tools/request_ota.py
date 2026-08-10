@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""デバイスにpull型OTAの更新を許可する/取り消す手元用CLI（docs/ota.md §7）。
+"""デバイスにpull型OTAの更新を許可する/取り消す手元用CLI（docs/ota.md §2）。
 
 デバイスは定期的にapi Lambda(/devices/<id>)へ問い合わせ、pending_ota_versionが
 自分のビルドバージョン(NAMZ_FW_VERSION)と違えば安全停止シーケンスを経てから
