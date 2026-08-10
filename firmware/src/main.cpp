@@ -7,7 +7,6 @@
 // シリアルに "t_us,x,y,z" を出すだけ（tools/capture_serial.py 用・Phase1）。
 
 #include <Arduino.h>
-#include <ArduinoOTA.h>
 #include <HTTPUpdate.h>
 #include <SPI.h>
 #include <WiFi.h>
@@ -75,7 +74,7 @@ static volatile bool gManualRebootArmed = false;
 static volatile bool gManualRebootConfirmed = false;
 
 // デバイス識別情報・秘密・エンドポイントURL。setup()の先頭でNVSからロードする
-// （旧secrets.h。コンパイル時に埋め込まない理由はdocs/ota.md §7参照）。
+// （旧secrets.h。コンパイル時に埋め込まない理由はdocs/ota.md §2参照）。
 static DeviceIdentity gIdentity;
 
 #ifndef NAMZ_SENSOR_TEST
@@ -83,7 +82,7 @@ static DeviceIdentity gIdentity;
 // ヘッダの値を読んで返す」だけの汎用API、意味づけは呼び出し側=ここが持つ）。
 // - X-Namz-Restart: リモート再起動要求（docs/remote_restart.md）。ingestが
 //   立てるのはtools/request_restart.pyで要求した直後の1回だけ（一回性）。
-// - X-Namz-Ota-Version: pull型OTA更新許可（docs/ota.md §7）。
+// - X-Namz-Ota-Version: pull型OTA更新許可（docs/ota.md §2）。
 //   tools/request_ota.pyで立てた値をデバイスのビルドバージョンと一致するまで
 //   ingestが返し続ける（一回性ではない、消費しない）。
 static constexpr const char* kRestartHeader = "X-Namz-Restart";
@@ -96,7 +95,7 @@ static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHea
 // 今動いているビルド版数(kFwVersion)をingestへ渡し、devicesテーブルに記録させる。
 // サーバ側からも「今どのバージョンが動いているか」を見えるようにするための
 // 汎用ヘッダで、X-Namz-Ota-Versionの停滞検知が「原因不明」で止まっていた問題
-// （docs/ota.md §7 未決事項1）に対する外部可観測性を与える。
+// （docs/ota.md §2 未決事項1）に対する外部可観測性を与える。
 static constexpr const char* kFwVersionHeader = "X-Namz-Fw-Version";
 // 起動からの経過(us、esp_timer_get_time())を毎バッチ乗せる（docs/uptime.md §2.2）。
 // センサ値ではなく「今のプロセスの状態」なのでwireトレイラーではなくヘッダで運ぶ。
@@ -162,8 +161,6 @@ struct AlertMsg {
 
 static QueueHandle_t gBatchQueue;  // Batch*
 static QueueHandle_t gAlertQueue;  // AlertMsg
-
-static char gOtaHostname[16];  // "namazu-<id>"
 #endif
 
 static TaskHandle_t gSamplingTask;
@@ -302,7 +299,7 @@ static void connectWifi() {
                 WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "FAILED");
 }
 
-// --- OTA更新の安全な停止・再開（push/pull共通。docs/ota.md）---
+// --- OTA更新の安全な停止・再開（docs/ota.md）---
 // フラッシュ書き込み中はキャッシュが無効になり両コアの命令フェッチが止まるため、
 // 100Hzの測定タイマーは転送中に確実に取りこぼす。転送開始時点で一旦止め、RAMキュー
 // のバッチはLittleFSへ退避してから焼く（電源断・パニックでも失わないようにする）。
@@ -329,27 +326,7 @@ static void resumeSamplingAfterOtaFailure(const char* reason) {
   gOtaInProgress = false;  // 失敗して測定を再開したので震度画面に戻す
 }
 
-static void otaOnStart() { pauseSamplingForOta(); }
-
-static void otaOnProgress(unsigned int done, unsigned int total) {
-  // 転送は呼び出し元(uploaderTask)のループ内で丸ごとブロックするので、ここで
-  // 都度リセットしないとタスクウォッチドッグ(10秒)に落ちる。
-  esp_task_wdt_reset();
-  static uint8_t lastPct = 255;
-  uint8_t pct = total ? (uint8_t)(done * 100U / total) : 0;
-  if (pct != lastPct) {
-    Serial.printf("[ota] progress %u%%\n", pct);
-    lastPct = pct;
-  }
-}
-
-static void otaOnError(ota_error_t error) {
-  char reason[32];
-  snprintf(reason, sizeof(reason), "push error %u", (unsigned)error);
-  resumeSamplingAfterOtaFailure(reason);
-}
-
-// --- OTA更新の待ち受け（HTTPS pull、外出先からの更新・無人運用向け。docs/ota.md §7）---
+// --- OTA更新の待ち受け（HTTPS pull、外出先からの更新・無人運用向け。docs/ota.md §2）---
 // 手元から tools/request_ota.py で許可したバージョンを、リモート再起動要求と同じ
 // 経路（バッチ送信レスポンスへの便乗、X-Namz-Ota-Version）で知る。再起動要求と
 // 違い「消費しない」——ターゲットは「あるべき状態」なので、デバイスが実際にその
@@ -366,7 +343,7 @@ extern const uint8_t amazon_root_ca1_pem_end[] asm("_binary_certs_amazon_root_ca
 // 成功時はtrueを返す（呼び出し側がESP.restart()する）。失敗時はfalseを返す
 // （呼び出し側がresumeSamplingAfterOtaFailureを呼ぶ）。
 //
-// TLS検証の経緯（実機で2段階の失敗を踏んでいる。docs/ota.md §7）:
+// TLS検証の経緯（実機で2段階の失敗を踏んでいる。docs/ota.md §2）:
 // 1. ESP-IDFの低レベルAPI(esp_https_ota_begin/perform/finish +
 //    esp_http_client_config_t.crt_bundle_attach)で試したが、device2実機で
 //    "Failed to attach bundle" のままTLSハンドシェイクが常に失敗した。
@@ -407,7 +384,7 @@ static bool performPullOta(const String& targetVersion) {
 // 更新されないため（Uploaderがキャッシュする値なので）、この関数はuploaderTask
 // のループで毎回呼ばれ続ける。バックオフ無しだと1周(50ms+ネットワーク待ち)ごとに
 // 取得を試み、測定タイマーが止まったまま(pauseSamplingForOta中)になり続けて
-// 実測が止まる（実機で踏んだ。docs/ota.md §7）。
+// 実測が止まる（実機で踏んだ。docs/ota.md §2）。
 static constexpr int64_t kOtaRetryBackoffUs = 60LL * 1000000LL;  // 1分
 
 // バージョン不一致を見つけたら、安全停止→取得→(成功なら再起動/失敗なら復旧)まで
@@ -458,11 +435,6 @@ static void uploaderTask(void*) {
     if (millis() - lastResync > kNtpResyncSeconds * 1000UL) {
       lastResync = millis();
     }
-
-    // OTA更新の待ち受け（LAN内push）。通常は着信確認だけの軽い呼び出しだが、
-    // 実際に転送が始まると完了までこの呼び出し内でブロックする
-    // （otaOnProgressでWDTを養う）。
-    ArduinoOTA.handle();
 
     // batchQueue -> uploader
     Batch* b = nullptr;
@@ -525,7 +497,7 @@ static void uploaderTask(void*) {
       }
     }
 
-    // pull型OTA更新の確認（docs/ota.md §7）。同じバッチ送信レスポンスヘッダで
+    // pull型OTA更新の確認（docs/ota.md §2）。同じバッチ送信レスポンスヘッダで
     // 気づく。不一致なら取得〜書き込みまで一息に行い、完了までここでブロック
     // する（performPullOta内でWDTを養う）。
     checkAndPerformPullOta(gUploader->lastResponseHeaderValue(kOtaVersionHeader));
@@ -548,7 +520,7 @@ void setup() {
   Serial.printf("[boot] reset_reason=%s\n", sResetReasonBuf);
 #endif
 
-  // デバイス識別情報・秘密・エンドポイントURLをNVSからロードする（docs/ota.md §7）。
+  // デバイス識別情報・秘密・エンドポイントURLをNVSからロードする（docs/ota.md §2）。
   // 失敗時はdeviceId=0のまま返る。表示のIDだけはこの時点で使うが、実際に
   // 空のまま進めてよいかは下のガード（NAMZ_SENSOR_TEST以外）でチェックする。
   loadDeviceIdentity(gIdentity);
@@ -584,7 +556,7 @@ void setup() {
 #ifndef NAMZ_SENSOR_TEST
   // WiFi/HMAC/送信先が空のまま進むと不定動作になる（未プロビジョニング）。
   // tools/provision_device.py provision-h --id N → pio run -e provision -t upload
-  // を先にやれ（docs/ota.md §7）。
+  // を先にやれ（docs/ota.md §2）。
   if (gIdentity.deviceId == 0 || gIdentity.wifiSsid.length() == 0 ||
       gIdentity.hmacSecret.length() == 0 || gIdentity.ingestUrl.length() == 0) {
     for (;;) {
@@ -609,16 +581,6 @@ void setup() {
                            kExtraRequestHeaderNames, kExtraRequestHeaderValues,
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
   gUploader->begin();
-
-  // OTA更新（docs/ota.md）。ArduinoOTA.handle()はuploaderTask（Core0）で回す。
-  snprintf(gOtaHostname, sizeof(gOtaHostname), "namazu-%u", (unsigned)gIdentity.deviceId);
-  ArduinoOTA.setHostname(gOtaHostname);
-  ArduinoOTA.setPassword(gIdentity.otaPassword.c_str());
-  ArduinoOTA.onStart(otaOnStart);
-  ArduinoOTA.onProgress(otaOnProgress);
-  ArduinoOTA.onError(otaOnError);
-  ArduinoOTA.begin();
-  Serial.printf("[ota] ready as %s.local\n", gOtaHostname);
 
   xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0);
 #endif

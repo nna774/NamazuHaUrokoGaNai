@@ -13,7 +13,6 @@ bool loadDeviceIdentity(DeviceIdentity& out) {
   out.wifiSsid = prefs.getString("wifi_ssid", "");
   out.wifiPass = prefs.getString("wifi_pass", "");
   out.hmacSecret = prefs.getString("hmac_secret", "");
-  out.otaPassword = prefs.getString("ota_password", "");
   out.ingestUrl = prefs.getString("ingest_url", "");
   out.alertUrl = prefs.getString("alert_url", "");
   out.apiUrl = prefs.getString("api_url", "");
@@ -30,7 +29,6 @@ bool saveDeviceIdentity(const DeviceIdentity& in) {
   prefs.putString("wifi_ssid", in.wifiSsid);
   prefs.putString("wifi_pass", in.wifiPass);
   prefs.putString("hmac_secret", in.hmacSecret);
-  prefs.putString("ota_password", in.otaPassword);
   prefs.putString("ingest_url", in.ingestUrl);
   prefs.putString("alert_url", in.alertUrl);
   prefs.putString("api_url", in.apiUrl);

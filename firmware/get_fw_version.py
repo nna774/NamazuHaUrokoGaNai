@@ -1,15 +1,13 @@
 """ビルド時にgitの短縮hashをNAMZ_FW_VERSIONへ、env名からNAMZ_OTA_ENVを注入する
-(docs/ota.md §7)。
+(docs/ota.md §2)。
 
 pull型OTAはビルドバージョンの一致判定でトリガーするので、焼いたバイナリが
 「どのコミットか」を自己申告できないと成立しない。作業ツリーが汚れていたら
 -dirtyを付け、未コミット状態を配布版として掴む事故に気付けるようにする。
 
-NAMZ_OTA_ENVは「センサ・ボードの組」を表す（esp32dev/adxl355。espota用の
-"-ota" envはアップロード方式が違うだけで中身は同じビルドなのでesp32dev/adxl355に
-畳み込む）。platformio.ini側の各envに`-DNAMZ_OTA_ENV=...`を個別に書くと、
-adxl355が`${env:esp32dev.build_flags}`ごと継承する際に二重定義警告が出るので、
-ここでenv名から一元的に決める。
+NAMZ_OTA_ENVは「センサ・ボードの組」を表す（esp32dev/adxl355）。platformio.ini側の
+各envに`-DNAMZ_OTA_ENV=...`を個別に書くと、adxl355が`${env:esp32dev.build_flags}`
+ごと継承する際に二重定義警告が出るので、ここでenv名から一元的に決める。
 """
 
 import subprocess

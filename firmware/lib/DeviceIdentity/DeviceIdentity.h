@@ -2,7 +2,7 @@
 // デバイス固有の識別情報・秘密・エンドポイントURL。
 //
 // コンパイル時定数(旧secrets.h)としては埋め込まず、NVS(Preferences)に持つ。
-// 理由(docs/ota.md §7「バイナリの秘密情報を分離しないと成立しない」):
+// 理由(docs/ota.md §2「バイナリの秘密情報を分離しないと成立しない」):
 // pull型OTAで env ごとに1本のバイナリを公開URLへ置く設計は、WiFiパスワードや
 // 投稿用HMAC鍵がバイナリに平文で焼き込まれていると成立しない。OTAはappパー
 // ティションのみを書き換えNVSには触らないため、ここに置けばOTAをまたいで
@@ -18,7 +18,6 @@ struct DeviceIdentity {
   String wifiSsid;
   String wifiPass;
   String hmacSecret;
-  String otaPassword;
   // エンドポイントURL自体は秘密ではないが、デバイス個体差ではなくデプロイ差
   // （手元の devices.json manifest）に属するので、同じ経路でNVSへ持つ。
   String ingestUrl;
