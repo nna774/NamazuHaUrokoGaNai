@@ -185,3 +185,20 @@ mutexなしで競合が消える、小さく安全な修正。
 一貫した経験則とのこと。後付けの仮説にしては綺麗にハマりすぎている面はまだ残るが、
 偶然の一致とは考えにくい強さの裏付け。`kMaxRamBatches`縮小(選択肢2、現在1号機のみ
 6→2で実験中)が実機投入すべき本命の対策である可能性が高まった。
+
+## 続報3: `malloc(18032)`が延々失敗し続ける件、`MALLOC_CAP_8BIT` vs `INTERNAL`の疑いを再検証
+
+続報1のvolatile publish修正後の実機ログを精査したところ、`DNS Failed`は1回しか
+出ておらず、その後延々続いていた失敗は`malloc(18032)`単体だった。`heap_free`は
+約59000〜59084で終始安定（右肩下がりなし=リークではない）にもかかわらず、
+同じ`ESP.getMaxAllocHeap()`(`MALLOC_CAP_INTERNAL`基準)は毎回45044という
+`malloc(18032)`に対して十分すぎる値を報告し続けていた。
+
+これはPR #54の原因(`MALLOC_CAP_INTERNAL`が`MALLOC_CAP_8BIT`を過大報告する)と
+同じ構図に見える——ただし今回は当時と違い、TlsMemPoolでTLS分は既に隔離済みの
+状態でも起きている。実際に`malloc()`が使う`MALLOC_CAP_8BIT`側の実測値がまだ
+ログに出ていなかったため、[batch-uplink#17](https://github.com/nna774/batch-uplink/pull/17)
+（v2.8.0）で`pump()`の読み込み失敗ログに`heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)`
+を追加した(`maxblock_internal`/`maxblock_8bit`のペアで両方出す)。firmware側の
+pinもv2.8.0へ追従済み。次の実機検証で、失敗の瞬間に`maxblock_8bit`が本当に
+18032未満まで断片化しているかを確認する。
