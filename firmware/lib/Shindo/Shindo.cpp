@@ -13,8 +13,8 @@ Shindo::Shindo() : compPos_(0), compCount_(0), seen_(0), lastComposite_(0.0f) {
 
 float Shindo::firStep(int axis, float sample) {
   int pos = histPos_[axis];
-  hist_[axis][pos] = sample;
-  // y[n] = sum_k taps[k] * x[n-k]
+  hist_[axis][pos] = static_cast<int16_t>(std::lround(sample * kGalScale));
+  // y[n] = sum_k taps[k] * x[n-k]。hist_はkGalScale倍のまま積算し、最後に1回だけ割る。
   double acc = 0.0;
   int idx = pos;
   for (int k = 0; k < kJmaFirNumTaps; ++k) {
@@ -23,7 +23,7 @@ float Shindo::firStep(int axis, float sample) {
   }
   if (++pos >= kJmaFirNumTaps) pos = 0;
   histPos_[axis] = pos;
-  return static_cast<float>(acc);
+  return static_cast<float>(acc / kGalScale);
 }
 
 float Shindo::push(float galX, float galY, float galZ) {
@@ -35,7 +35,7 @@ float Shindo::push(float galX, float galY, float galZ) {
   // ウォームアップ中はフィルタ過渡なので移動窓に入れない。
   ++seen_;
   if (seen_ > kWarmupSamples) {
-    composite_[compPos_] = comp;
+    composite_[compPos_] = static_cast<int16_t>(std::lround(comp * kCompositeScale));
     if (++compPos_ >= kWindowSamples) compPos_ = 0;
     if (compCount_ < kWindowSamples) ++compCount_;
   }
@@ -68,14 +68,14 @@ float Shindo::currentIntensity() {
   // 最古値がnth_elementで別の位置へ移動してしまい、次回pushが新しい値でない
   // 値を上書きしてしまう）。実測で震度計算が食い違うことを確認済み。
   // 欲しいのは「上位kExceedSamples個のうち最小の値」だけなので、6000要素の
-  // コピー(24000B、compositeとほぼ同サイズの静的バッファ)は不要。
+  // コピー（compositeとほぼ同サイズの静的バッファ）は不要。
   // composite_を読み取り専用のまま、サイズkExceedSamples(30個=120B)の
   // 最小ヒープで一回走査すれば足りる。
   float heap[kExceedSamples];
   int size = 0;
   int n = compCount_;
   for (int i = 0; i < n; ++i) {
-    float v = composite_[i];
+    float v = static_cast<float>(composite_[i]) / kCompositeScale;
     if (size < kExceedSamples) {
       heap[size++] = v;
       if (size == kExceedSamples) {
