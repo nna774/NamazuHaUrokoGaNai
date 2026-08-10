@@ -706,12 +706,17 @@ void setup() {
   // CloudFrontを介さない）。openssl s_clientで実機のチェーンを確認したところ
   // leaf -> Amazon RSA 2048 M01 -> Amazon Root CA 1 で、OTA用に埋め込み済みの
   // 同じルートCAで検証できる（ドメインは別だがどちらもAWS/ACM発行のため）。
+  // maxSpillReadBytes: 退避ファイルは常にkBatchBufferBytes以下(Batchプールの
+  // スロットサイズと同じ実体、docs/log/2026-08-10-ota-tls-pool-race.md)。
+  // 都度malloc/freeによる断片化(TLS・Batchバッファに続く3つ目のmalloc(18032))
+  // を避けるため固定バッファを使い回させる(batch-uplink v2.10.0)。
   gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
                            kWatchedHeaders,
                            kExtraRequestHeaderNames, kExtraRequestHeaderValues,
-                           reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
+                           reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
+                           kBatchBufferBytes);
   gUploader->begin();
 
   if (xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0) != pdPASS) {
