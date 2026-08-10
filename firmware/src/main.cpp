@@ -12,7 +12,6 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
-#include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
@@ -22,45 +21,36 @@
 #include "DeviceIdentity.h"
 #include "Display.h"
 #include "NamzWire.h"
-#ifdef NAMZ_SENSOR_ADXL355
+#ifdef NAMZ_SENSOR_FAKE
+#include "FakeSensor.h"
+#elif defined(NAMZ_SENSOR_ADXL355)
 #include "Adxl355.h"
 #else
 #include "Iis3dhhc.h"
 #endif
 #include "Shindo.h"
 #include "TimeSync.h"
-
-// uploaderTaskのループ内、どの呼び出しの前後で最後に生きていたかを見るための
-// 一時デバッグログ。batch-uplink側のUPLINK_DEBUG_TIMINGと同じbuild_flagsで
-// 有効化する（既定オフ、コストゼロ）。device1の「postBatch()の1本目は成功する
-// のに2本目のログが一切出ない」調査用——pump()どころかそこへ到達する前の
-// どこかで詰まっている可能性を切り分ける。
-#ifdef UPLINK_DEBUG_TIMING
-#define LOOP_DEBUG_LOG(...) Serial.printf(__VA_ARGS__)
-#else
-#define LOOP_DEBUG_LOG(...) \
-  do {                      \
-  } while (0)
-#endif
 #include "Uploader.h"
 #include "config.h"
 
 static SPIClass gSpi(VSPI);
 // センサはビルド時に選ぶ（-DNAMZ_SENSOR_ADXL355）。CSが別ピンなので、比較のため
 // 両方を同じバスにぶら下げたままファームだけ焼き分けてもよい。
-#ifdef NAMZ_SENSOR_ADXL355
+#ifdef NAMZ_SENSOR_FAKE
+// 実センサ無しでパイプラインだけ確認する結合試験用(FakeSensor.h参照)。
+// CSピンはSPIを使わないFakeSensorでは意味を持たないが、gSpi.begin()の
+// 引数として要る。
+static constexpr int kPinCsSensor = kPinCsIis3dhhc;
+static constexpr const char* kSensorName = "FAKE";
+static FakeSensor gSensor;
+#elif defined(NAMZ_SENSOR_ADXL355)
 static constexpr int kPinCsSensor = kPinCsAdxl355;
 static constexpr const char* kSensorName = "ADXL355";
 static Adxl355 gSensor(gSpi, kPinCsSensor, kSpiClockHz);
-// バッチバッファプールのスロットサイズを起動前（静的配列）に決めるための複製。
-// Adxl355::sampleFormat()(=1, int32)と対応。食い違いはsetup()の実行時チェックで検知する。
-static constexpr size_t kBatchRecordBytes = 3 * sizeof(int32_t);
 #else
 static constexpr int kPinCsSensor = kPinCsIis3dhhc;
 static constexpr const char* kSensorName = "IIS3DHHC";
 static Iis3dhhc gSensor(gSpi, kPinCsSensor, kSpiClockHz);
-// Iis3dhhc::sampleFormat()(=0, int16)と対応。
-static constexpr size_t kBatchRecordBytes = 3 * sizeof(int16_t);
 #endif
 static Shindo gShindo;
 static Display gDisplay;
@@ -170,56 +160,8 @@ struct AlertMsg {
   float peak;
 };
 
-static constexpr size_t kBatchQueueDepth = 4;  // xQueueCreate()に渡す実際の深さと揃える
 static QueueHandle_t gBatchQueue;  // Batch*
 static QueueHandle_t gAlertQueue;  // AlertMsg
-
-// --- バッチバッファの固定プール ---
-// namzwire::newBatch()(=Batchの内部malloc)を毎バッチ回すと、長時間稼働で
-// ヒープ断片化を起こしうる。実機でESP.getMaxAllocHeap()(MALLOC_CAP_INTERNAL基準)が
-// malloc()の実際の要求(MALLOC_CAP_8BIT基準)を過大報告し、ヒープに余裕があるように
-// 見えるのにnewBatch()が失敗する現象を観測した
-// (docs/log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md §11)。
-//
-// 同時生存数の理論上限「組み立て中(1) + gBatchQueueの深さ + kMaxRamBatches」ぶん
-// (esp32devで7本≒126KB)を`static uint8_t[][]`(=.dram0.bss)で確保しようとしたら
-// リンカが`dram0_0_seg`をオーバーフローさせた。memory.ldのコメントに答えがあった:
-// このリージョンの宣言サイズ(約121KB)はROM起動時の一時使用と衝突しないよう
-// 静的配置(.data/.bss)だけに課された保守的な制限で、"本来は0x50000(320KB)ある。
-// この余剰分は実行時のヒープでは使える"と明記されている。つまり静的配列ではなく
-// setup()で1回だけmalloc()すれば、この制限を受けない
-// (docs/log/2026-08-10-newbatch-buffer-pool-handoff.md で実機確認済み)。
-// WiFi/TLS等が動き出す前(=ヒープが一番連続している時)に確保するため、
-// setup()の先頭付近で確保する。スロット数とRAM予算の実測はconfig.hの
-// kMaxRamBatches側のコメント、および`pio run -e pool-probe`(使い捨て
-// 診断ビルド)参照。
-static constexpr size_t kBatchPoolSlots = 1 + kBatchQueueDepth + kMaxRamBatches;
-static constexpr size_t kBatchBufferBytes =
-    kWireHeaderSize + kBatchSamples * kBatchRecordBytes + namzwire::kMaxTrailerBytes;
-static uint8_t* sBatchPool = nullptr;  // malloc(kBatchPoolSlots * kBatchBufferBytes)
-static QueueHandle_t gBufferPool;      // uint8_t*（sBatchPoolの各スロット先頭を積む）
-
-static void releaseBatchBufferToPool(void* ctx, uint8_t* buf) {
-  xQueueSendToBack(static_cast<QueueHandle_t>(ctx), &buf, 0);
-}
-
-// namzwire::newBatch()相当だが、プールから借りる版。プールが尽きた場合
-// (kBatchPoolSlotsの見積もりが崩れた時の保険。想定運転では起きないはず)は
-// 素朴なmalloc版へフォールバックする。
-static Batch* newPooledBatch(uint32_t capacitySamples, uint8_t sampleFormat) {
-  uint8_t* buf = nullptr;
-  if (xQueueReceive(gBufferPool, &buf, 0) != pdTRUE) {
-    static bool sPoolExhaustedLogged = false;
-    if (!sPoolExhaustedLogged) {
-      sPoolExhaustedLogged = true;
-      Serial.println("[pool] buffer pool exhausted, falling back to malloc (sizing bug?)");
-    }
-    return namzwire::newBatch(capacitySamples, sampleFormat);
-  }
-  return new Batch(buf, kBatchBufferBytes, capacitySamples, namzwire::sampleBytes(sampleFormat),
-                    kWireHeaderSize, namzwire::kMaxTrailerBytes,
-                    releaseBatchBufferToPool, gBufferPool);
-}
 
 static char gOtaHostname[16];  // "namazu-<id>"
 #endif
@@ -251,19 +193,7 @@ static void samplingTask(void*) {
     esp_task_wdt_reset();
 
     AccelSample rd;
-    static bool sReadFailing = false;
-    if (!gSensor.read(rd)) {
-      if (!sReadFailing) {
-        sReadFailing = true;
-        LOOP_DEBUG_LOG("[loop-debug] gSensor.read() started failing t=%lld\n",
-                        (long long)esp_timer_get_time());
-      }
-      continue;
-    } else if (sReadFailing) {
-      sReadFailing = false;
-      LOOP_DEBUG_LOG("[loop-debug] gSensor.read() recovered t=%lld\n",
-                      (long long)esp_timer_get_time());
-    }
+    if (!gSensor.read(rd)) continue;
     accX += rd.x;
     accY += rd.y;
     accZ += rd.z;
@@ -285,42 +215,15 @@ static void samplingTask(void*) {
 #else
     // NTP同期前はタイムスタンプが無効(1970年)になるのでサンプルを捨てる。
     // 起動直後の数秒ぶんを失うだけで、24/365運用では無視できる。
-    if (!timesync::isSynced()) {
-      static bool sSyncLost = false;
-      if (!sSyncLost) {
-        sSyncLost = true;
-        LOOP_DEBUG_LOG("[loop-debug] timesync::isSynced() false t=%lld\n",
-                        (long long)esp_timer_get_time());
-      }
-      continue;
-    }
+    if (!timesync::isSynced()) continue;
 
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
-      static bool sNewBatchFailing = false;
-      cur = newPooledBatch(kBatchSamples, gSensor.sampleFormat());
+      cur = namzwire::newBatch(kBatchSamples, gSensor.sampleFormat());
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
-        if (!sNewBatchFailing) {
-          sNewBatchFailing = true;
-          // ESP.getMaxAllocHeap()はMALLOC_CAP_INTERNAL基準。malloc()（Batchの内部で
-          // 使っている）が実際に要求するのはMALLOC_CAP_8BIT。内蔵RAMには8BIT不可な
-          // 領域(IRAM専用部分)も含まれるので、両者が食い違えば「INTERNAL基準では
-          // 空きがあるのにmalloc()が失敗する」という現象の説明になる。実測で切り分ける。
-          LOOP_DEBUG_LOG(
-              "[loop-debug] newBatch invalid, retrying next sample heap_free=%u maxblock_internal=%u "
-              "maxblock_8bit=%u t=%lld\n",
-              (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
-              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-              (long long)esp_timer_get_time());
-        }
         delete cur;
         cur = nullptr;
       } else {
-        if (sNewBatchFailing) {
-          sNewBatchFailing = false;
-          LOOP_DEBUG_LOG("[loop-debug] newBatch recovered t=%lld\n",
-                          (long long)esp_timer_get_time());
-        }
         cur->begin(ts);
         // 温度はバッチ先頭の1点だけ載せる。架台の熱ドリフトは分〜時間の時定数で
         // 動くので、30秒に1点あれば傾きは追える。
@@ -337,14 +240,9 @@ static void samplingTask(void*) {
         // Batch はワイヤ形式を知らないので、この一手だけがNAMZ形式を作っている。
         namzwire::fillHeader(*cur, gSensor.sensorType(), gSensor.scaleMgPerLsb(),
                              kSampleRateHz, gIdentity.deviceId);
-        static uint32_t sBatchCompleteCount = 0;
-        LOOP_DEBUG_LOG("[loop-debug] batch complete #%u t=%lld\n",
-                        (unsigned)++sBatchCompleteCount, (long long)esp_timer_get_time());
         if (xQueueSend(gBatchQueue, &cur, 0) != pdTRUE) {
           // 送信タスクが詰まっている: uploaderに直接渡す代わりに破棄回避のため待たない。
           // batchQueueは十分な深さを持たせている前提。溢れたら最古を諦める。
-          LOOP_DEBUG_LOG("[loop-debug] gBatchQueue full, dropping oldest t=%lld\n",
-                          (long long)esp_timer_get_time());
           Batch* dropped = nullptr;
           if (xQueueReceive(gBatchQueue, &dropped, 0) == pdTRUE) delete dropped;
           xQueueSend(gBatchQueue, &cur, 0);
@@ -542,22 +440,18 @@ static void uploaderTask(void*) {
   uint32_t lastResync = 0;
   bool restartRequested = false;  // サーバからのリモート再起動要求（docs/remote_restart.md）
 
-  // このタスクは1周の中でネットワーク待ちを何度もする。DNS解決だけで最大15秒
-  // ブロックしうる(上のwatchdog設定コメント参照)ため、ウォッチドッグは20秒に
-  // 上げてある（実機で10秒時代にpanic再起動を確認した）。それでも単発の呼び出しが
-  // 積み重なれば超えうるので、タスクはハングしておらずソケットを待っているだけと
-  // 分かっている前提で、ブロックしうる呼び出しの前後に明示的に餌をやる。ここを
-  // 削ると回線が詰まった時に限って再起動する。
+  // このタスクは1周の中でネットワーク待ちを何度もする。TLS接続のタイムアウトは
+  // 1回あたり5秒あり、回線が詰まると「速報送信で5秒＋バッチ送信で5秒」で簡単に
+  // ウォッチドッグの10秒を超える（実機で panic 再起動した）。タスクはハングして
+  // おらず、ソケットを待っているだけなので、ブロックしうる呼び出しの前後で
+  // 明示的に餌をやる。ここを削ると回線が詰まった時に限って再起動する。
   for (;;) {
     esp_task_wdt_reset();
-    LOOP_DEBUG_LOG("[loop-debug] top t=%lld\n", (long long)esp_timer_get_time());
 
     // WiFi再接続
     if (WiFi.status() != WL_CONNECTED) {
-      LOOP_DEBUG_LOG("[loop-debug] before connectWifi t=%lld\n", (long long)esp_timer_get_time());
       connectWifi();
       esp_task_wdt_reset();
-      LOOP_DEBUG_LOG("[loop-debug] after connectWifi t=%lld\n", (long long)esp_timer_get_time());
     }
     // NTP再同期（間接: SNTPが自動pollするので明示不要だが接続回復時に備え）
     if (millis() - lastResync > kNtpResyncSeconds * 1000UL) {
@@ -567,9 +461,7 @@ static void uploaderTask(void*) {
     // OTA更新の待ち受け（LAN内push）。通常は着信確認だけの軽い呼び出しだが、
     // 実際に転送が始まると完了までこの呼び出し内でブロックする
     // （otaOnProgressでWDTを養う）。
-    LOOP_DEBUG_LOG("[loop-debug] before ota.handle t=%lld\n", (long long)esp_timer_get_time());
     ArduinoOTA.handle();
-    LOOP_DEBUG_LOG("[loop-debug] after ota.handle t=%lld\n", (long long)esp_timer_get_time());
 
     // batchQueue -> uploader
     Batch* b = nullptr;
@@ -598,9 +490,7 @@ static void uploaderTask(void*) {
     snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
     snprintf(sHeapFreeBuf, sizeof(sHeapFreeBuf), "%u", (unsigned)ESP.getFreeHeap());
     snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
-    LOOP_DEBUG_LOG("[loop-debug] before pump t=%lld\n", (long long)esp_timer_get_time());
     gUploader->pump();
-    LOOP_DEBUG_LOG("[loop-debug] after pump t=%lld\n", (long long)esp_timer_get_time());
     esp_task_wdt_reset();
 
     // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、RAMキューを
@@ -671,23 +561,12 @@ void setup() {
     Serial.printf("[sensor] %s ready\n", kSensorName);
   }
 
-  // watchdog: 20秒。WDT APIは ESP-IDF のメジャーバージョンで異なる。
-  //
-  // 元は10秒だったが、`WiFi.hostByName()`(WiFiGeneric.cpp)内部のDNS解決待ちが
-  // 最大15秒ブロックしうる(`waitStatusBits(WIFI_DNS_DONE_BIT, 15000)`、コメントに
-  // "real internal timeout in lwip library is 14[s]"とある)と実機で確認した
-  // （2026-08-09、docs/log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md）。
-  // このDNS待ちはHTTPClientの接続タイムアウト(5秒)にもUploaderのTLSハンドシェイク
-  // タイムアウト(4秒、batch-uplink v2.2.0)にも守られていない別枠のブロッキングで、
-  // コード側から制御できない。DNSキャッシュが切れて再解決が要る瞬間だけ10秒の
-  // WDTより先に詰まりパニック再起動していた（パニックはflushToSpill()を経由
-  // しないためRAM上のバッチを毎回失う）。DNS最悪ケース(15秒)に余裕を持って
-  // 収まるよう20秒に上げる。
+  // watchdog: 10秒。WDT APIは ESP-IDF のメジャーバージョンで異なる。
 #if ESP_IDF_VERSION_MAJOR >= 5
-  esp_task_wdt_config_t wdt = {.timeout_ms = 20000, .idle_core_mask = 0, .trigger_panic = true};
+  esp_task_wdt_config_t wdt = {.timeout_ms = 10000, .idle_core_mask = 0, .trigger_panic = true};
   esp_task_wdt_reconfigure(&wdt);
 #else
-  esp_task_wdt_init(20, true);  // 旧API: timeout[秒], panic
+  esp_task_wdt_init(10, true);  // 旧API: timeout[秒], panic
 #endif
 
 #ifndef NAMZ_SENSOR_TEST
@@ -702,37 +581,8 @@ void setup() {
     }
   }
 
-  gBatchQueue = xQueueCreate(kBatchQueueDepth, sizeof(Batch*));
+  gBatchQueue = xQueueCreate(4, sizeof(Batch*));
   gAlertQueue = xQueueCreate(4, sizeof(AlertMsg));
-
-  // kBatchRecordBytes(コンパイル時の複製)がgSensor.sampleFormat()の実際の値と
-  // 食い違うと、プールのスロットが小さすぎる/大きすぎるまま静的確保されてしまう。
-  // 小さすぎる場合はBatchの借用コンストラクタがinvalidを返し続け実質プール無効化、
-  // 大きすぎる場合はRAMの無駄遣いで済むが、どちらも気付けるようにログだけ出す。
-  if (namzwire::sampleBytes(gSensor.sampleFormat()) != kBatchRecordBytes) {
-    Serial.printf(
-        "[pool] BUG: kBatchRecordBytes=%u but sampleFormat()->%u bytes. buffer pool "
-        "sizing is wrong.\n",
-        (unsigned)kBatchRecordBytes, (unsigned)namzwire::sampleBytes(gSensor.sampleFormat()));
-  }
-  // static配列ではなくmalloc()で確保する（理由は宣言側のコメント参照。
-  // dram0_0_segの静的配置向け制限を受けないようにするため）。WiFi/TLS等が
-  // まだ何も確保していない、ヒープが一番連続しているこの時点で確保する。
-  sBatchPool = static_cast<uint8_t*>(malloc(kBatchPoolSlots * kBatchBufferBytes));
-  if (!sBatchPool) {
-    Serial.println("[pool] BUG: buffer pool malloc failed, pooling disabled");
-  }
-  gBufferPool = xQueueCreate(kBatchPoolSlots, sizeof(uint8_t*));
-  for (size_t i = 0; sBatchPool && i < kBatchPoolSlots; ++i) {
-    uint8_t* slot = sBatchPool + i * kBatchBufferBytes;
-    xQueueSendToBack(gBufferPool, &slot, 0);
-  }
-  Serial.printf("[pool] batch buffer pool: %u slots x %u B = %u B (%s) free_heap=%u maxblock_8bit=%u\n",
-                (unsigned)kBatchPoolSlots, (unsigned)kBatchBufferBytes,
-                (unsigned)(kBatchPoolSlots * kBatchBufferBytes), sBatchPool ? "ok" : "FAILED",
-                (unsigned)ESP.getFreeHeap(),
-                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-
   connectWifi();
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
@@ -763,8 +613,9 @@ void setup() {
 
   // バッチ1本のRAM量はセンサのサンプル幅で倍違う（int16 18KB / int32 36KB）。
   // kMaxRamBatches が実機のヒープに収まっているかを起動時に見えるようにしておく。
-  Serial.printf("[mem] free heap %u maxblock %u, batch %u B x %u\n", ESP.getFreeHeap(),
-                ESP.getMaxAllocHeap(), (unsigned)(kBatchSamples * kBatchRecordBytes),
+  Serial.printf("[mem] free heap %u maxblock %u, batch %u B x %u\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+                (unsigned)(kBatchSamples * (gSensor.sampleFormat() == 1 ? 12 : 6)),
                 (unsigned)kMaxRamBatches);
 
   // 測定タスクは Core1 に高優先度で固定
