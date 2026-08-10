@@ -29,7 +29,15 @@ class FakeSensor : public AccelSensor {
   // 既存のセンサ種別(0/1/2)と衝突しない値。ダッシュボード側はsensor_typeの
   // 値を検証していないため、未知の値でも壊れない（見た目が変なだけ）。
   uint8_t sensorType() const override { return 255; }
+  // レコード幅は既定でint16。NAMZ_SENSOR_ADXL355を併せて定義した
+  // fake-sensor-device2-profile env（platformio.ini）では、2号機と同じ
+  // int32(12B/サンプル)を返しバッチの実バイト数まで合わせる
+  // （docs/log/2026-08-11-fake-sensor-device2-profile-env.md 続報）。
+#ifdef NAMZ_SENSOR_ADXL355
+  uint8_t sampleFormat() const override { return 1; /* int32 */ }
+#else
   uint8_t sampleFormat() const override { return 0; /* int16 */ }
+#endif
 
  private:
   static int32_t jitter() { return (rand() % 41) - 20; }  // -20..+20 LSB
