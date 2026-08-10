@@ -11,6 +11,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
@@ -173,6 +174,79 @@ struct AlertMsg {
 
 static QueueHandle_t gBatchQueue;  // Batch*
 static QueueHandle_t gAlertQueue;  // AlertMsg
+
+// --- Batchバッファの固定プール（docs/log/2026-08-10-batch-ram-pool.md）---
+// namzwire::newBatch()(=Batchの内部malloc)を毎バッチ回すと、RAMキューに積まれた
+// Batch(約18KB、送信完了まで数十秒〜数分居座る)が一般ヒープの中でアドレスを
+// 転々と変え、malloc(18032)がMALLOC_CAP_8BITの最大連続空きブロック不足で詰まる
+// 事象を実機で確認した。TlsMemPoolでTLSの一時確保に対して行ったのと同じ対策
+// （頻発する固定サイズ確保を専用プールへ隔離し、一般ヒープにその挙動をさせない）
+// をBatchバッファにも適用する。batch-uplink v2.4.0で追加された、呼び出し側が
+// 用意した領域を借りる版のBatchコンストラクタ(Batch.h、外部バッファ+解放
+// コールバック)を使う。
+//
+// スロット数はkMaxRamBatchesちょうど（+1で組み立て中の1本ぶん）に抑える。
+// 以前の並行セッションの試み(docs/log/2026-08-10-newbatch-buffer-pool-handoff.md
+// 「続報3」)は「組み立て中1+gBatchQueue深さ4+kMaxRamBatches」の合計(当時7本
+// =126448B)で確保し、実機でsamplingTaskの生成失敗によるパニック再起動ループを
+// 踏んだ——isolatedなプローブ(pool_probe_main.cpp)での検証はDisplay/TFT_eSPIの
+// フォント読み込み等、本番firmwareが食う分を見落としており、実機の余裕は
+// 見た目より少なかった。今回はgBatchQueue分は数えず小さめに確保し、キュー内
+// 滞留ぶんは素朴なmalloc版へのフォールバックに任せる（安全側）。
+static constexpr size_t kBatchRecordBytes =
+#ifdef NAMZ_SENSOR_ADXL355
+    3 * sizeof(int32_t);
+#else
+    3 * sizeof(int16_t);
+#endif
+static constexpr size_t kBatchBufferBytes =
+    kWireHeaderSize + kBatchSamples * kBatchRecordBytes + namzwire::kMaxTrailerBytes;
+static constexpr size_t kBatchPoolSlots = kMaxRamBatches + 1;
+
+static uint8_t* sBatchPool = nullptr;  // malloc(kBatchPoolSlots * kBatchBufferBytes)
+static QueueHandle_t gBufferPool;      // uint8_t*（sBatchPoolの各スロット先頭を積む）
+
+static void releaseBatchBufferToPool(void* ctx, uint8_t* buf) {
+  QueueHandle_t pool = static_cast<QueueHandle_t>(ctx);
+  xQueueSendToBack(pool, &buf, 0);
+}
+
+// namzwire::newBatch()相当だが、プールから借りる版。プールが尽きた場合
+// （kBatchPoolSlotsの見積もりが実際の同時生存数を下回った時。安全な縮退として
+// 許容している）は素朴なmalloc版へフォールバックする。
+static Batch* newPooledBatch(uint32_t capacitySamples, uint8_t sampleFormat) {
+  uint8_t* buf = nullptr;
+  if (!gBufferPool || xQueueReceive(gBufferPool, &buf, 0) != pdTRUE) {
+    return namzwire::newBatch(capacitySamples, sampleFormat);
+  }
+  return new Batch(buf, kBatchBufferBytes, capacitySamples,
+                   namzwire::sampleBytes(sampleFormat), kWireHeaderSize,
+                   namzwire::kMaxTrailerBytes, releaseBatchBufferToPool, gBufferPool);
+}
+
+// setup()の先頭、Display/SPI/センサ初期化(TFT_eSPIのフォント読み込み等でヒープを
+// 消費する)より前、起動直後の最も断片化していない時点で呼ぶこと。malloc失敗時は
+// sBatchPool=nullptrのまま返り、newPooledBatch()は自動的に素朴なmalloc版へ
+// フォールバックする（クラッシュしない、pooling効果が無くなるだけ）。
+static void setupBatchPool() {
+  sBatchPool = static_cast<uint8_t*>(malloc(kBatchPoolSlots * kBatchBufferBytes));
+  if (!sBatchPool) {
+    Serial.printf(
+        "[pool] batch buffer pool malloc failed (%u slots x %u B), pooling disabled\n",
+        (unsigned)kBatchPoolSlots, (unsigned)kBatchBufferBytes);
+    return;
+  }
+  gBufferPool = xQueueCreate(kBatchPoolSlots, sizeof(uint8_t*));
+  for (size_t i = 0; i < kBatchPoolSlots; ++i) {
+    uint8_t* slot = sBatchPool + i * kBatchBufferBytes;
+    xQueueSendToBack(gBufferPool, &slot, 0);
+  }
+  Serial.printf(
+      "[pool] batch buffer pool: %u slots x %u B = %u B free_heap=%u maxblock_8bit=%u\n",
+      (unsigned)kBatchPoolSlots, (unsigned)kBatchBufferBytes,
+      (unsigned)(kBatchPoolSlots * kBatchBufferBytes), (unsigned)ESP.getFreeHeap(),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+}
 #endif
 
 static TaskHandle_t gSamplingTask;
@@ -228,7 +302,7 @@ static void samplingTask(void*) {
 
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
-      cur = namzwire::newBatch(kBatchSamples, gSensor.sampleFormat());
+      cur = newPooledBatch(kBatchSamples, gSensor.sampleFormat());
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
         delete cur;
         cur = nullptr;
@@ -542,6 +616,10 @@ void setup() {
   // 理由・設計はTlsMemPool.h参照。
   tlsmempool::install();
 #ifndef NAMZ_SENSOR_TEST
+  // Display/SPI/センサ初期化(フォント読み込み等でヒープを消費する)より前、
+  // 起動直後の最も断片化していない時点で確保する。理由はsetupBatchPool()の
+  // コメント参照。
+  setupBatchPool();
   // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
   // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
   // 同じ#ifndefで囲まれている）。
@@ -612,7 +690,14 @@ void setup() {
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
   gUploader->begin();
 
-  xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0);
+  if (xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0) != pdPASS) {
+    // 戻り値未チェックのままだと、失敗時に後続コードが不定ハンドルへ通知を送り
+    // 分かりにくいアサートで落ちる（前例: docs/log/2026-08-10-batch-ram-pool.md）。
+    for (;;) {
+      Serial.println("[boot] BUG: uploaderTask creation failed (heap exhausted?). halting.");
+      delay(5000);
+    }
+  }
 #endif
 
   // バッチ1本のRAM量はセンサのサンプル幅で倍違う（int16 18KB / int32 36KB）。
@@ -623,7 +708,16 @@ void setup() {
                 (unsigned)kMaxRamBatches);
 
   // 測定タスクは Core1 に高優先度で固定
-  xTaskCreatePinnedToCore(samplingTask, "sampling", 8192, nullptr, 10, &gSamplingTask, 1);
+  if (xTaskCreatePinnedToCore(samplingTask, "sampling", 8192, nullptr, 10, &gSamplingTask, 1) !=
+      pdPASS) {
+    // 戻り値未チェックのままだと、gSamplingTaskが不定のままonSampleTimer()の
+    // vTaskNotifyGiveFromISR()が呼ばれ分かりにくいアサートで落ちる
+    // （前例: docs/log/2026-08-10-newbatch-buffer-pool-handoff.md 続報3）。
+    for (;;) {
+      Serial.println("[boot] BUG: samplingTask creation failed (heap exhausted?). halting.");
+      delay(5000);
+    }
+  }
 
   // 読み取りタイマー（1kHz = 出力100Hz × オーバーサンプル10）
   const esp_timer_create_args_t targs = {

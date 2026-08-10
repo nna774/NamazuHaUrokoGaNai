@@ -36,10 +36,16 @@ static constexpr uint32_t kBatchSamples = kSampleRateHz * kBatchSeconds;
 // WiFi断からの復旧時、溜まったバッチを抱えたまま TLS ハンドシェイクをやることになる
 // ため、ここを高くすると復旧できないまま詰まる。溢れたぶんは LittleFS へ逃げるので
 // データは落ちない。
+// XXX: 実験的に6→2へ縮小(2026-08-10)。TlsMemPool導入後も、RAMキューに新規
+// バッチが積まれるタイミングで一般ヒープが断片化しmalloc(18032)が詰まる
+// 事象を実機で確認したため、RAMキューの最大占有量(バッチ本体18KB×本数)を
+// 減らして一般ヒープの余裕を増やす。詳細はdocs/log参照、最終値はまだ未確定。
+// この値はmain.cppのBatchバッファプール(kBatchPoolSlots)のスロット数も決める
+// （docs/log/2026-08-10-batch-ram-pool.md）。
 #ifdef NAMZ_SENSOR_ADXL355
 static constexpr uint32_t kMaxRamBatches = 3;
 #else
-static constexpr uint32_t kMaxRamBatches = 6;
+static constexpr uint32_t kMaxRamBatches = 2;
 #endif
 static constexpr const char* kSpillDir = "/spill";
 
