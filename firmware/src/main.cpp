@@ -709,35 +709,37 @@ void loop() {
 
   // 継続ステートを画面全体の背景色で表す（遠目でも判別できるように）。
   // idle=暗い紺 / closing=橙 / active=赤。文字色はDisplay側で背景から自動選択。
-  String status;
+  // Stringではなく固定バッファ+snprintfにしているのは、ここが250msごとに回る
+  // loop()のホットパスで、String同士の連結は都度ヒープを確保・解放するため
+  // （このプロジェクトの他の頻更新値=sUptimeBuf等と同じ流儀。断片化調査の一環、
+  // docs/log/2026-08-10-display-string-heap-churn.md参照）。
+  char status[24];
   uint16_t bg;
   if (active && shakingNow) {
-    status = "ACTIVE " + String((now - sessStart) / 1000) + "s";
+    snprintf(status, sizeof(status), "ACTIVE %lus", (unsigned long)((now - sessStart) / 1000));
     bg = TFT_RED;
   } else if (active) {
     uint32_t elapsed = sinceShake / 1000;
     uint32_t left = elapsed >= kDispCloseSeconds ? 0 : kDispCloseSeconds - elapsed;
-    status = "closing " + String(left) + "s";
+    snprintf(status, sizeof(status), "closing %lus", (unsigned long)left);
     bg = TFT_ORANGE;
   } else {
-    status = "idle";
+    snprintf(status, sizeof(status), "idle");
     bg = TFT_NAVY;
   }
 
   // 描画は約500msごと（ボタンは250msごとに見る）
   if (++tick % 2 == 0) {
     // 日時（表示用にJST=UTC+9h。データ経路はUTCのまま触らない）。
-    String clock;
+    char clock[20];
     if (timesync::isSynced()) {
       time_t t = (time_t)(timesync::nowUs() / 1000000ULL) + 9 * 3600;
       struct tm tmv;
       gmtime_r(&t, &tmv);
-      char cb[20];
-      snprintf(cb, sizeof(cb), "%02d/%02d %02d:%02d:%02d", tmv.tm_mon + 1,
+      snprintf(clock, sizeof(clock), "%02d/%02d %02d:%02d:%02d", tmv.tm_mon + 1,
                tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
-      clock = cb;
     } else {
-      clock = "--/-- --:--:--";
+      snprintf(clock, sizeof(clock), "--/-- --:--:--");
     }
 #ifdef NAMZ_SENSOR_TEST
     gDisplay.render(gDispIntensity, gDispPeakGal, false, "", 0, 0, status, bg, clock);
@@ -756,7 +758,11 @@ void loop() {
       gDisplay.renderOtaUpdating(clock);
     } else {
       bool wifi = WiFi.status() == WL_CONNECTED;
-      String ip = wifi ? WiFi.localIP().toString() : String("");
+      char ip[16] = "";
+      if (wifi) {
+        IPAddress addr = WiFi.localIP();
+        snprintf(ip, sizeof(ip), "%u.%u.%u.%u", addr[0], addr[1], addr[2], addr[3]);
+      }
       uint32_t backlog = gUploader->spillCount() + gUploader->ramQueued();
       uint32_t backlogAgeS = 0;
       uint64_t oldestUs;
