@@ -127,6 +127,17 @@ static constexpr const char* kHeapMaxblockHeader = "X-Namz-Heap-Maxblock";
 static char sHeapFreeBuf[16];
 static char sHeapMaxblockBuf[16];
 
+// 未送信バックログ件数(spill=LittleFS退避済み・ram=RAMキュー内)。OLED表示・
+// backlogAgeS計算(下のgUploader->spillCount()/ramQueued()呼び出し箇所参照)では
+// 既に使っているが、これまではデバイス本体の画面にしか出ておらずサーバ側
+// （dashboard・watchdog）からは今の滞留量が見えなかった。2systemを分けて送るのは
+// heap free/maxblockと同じ理由——spillが多いのは電源断からの復旧中、ramが多いのは
+// 今まさに送信が詰まっている、で意味が違うため合算すると見分けが付かなくなる。
+static constexpr const char* kSpillCountHeader = "X-Namz-Spill-Count";
+static constexpr const char* kRamQueuedHeader = "X-Namz-Ram-Queued";
+static char sSpillCountBuf[16];
+static char sRamQueuedBuf[16];
+
 // 直前の再起動理由(esp_reset_reason())。WDT panic説（docs/log/2026-08-08-
 // wdt-panic-hypothesis.md）とヒープ枯渇説を実機データで切り分けるための可観測性。
 // 起動時に1回だけ確定し以後変わらない値だが、kExtraRequestHeaderValues[]の要素は
@@ -160,10 +171,12 @@ static const char* resetReasonToString(esp_reset_reason_t reason) {
 // （ループはnamesの終端で止まる）。
 static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
                                                   kHeapFreeHeader, kHeapMaxblockHeader,
-                                                  kResetReasonHeader, nullptr};
+                                                  kResetReasonHeader, kSpillCountHeader,
+                                                  kRamQueuedHeader, nullptr};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
                                                    sHeapFreeBuf, sHeapMaxblockBuf,
-                                                   sResetReasonBuf};
+                                                   sResetReasonBuf, sSpillCountBuf,
+                                                   sRamQueuedBuf};
 
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
@@ -624,6 +637,8 @@ static void uploaderTask(void*) {
     snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
     snprintf(sHeapFreeBuf, sizeof(sHeapFreeBuf), "%u", (unsigned)ESP.getFreeHeap());
     snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
+    snprintf(sSpillCountBuf, sizeof(sSpillCountBuf), "%u", (unsigned)gUploader->spillCount());
+    snprintf(sRamQueuedBuf, sizeof(sRamQueuedBuf), "%u", (unsigned)gUploader->ramQueued());
     gUploader->pump();
     esp_task_wdt_reset();
 #ifdef NAMZ_TLS_ALLOC_PROBE

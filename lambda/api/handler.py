@@ -321,6 +321,14 @@ def _device(device_id: int):
             view.update(heap)
     except Exception as e:  # noqa: BLE001
         print(f"metrics.latest_heap failed: {e!r}")
+    # 未送信バックログ(spill=LittleFS退避済み・ram=RAMキュー内)。ヒープと同じ理由で
+    # 詳細ページ限定(一覧はデバイス数ぶんCloudWatch呼び出しが増える)。
+    try:
+        backlog = metrics.latest_backlog(device_id)
+        if backlog:
+            view.update(backlog)
+    except Exception as e:  # noqa: BLE001
+        print(f"metrics.latest_backlog failed: {e!r}")
     return _json(200, {"device": view,
                        "offline_after_s": OFFLINE_AFTER_S,
                        "lag_after_s": LAG_AFTER_S})

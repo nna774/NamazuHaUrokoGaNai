@@ -14,6 +14,7 @@ from api import handler as api  # noqa: E402
 def _no_cloudwatch(monkeypatch):
     """_device()が実CloudWatchへ問い合わせないようにする（既定はデータ無し扱い）。"""
     monkeypatch.setattr(api.metrics, "latest_heap", lambda device_id: None)
+    monkeypatch.setattr(api.metrics, "latest_backlog", lambda device_id: None)
 
 
 def _capture_query_range(monkeypatch, items):
@@ -172,6 +173,24 @@ def test_device_view_omits_heap_when_unavailable(monkeypatch):
     resp = api._device(2)  # _no_cloudwatchフィクスチャによりlatest_heapはNoneを返す
     body = resp["body"]
     assert "heap_free_bytes" not in body
+
+
+def test_device_view_includes_backlog_when_available(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    monkeypatch.setattr(api.metrics, "latest_backlog", lambda did: {
+        "spill_count": 3, "ram_queued": 1, "backlog_measured_at_us": 999,
+    })
+    resp = api._device(2)
+    body = resp["body"]
+    assert '"spill_count": 3' in body
+    assert '"ram_queued": 1' in body
+
+
+def test_device_view_omits_backlog_when_unavailable(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)  # _no_cloudwatchフィクスチャによりlatest_backlogはNoneを返す
+    body = resp["body"]
+    assert "spill_count" not in body
 
 
 def test_device_view_reports_orientation_calibration(monkeypatch):

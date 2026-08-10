@@ -1264,6 +1264,14 @@ function cloudwatchHeapUrl(deviceId) {
     + `~region~'${CLOUDWATCH_REGION}~start~'-PT24H~end~'P0D)`;
 }
 
+function cloudwatchBacklogUrl(deviceId) {
+  const id = String(deviceId);
+  return `https://${CLOUDWATCH_REGION}.console.aws.amazon.com/cloudwatch/home?region=${CLOUDWATCH_REGION}`
+    + `#metricsV2:graph=~(metrics~(~(~'Namazu~'SpillCount~'DeviceId~'${id})`
+    + `~(~'Namazu~'RamQueued~'DeviceId~'${id}))~view~'timeSeries~stacked~false`
+    + `~region~'${CLOUDWATCH_REGION}~start~'-PT24H~end~'P0D)`;
+}
+
 function renderDeviceInfo(d) {
   const tbody = document.getElementById('device-info');
   const st = d.online
@@ -1287,6 +1295,11 @@ function renderDeviceInfo(d) {
     : '直近データなし　';
   rows.push(['ヒープ', heapText
     + `<a href="${cloudwatchHeapUrl(d.device_id)}" target="_blank" rel="noopener">CloudWatchで見る →</a>`]);
+  const backlogText = d.spill_count != null
+    ? `退避${d.spill_count}件 / RAM${d.ram_queued}件　`
+    : '直近データなし　';
+  rows.push(['未送信バックログ', backlogText
+    + `<a href="${cloudwatchBacklogUrl(d.device_id)}" target="_blank" rel="noopener">CloudWatchで見る →</a>`]);
   if (d.pending_ota_version) {
     rows.push(['OTA', (d.fw_version && d.fw_version === d.pending_ota_version)
       ? `適用済み (${d.pending_ota_version})` : `→ ${d.pending_ota_version}`]);

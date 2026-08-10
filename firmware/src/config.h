@@ -42,8 +42,14 @@ static constexpr uint32_t kBatchSamples = kSampleRateHz * kBatchSeconds;
 // 減らして一般ヒープの余裕を増やす。詳細はdocs/log参照、最終値はまだ未確定。
 // この値はmain.cppのBatchバッファプール(kBatchPoolSlots)のスロット数も決める
 // （docs/log/2026-08-10-batch-ram-pool.md）。
+// ADXL355(2号機)も上と同じ理由で3→2へ下げる(2026-08-11)。テスト機で
+// fix#1/#2(PR #72)込みでも3のままだと、heap_freeは5万バイト台あるのに
+// maxblock_8bitが1396〜1972まで落ち込みDNS解決が繰り返し失敗する
+// (hostByName() DNS Failed)断片化を実機再現した。2へ下げたところ同条件で
+// DNS失敗0件・maxblock_8bit 23540で安定・POST 7/7成功に改善した
+// （docs/log/2026-08-11-device2-ram-batches-reduction.md）。
 #ifdef NAMZ_SENSOR_ADXL355
-static constexpr uint32_t kMaxRamBatches = 3;
+static constexpr uint32_t kMaxRamBatches = 2;
 #else
 static constexpr uint32_t kMaxRamBatches = 2;
 #endif

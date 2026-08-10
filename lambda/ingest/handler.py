@@ -104,6 +104,18 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
         except Exception as e:  # noqa: BLE001
             print(f"metrics.record_heap failed: {e!r}")
 
+    # 未送信バックログ件数ヘッダ(X-Namz-Spill-Count/-Ram-Queued)をCloudWatchへ送る。
+    # これまでデバイス本体のOLED表示にしか出ていなかった滞留量(spill=LittleFS退避済み・
+    # ram=RAMキュー内)を、サーバ側からも見えるようにする(memo.md「batch okuru toki
+    # spill youryou mo issyo ni okurenaika」への対応)。
+    spill_count_raw = headers.get("x-namz-spill-count", "")
+    ram_queued_raw = headers.get("x-namz-ram-queued", "")
+    if spill_count_raw and ram_queued_raw:
+        try:
+            metrics.record_backlog(b.meta.device_id, int(spill_count_raw), int(ram_queued_raw))
+        except Exception as e:  # noqa: BLE001
+            print(f"metrics.record_backlog failed: {e!r}")
+
     # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。ここも主経路では
     # ないので、失敗してもバッチ保存自体は成功扱いにする。
     extra_headers: dict[str, str] = {}
