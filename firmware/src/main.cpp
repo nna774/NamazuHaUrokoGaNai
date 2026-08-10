@@ -221,13 +221,20 @@ static void releaseBatchBufferToPool(void* ctx, uint8_t* buf) {
   xQueueSendToBack(pool, &buf, 0);
 }
 
-// namzwire::newBatch()相当だが、プールから借りる版。プールが尽きた場合
-// （kBatchPoolSlotsの見積もりが実際の同時生存数を下回った時。安全な縮退として
-// 許容している）は素朴なmalloc版へフォールバックする。
+// namzwire::newBatch()相当だが、プールから借りる版。プールが尽きた場合は
+// nullptrを返す。呼び出し側(samplingTask)の既存の「メモリ不足なら次サンプルで
+// 再挑戦」経路にそのまま乗せるためで、素朴なmalloc版へは逃げない——
+// 2026-08-11、実機でこのフォールバックが一般ヒープ(MALLOC_CAP_8BIT)を
+// 破壊しDNS解決まで巻き添えにする事象を確認した
+// （docs/log/2026-08-11-batch-pool-fallback-heap-corruption.md）。
+// この機体は8bit側の最大連続ブロックが17396バイト前後で頭打ちになりやすく、
+// フォールバックが要求する容量(18KB級)を恒常的に下回るため、フォールバック
+// 自体もほぼ確実に失敗し続ける——「無駄な失敗mallocを繰り返しながら結局
+// 同じサンプルを捨てる」だけで、ヒープを汚す分だけ今の素通しより害がある。
 static Batch* newPooledBatch(uint32_t capacitySamples, uint8_t sampleFormat) {
   uint8_t* buf = nullptr;
   if (!gBufferPool || xQueueReceive(gBufferPool, &buf, 0) != pdTRUE) {
-    return namzwire::newBatch(capacitySamples, sampleFormat);
+    return nullptr;
   }
   return new Batch(buf, kBatchBufferBytes, capacitySamples,
                    namzwire::sampleBytes(sampleFormat), kWireHeaderSize,
@@ -321,7 +328,10 @@ static void samplingTask(void*) {
     // --- バッチ蓄積 ---
     if (cur == nullptr) {
       cur = newPooledBatch(kBatchSamples, gSensor.sampleFormat());
-      if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
+      // nullptr: プール枯渇。非nullでもvalid()==false: プール外の異常
+      // （現状は起こらないはずだが、newPooledBatch()の契約上ここも見ておく）。
+      // どちらも同じ「メモリ不足: 次サンプルで再挑戦」経路に落とす。
+      if (!cur || !cur->valid()) {
         delete cur;
         cur = nullptr;
         ++sBatchAllocFailCount;
