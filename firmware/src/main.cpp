@@ -276,6 +276,14 @@ static void samplingTask(void*) {
   float holdSeconds = 0.0f;
   float cooldown = 0.0f;
 
+  // XXX(2026-08-10 診断用・恒久化するなら整理すること): newBatch()詰まり検知。
+  // 実機でRAMキューにバッチが溜まった状態から新しいバッチが二度と完成しない
+  // 現象を観測した(docs/log/2026-08-10-ota-tls-pool-race.md周辺の追加調査、
+  // internetを断って再現)。「メモリ不足なら次サンプルで再挑戦」の分岐は
+  // 仕様上ログを出さないため、詰まっても外から気付けなかった。
+  uint32_t sBatchAllocFailCount = 0;
+  uint32_t sBatchAllocLastLogMs = 0;
+
   // オーバーサンプリング用アキュムレータ
   int32_t accX = 0, accY = 0, accZ = 0;
   int oversampleCount = 0;
@@ -316,7 +324,18 @@ static void samplingTask(void*) {
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
         delete cur;
         cur = nullptr;
+        ++sBatchAllocFailCount;
+        uint32_t nowMs = millis();
+        if (nowMs - sBatchAllocLastLogMs >= 1000) {
+          sBatchAllocLastLogMs = nowMs;
+          Serial.printf(
+              "[sampling] newBatch stuck: %u consecutive fails, heap_free=%u "
+              "maxblock_8bit=%u\n",
+              (unsigned)sBatchAllocFailCount, (unsigned)ESP.getFreeHeap(),
+              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        }
       } else {
+        sBatchAllocFailCount = 0;  // 回復したので次の詰まりに備えてリセット
         cur->begin(ts);
         // 温度はバッチ先頭の1点だけ載せる。架台の熱ドリフトは分〜時間の時定数で
         // 動くので、30秒に1点あれば傾きは追える。
@@ -336,6 +355,14 @@ static void samplingTask(void*) {
         if (xQueueSend(gBatchQueue, &cur, 0) != pdTRUE) {
           // 送信タスクが詰まっている: uploaderに直接渡す代わりに破棄回避のため待たない。
           // batchQueueは十分な深さを持たせている前提。溢れたら最古を諦める。
+          // XXX(2026-08-10 診断用・恒久化するなら整理すること): この経路は
+          // Uploaderへ一度も渡らないままバッチを握りつぶすため、droppedCount()
+          // にもカウントされずログも一切無い、完全にサイレントな喪失経路だった。
+          // newBatch stuck診断と同じ調査(internetを断って再現)の一環で、
+          // 実際に踏まれているか確認するためログを足す。
+          Serial.printf(
+              "[sampling] gBatchQueue full, dropping oldest queued batch "
+              "(uploaderTask stuck too long?)\n");
           Batch* dropped = nullptr;
           if (xQueueReceive(gBatchQueue, &dropped, 0) == pdTRUE) delete dropped;
           xQueueSend(gBatchQueue, &cur, 0);
@@ -706,12 +733,17 @@ void setup() {
   // CloudFrontを介さない）。openssl s_clientで実機のチェーンを確認したところ
   // leaf -> Amazon RSA 2048 M01 -> Amazon Root CA 1 で、OTA用に埋め込み済みの
   // 同じルートCAで検証できる（ドメインは別だがどちらもAWS/ACM発行のため）。
+  // maxSpillReadBytes: 退避ファイルは常にkBatchBufferBytes以下(Batchプールの
+  // スロットサイズと同じ実体、docs/log/2026-08-10-ota-tls-pool-race.md)。
+  // 都度malloc/freeによる断片化(TLS・Batchバッファに続く3つ目のmalloc(18032))
+  // を避けるため固定バッファを使い回させる(batch-uplink v2.10.0)。
   gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
                            kWatchedHeaders,
                            kExtraRequestHeaderNames, kExtraRequestHeaderValues,
-                           reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
+                           reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
+                           kBatchBufferBytes);
   gUploader->begin();
 
   if (xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0) != pdPASS) {
