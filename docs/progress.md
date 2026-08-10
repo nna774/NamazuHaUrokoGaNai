@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-11 | **未送信バックログ件数(spill=LittleFS退避済み・ram=RAMキュー内)を毎バッチヘッダ(`X-Namz-Spill-Count`/`X-Namz-Ram-Queued`)で送るようにした。** これまでOLED表示にしか出ていなかった滞留量を、ヒープ空き容量と同じ設計(CloudWatchカスタムメトリクス、詳細ページ限定で最新値取得)でサーバ側からも見えるようにした。dashboardのデバイス詳細画面に「未送信バックログ」行を追加 | [log/2026-08-11-backlog-headers.md](log/2026-08-11-backlog-headers.md) |
 | 2026-08-11 | **電源断等でLittleFSに0バイト/途中で切れた退避ファイルができると、`pump()`が同じ壊れたファイルを永遠にリトライし続けキュー全体が詰まる実機バグに対処した。** `batch-uplink`に`discardSpillOn400`オプション(既定false)を追加(`v2.12.0`)し、ingestが実際にHTTP 400（=サーバがボディを構造的に不正と判定）を返した回だけ、その退避ファイルは二度と成功しないとみなして即座に破棄するようにした。`Uploader`はワイヤ形式を知らない設計のまま、0バイトと途中で切れたbinの両方をHTTP 400という単一シグナルで一律に拾える。`main.cpp`でオプトインし、`firmware/platformio.ini`・`terraform/build_lambda.sh`のpinを揃えた。実機での自動削除確認はまだ | [log/2026-08-11-spill-quarantine-on-400.md](log/2026-08-11-spill-quarantine-on-400.md) |
 | 2026-08-11 | **デバイス詳細画面の「データ鮮度」「稼働時間」に、丸め表記(`2時間`)へ実秒数を括弧書きで併記する(`2時間(7328秒)`)ようにした。** 一覧テーブルは列幅が厳しいため丸め表記のまま維持し、詳細画面のみ新関数`fmtAgoExact`に差し替えた | [log/2026-08-11-device-detail-exact-seconds.md](log/2026-08-11-device-detail-exact-seconds.md) |
 | 2026-08-11 | **ダッシュボードのデバイス版数リンクが`-dirty`付き版数（例`09d6dc1-dirty`）で404になっていたのを直した。** `get_fw_version.py`は作業ツリーが汚れているとgit短縮hashに`-dirty`を付けるが、`fwVersionHtml()`がそれをそのままGitHubのコミットURLに使っていたため、そんなコミットは存在せず404だった。リンク先だけ`-dirty`を削り、表示テキストは付けたまま残した | [log/2026-08-11-dashboard-fw-version-dirty-link-404.md](log/2026-08-11-dashboard-fw-version-dirty-link-404.md) |

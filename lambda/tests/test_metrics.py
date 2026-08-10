@@ -74,3 +74,48 @@ def test_latest_heap_none_when_only_one_metric_has_data(client):
     # HeapMaxAllocBytesは未設定(空リスト扱い)
 
     assert metrics.latest_heap(1) is None
+
+
+def test_record_backlog_sends_both_metrics_with_device_dimension(client):
+    metrics.record_backlog(2, 3, 1)
+
+    assert len(client.calls) == 1
+    call = client.calls[0]
+    assert call["Namespace"] == metrics.NAMESPACE
+    by_name = {m["MetricName"]: m for m in call["MetricData"]}
+    assert set(by_name) == {"SpillCount", "RamQueued"}
+    assert by_name["SpillCount"]["Value"] == 3
+    assert by_name["RamQueued"]["Value"] == 1
+    for m in by_name.values():
+        assert m["Dimensions"] == [{"Name": "DeviceId", "Value": "2"}]
+        assert m["Unit"] == "Count"
+
+
+def test_latest_backlog_returns_none_without_data(client):
+    assert metrics.latest_backlog(1) is None
+
+
+def test_latest_backlog_picks_the_newest_datapoint(client):
+    now = datetime.now(timezone.utc)
+    client.datapoints["SpillCount"] = [
+        {"Timestamp": now - timedelta(minutes=5), "Average": 10.0},
+        {"Timestamp": now, "Average": 3.0},  # 一番新しい
+    ]
+    client.datapoints["RamQueued"] = [
+        {"Timestamp": now, "Average": 1.0},
+    ]
+
+    result = metrics.latest_backlog(1)
+
+    assert result["spill_count"] == 3
+    assert result["ram_queued"] == 1
+    assert result["backlog_measured_at_us"] == int(now.timestamp() * 1e6)
+
+
+def test_latest_backlog_none_when_only_one_metric_has_data(client):
+    client.datapoints["SpillCount"] = [
+        {"Timestamp": datetime.now(timezone.utc), "Average": 3.0},
+    ]
+    # RamQueuedは未設定(空リスト扱い)
+
+    assert metrics.latest_backlog(1) is None
