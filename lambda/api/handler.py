@@ -78,10 +78,10 @@ def handler(event, context):
             return _events(q)
         if path.endswith("/event"):
             return _event(q)
-        m = re.search(r"/devices/(\d{1,4})/temp$", path)  # 個別デバイスの温度（より具体的な方を先に）
+        m = re.search(r"/devices/(\d{1,10})/temp$", path)  # 個別デバイスの温度（より具体的な方を先に）
         if m:
             return _device_temp(int(m.group(1)), q)
-        m = re.search(r"/devices/(\d{1,4})$", path)
+        m = re.search(r"/devices/(\d{1,10})$", path)
         if m:
             return _device(int(m.group(1)))
         if path.endswith("/devices"):

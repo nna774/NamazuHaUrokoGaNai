@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -31,6 +32,25 @@ def _capture_query_range(monkeypatch, items):
 
 def _item(batch_start_us, raw, sensor_type):
     return {"device_id": 2, "batch_start_us": batch_start_us, "raw": raw, "sensor_type": sensor_type}
+
+
+def _event(path, params=None):
+    return {
+        "requestContext": {"http": {"method": "GET"}},
+        "rawPath": path,
+        "queryStringParameters": params or {},
+    }
+
+
+def test_handler_routes_device_ids_beyond_four_digits(monkeypatch):
+    """device_id は uint32 全域(最大10桁)を取りうる。sentinel値4294967295(=0xFFFFFFFF)の
+    テスト機がdevices一覧には出るのに詳細だけ404になる回帰を防ぐ。"""
+    device_id = 4294967295
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did} if did == device_id else None)
+    resp = api.handler(_event(f"/devices/{device_id}"), {})
+    assert resp["statusCode"] == 200
+    assert json.loads(resp["body"])["device"]["device_id"] == device_id
 
 
 def test_device_temp_defaults_to_three_hours(monkeypatch):
