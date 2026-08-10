@@ -116,6 +116,14 @@ def test_device_view_sensor_none_when_not_yet_recorded(monkeypatch):
     assert '"sensor": null' in resp["body"]
 
 
+def test_device_view_reports_fake_sensor_name(monkeypatch):
+    """FakeSensor(結合試験用)のsensor_type=255は「未記録」と区別してダミー表示する。"""
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "sensor_type": wire.SENSOR_TYPE_FAKE})
+    resp = api._device(2)
+    assert json.loads(resp["body"])["device"]["sensor"] == "ダミー"
+
+
 def test_device_view_reports_uptime(monkeypatch):
     monkeypatch.setattr(api.time, "time", lambda: 2000.0)
     monkeypatch.setattr(api.devices, "get_device",

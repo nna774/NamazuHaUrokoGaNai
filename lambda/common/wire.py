@@ -27,11 +27,16 @@ TRAILER_SENSOR_TEMP = 1
 # 温度の換算式はチップ依存なので、どのチップかの判定に使う（TLVのtypeとは無関係）。
 SENSOR_TYPE_IIS3DHHC = 0
 SENSOR_TYPE_ADXL355 = 1
+# firmware FakeSensor::sensorType()。結合試験用のダミーセンサであることを示す
+# sentinel値（実チップの型番と衝突しないuint8_tの最大値）。
+SENSOR_TYPE_FAKE = 255
 
-# 表示用の名前。ダッシュボードのデバイス詳細ページで使う。
+# 表示用の名前。ダッシュボードのデバイス詳細ページで使う。未記録(古いデータ等)と
+# 区別するため、FakeSensorも明示的に名前を持たせてある。
 SENSOR_TYPE_NAMES = {
     SENSOR_TYPE_IIS3DHHC: "IIS3DHHC",
     SENSOR_TYPE_ADXL355: "ADXL355",
+    SENSOR_TYPE_FAKE: "ダミー",
 }
 
 # ADXL355 の内蔵温度の換算（データシートの公称値）。
