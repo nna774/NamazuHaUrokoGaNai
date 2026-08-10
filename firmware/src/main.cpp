@@ -747,13 +747,20 @@ void setup() {
   // スロットサイズと同じ実体、docs/log/2026-08-10-ota-tls-pool-race.md)。
   // 都度malloc/freeによる断片化(TLS・Batchバッファに続く3つ目のmalloc(18032))
   // を避けるため固定バッファを使い回させる(batch-uplink v2.10.0)。
+  // discardSpillOn400: 電源断等でLittleFSに0バイト/途中で切れた退避ファイルが
+  // でき、それを送ろうとするとwire.parse()に通らずingestが常に400を返す実機
+  // バグを踏んだ(docs/log/2026-08-11-spill-quarantine-on-400.md)。従来はpump()が
+  // 成功時にしかremoveSpill()しないため同じファイルを永遠にリトライし続け、
+  // それより新しい退避データがキュー全体で先へ進めなくなっていた。ingestが
+  // 実際にHTTP 400を返した回だけ「もう二度と成功しない」とみなして即座に
+  // 捨てる(batch-uplink v2.12.0)。
   gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
                            kWatchedHeaders,
                            kExtraRequestHeaderNames, kExtraRequestHeaderValues,
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
-                           kBatchBufferBytes);
+                           kBatchBufferBytes, /*discardSpillOn400=*/true);
   gUploader->begin();
 
   if (xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0) != pdPASS) {
