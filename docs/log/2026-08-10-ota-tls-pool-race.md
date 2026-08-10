@@ -65,11 +65,31 @@
 53248 byte`(=52KiB)、`pending_ota_version`はサーバ側で自動クリアされ
 (`ota_watch.py`の`reached_target()`)、以後の送信も正常。
 
+## 追検証: 修正版ファーム自身での1回目
+
+上記コミット（`068405f`、この記録を足したコミット）を新しいOTAターゲットにして、
+今度は`9e8d087`(修正版)自身から発火させた。
+
+```
+[20:47:01] [ota-pull] update available: 9e8d087 -> 068405f
+[20:47:01] [ota] start: pausing sampling, flushing queue to spill
+[20:47:01] [ota] flushed 0 batch(es) to spill
+[20:47:01] [ota-pull] fetching https://namazu.dark-kuins.net/ota/esp32dev/068405f.bin
+[20:47:19] [ota-pull] write OK, restarting
+```
+
+**`[tls-pool] calloc FAILED`は一度も出ず、1回目(18秒)でそのまま成功した。**
+再起動後`fw=068405f`で正常起動、`tls-pool installed: 53248 byte`、`pending_ota_version`は
+サーバ側で自動クリア、以後の送信も安定（`uptime_s`が問題なく伸び続けることを確認）。
+
+修正前は「1回目は`checkAndPerformPullOta()`がPOST成功と同じ周で発火する構造上
+ほぼ確実に競合し、2回目以降はその間に挟まる`pump()`の「nothing to send, closing
+idle connection」周を経て`client_`が既に閉じているために通りやすい」という
+非決定的な挙動だったが、修正版は`pauseSamplingForOta()`内で`closeConnection()`を
+能動的に呼ぶため、この周の巡り合わせに依存せず**1回目から確実に接続を閉じてから
+OTA先へ接続する**ようになったと実機で確認できた。
+
 ## まだ確認できていないこと
 
-- 修正版ファーム自身がOTA発火時に確実に接続を閉じてから新規TLS接続を張るかは、
-  今回は「次のOTAターゲットが無い」ため未検証（1回目の失敗は修正前ファームの
-  挙動であって、修正の効果そのものではない）。次のコミットを新しいOTAターゲットに
-  して同じ手順で追検証する。
-- `tls-pool`の確保/解放カウンタの負値（上記）。
+- `tls-pool`の確保/解放カウンタの負値（上記、既知の別課題として残す）。
 - device1/device2への投入判断はまだ。
