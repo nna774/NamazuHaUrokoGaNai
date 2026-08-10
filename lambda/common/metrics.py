@@ -41,6 +41,25 @@ def record_heap(device_id: int, heap_free: int, heap_maxblock: int) -> None:
     )
 
 
+def record_backlog(device_id: int, spill_count: int, ram_queued: int) -> None:
+    """毎バッチの未送信バックログ件数(spill=LittleFS退避済み・ram=RAMキュー内)を送る。
+
+    2つに分けて送るのはheap free/maxblockと同じ理由——spillが多いのは電源断
+    からの復旧中、ramが多いのは今まさに送信が詰まっている、で原因が違うため、
+    合算すると見分けが付かなくなる。
+    """
+    dims = [{"Name": "DeviceId", "Value": str(device_id)}]
+    _client().put_metric_data(
+        Namespace=NAMESPACE,
+        MetricData=[
+            {"MetricName": "SpillCount", "Dimensions": dims,
+             "Value": float(spill_count), "Unit": "Count"},
+            {"MetricName": "RamQueued", "Dimensions": dims,
+             "Value": float(ram_queued), "Unit": "Count"},
+        ],
+    )
+
+
 def _latest_point(metric_name: str, device_id: int, minutes: int = 10):
     """直近`minutes`分の1分解像度データポイントのうち一番新しいものを返す（無ければNone）。"""
     now = datetime.now(timezone.utc)
@@ -73,4 +92,17 @@ def latest_heap(device_id: int) -> dict | None:
         "heap_free_bytes": round(free["Average"]),
         "heap_maxblock_bytes": round(maxblock["Average"]),
         "heap_measured_at_us": int(free["Timestamp"].timestamp() * 1e6),
+    }
+
+
+def latest_backlog(device_id: int) -> dict | None:
+    """デバイス詳細ページの「軽く見る」用途で、未送信バックログの直近1点だけ返す。"""
+    spill = _latest_point("SpillCount", device_id)
+    ram = _latest_point("RamQueued", device_id)
+    if spill is None or ram is None:
+        return None
+    return {
+        "spill_count": round(spill["Average"]),
+        "ram_queued": round(ram["Average"]),
+        "backlog_measured_at_us": int(spill["Timestamp"].timestamp() * 1e6),
     }
