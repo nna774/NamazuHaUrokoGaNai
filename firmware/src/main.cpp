@@ -34,6 +34,8 @@
 #include "config.h"
 #ifdef NAMZ_TLS_ALLOC_PROBE
 #include "TlsAllocProbe.h"
+#else
+#include "TlsMemPool.h"
 #endif
 
 static SPIClass gSpi(VSPI);
@@ -549,6 +551,9 @@ void setup() {
   // WiFi/Uploaderより前、mbedTLSが一度も呼ばれていないうちにフックする
   // （後から差し替えても、既にそれ以前の呼び出しで確保済みの分は追えない）。
   tlsallocprobe::install();
+#else
+  // 本番の対策本体。理由・設計はTlsMemPool.h参照。
+  tlsmempool::install();
 #endif
 #ifndef NAMZ_SENSOR_TEST
   // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク

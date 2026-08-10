@@ -14,7 +14,7 @@ PY="${PYTHON:-python3}"
 
 # 共有ライブラリ batch-uplink のバージョン。ここを上げるときは firmware/platformio.ini
 # の lib_deps も揃えること（同じコードの両面なので、片方だけ動かすと食い違う）。
-UPLINK_VERSION="v2.4.0"
+UPLINK_VERSION="v2.5.0"
 
 rm -rf "$BUILD"
 mkdir -p "$BUILD"
