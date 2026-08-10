@@ -1149,6 +1149,16 @@ function fmtAgo(sec) {
   return `${Math.floor(h / 24)}日`;
 }
 
+// デバイス詳細画面用。一覧は列幅が厳しく丸め表記(fmtAgo)のままだが、詳細画面は
+// 実際に何秒遅れている/稼働しているかを丸めずに確認したい場面がある（例:
+// 「2時間」表記だと1時間59分59秒との区別がつかない）ため秒数を併記する。
+function fmtAgoExact(sec) {
+  if (sec == null) return '—';
+  const s = Math.max(0, Math.round(sec));
+  const label = fmtAgo(sec);
+  return s < 90 ? label : `${label}(${s}秒)`;
+}
+
 // 経過秒を警告値と比べて td の class 属性を返す。半分超で黄(warn-lo)・超過で赤(warn-hi)。
 function warnBg(sec, warnAt) {
   if (sec == null || !warnAt) return '';
@@ -1262,11 +1272,11 @@ function renderDeviceInfo(d) {
   const rows = [
     ['状態', st],
     ['最終受信', last],
-    ['データ鮮度', `${fmtAgo(d.lag_s)}遅れ`],
+    ['データ鮮度', `${fmtAgoExact(d.lag_s)}遅れ`],
     ['累計バッチ', String(d.batches_total ?? 0)],
     ['版数', fwVersionHtml(d.fw_version)],
     ['センサ', d.sensor || '不明'],
-    ['稼働時間', d.uptime_s != null ? fmtAgo(d.uptime_s) : '不明'],
+    ['稼働時間', d.uptime_s != null ? fmtAgoExact(d.uptime_s) : '不明'],
     ['前回の再起動理由', d.reset_reason ? escapeHtml(d.reset_reason) : '不明'],
   ];
   const heapText = d.heap_free_bytes != null
