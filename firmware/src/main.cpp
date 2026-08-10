@@ -276,6 +276,14 @@ static void samplingTask(void*) {
   float holdSeconds = 0.0f;
   float cooldown = 0.0f;
 
+  // XXX(2026-08-10 診断用・恒久化するなら整理すること): newBatch()詰まり検知。
+  // 実機でRAMキューにバッチが溜まった状態から新しいバッチが二度と完成しない
+  // 現象を観測した(docs/log/2026-08-10-ota-tls-pool-race.md周辺の追加調査、
+  // internetを断って再現)。「メモリ不足なら次サンプルで再挑戦」の分岐は
+  // 仕様上ログを出さないため、詰まっても外から気付けなかった。
+  uint32_t sBatchAllocFailCount = 0;
+  uint32_t sBatchAllocLastLogMs = 0;
+
   // オーバーサンプリング用アキュムレータ
   int32_t accX = 0, accY = 0, accZ = 0;
   int oversampleCount = 0;
@@ -316,7 +324,18 @@ static void samplingTask(void*) {
       if (!cur->valid()) {  // メモリ不足: 次サンプルで再挑戦
         delete cur;
         cur = nullptr;
+        ++sBatchAllocFailCount;
+        uint32_t nowMs = millis();
+        if (nowMs - sBatchAllocLastLogMs >= 1000) {
+          sBatchAllocLastLogMs = nowMs;
+          Serial.printf(
+              "[sampling] newBatch stuck: %u consecutive fails, heap_free=%u "
+              "maxblock_8bit=%u\n",
+              (unsigned)sBatchAllocFailCount, (unsigned)ESP.getFreeHeap(),
+              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        }
       } else {
+        sBatchAllocFailCount = 0;  // 回復したので次の詰まりに備えてリセット
         cur->begin(ts);
         // 温度はバッチ先頭の1点だけ載せる。架台の熱ドリフトは分〜時間の時定数で
         // 動くので、30秒に1点あれば傾きは追える。
