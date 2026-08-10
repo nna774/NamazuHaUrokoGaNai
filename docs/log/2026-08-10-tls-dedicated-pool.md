@@ -142,3 +142,41 @@ RAMキューが、spillに詰まったまま(malloc失敗が続く間)同時に�
    (TlsMemPoolと無関係な既存の頑健性バグとして独立に対応する価値がある)。
 
 **実機(device1/device2)への投入判断はまだ。テスト機での検証も継続中。**
+
+## 続報: `loop()`/`uploaderTask`のLittleFS競合、mutexではなくvolatile publishで直す
+
+Aの効果検証中、テスト機で新しいクラッシュを踏んだ: `assert failed: lfs_file_close
+lfs.c:6080 (lfs_mlist_isopen(...))`（LittleFS内部の整合性チェック違反）。addr2lineで
+バックトレースを解読したところ、`main.cpp`の`loop()`(Core1、ディスプレイ更新用に
+250msごとに呼ばれる)が呼ぶ`Uploader::oldestQueuedStartUs()`(内部で`loadOldestSpillPath()`
+を叩きLittleFSへアクセスする)が、`uploaderTask`(Core0)の`pump()`(同じくspillへ
+アクセス)と**ロックなしで同時にLittleFSへアクセスしていた**ことが原因と特定した。
+
+これは今回のTlsMemPool/kMaxRamBatches/例外処理のどれとも無関係な、以前から存在した
+独立のバグ——普段は表示更新(250ms周期)とspill読み込みのタイミングがめったに重ならず
+表面化しないが、今回のような高頻度リトライ(backlog多数)で競合窓が広がり顕在化した。
+
+design.mdが元々「`uploaderTask`を吸い出し/送信の2タスクに割る時は`ram_`にmutexが要る」
+と書いていたのと似た話に見えるが、**2タスク分離とは別問題**と判断した——`loop()`は
+分離後も変わらず存在する第3のタスクなので、分離してもこの競合は消えない。むしろ
+LittleFSに触るタスクが増えて競合の芽が増える。
+
+対策は、`Uploader`へmutexを持ち込むのではなく、このファイルに既にある「1書き手・
+1読み手のvolatile」パターン(`gDispIntensity`等、測定タスクが書きloopが読む)を
+踏襲した: `uploaderTask`(Core0)側でbacklog年齢を計算し`gBacklogAgeS`(volatile)へ
+publish、`loop()`(Core1)はそれを読むだけにしてLittleFSアクセスをCore0側へ一本化した。
+mutexなしで競合が消える、小さく安全な修正。
+
+実機で10分間の連続監視を行い、このクラッシュの再発は無いことを確認（同時に
+`malloc(18032)`の間欠的な失敗・ネットワーク層の失敗(`DNS Failed`/`code=-1`/`code=-3`/
+`GROUP_KEY_UPDATE_TIMEOUT`)は残るが、いずれも安全にbackoffへ落ちるだけでクラッシュ
+しない）。
+
+## 続報2: device1/device2の非対称性を`kMaxRamBatches`の差で説明できるかもしれない
+
+`config.h`では`kMaxRamBatches`がADXL355(2号機)=3・それ以外(1号機)=6で、RAMキューの
+最大占有量は1号機108KB・2号機54KBとちょうど倍の差がある（バッチ本体は両機とも同じ
+18KB）。今回特定した「RAMキューがヒープを圧迫しmalloc(18032)を詰まらせる」構図が
+正しければ、キュー上限が倍の1号機の方が先にこの罠にハマりやすい——2026-08-09の
+調査ログで「device2は同じ夜に再現していない」としていた非対称性と符合する仮説。
+後付けで綺麗にハマりすぎている面もあり過信は禁物だが、有力な説明として記録しておく。
