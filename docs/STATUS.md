@@ -164,18 +164,12 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       （削除する / 無効フラグを立てる）。退役後に watchdog が延々と欠測通知しないように、
       台帳から外すか監視対象外にする運用を決める。`tools/flag_event.py` 相当の手元CLIで
       台帳を編集する形が素直か
-- [ ] OTA更新（詳細は [ota.md](ota.md)）: **実装済み・push転送そのものの実機確認はまだ**。
-      ArduinoOTA（LAN内push）を採用。batch-uplink v1.4.0で追加した
-      `Uploader::flushToSpill()`でOTA開始前に測定を止めてRAMキューをLittleFSへ退避
-      してから焼く。`tools/provision_device.py ota-password --id N` でデバイス別の
-      認証パスワードを引き `pio run -e <env>-ota -t upload --upload-port namazu-N.local`。
-      device 2へのUSB書き込み・起動・OTAリスナー起動は実機確認済みだが、母艦(別VLAN)
-      からのpush転送はネットワーク分離で届かなかった（ota.md §5）。
-      `unnamed_network_g` に実際に繋がった端末から試す必要がある。
-      外出先からの更新・無人運用に要るHTTPSプル型は**実装済み・device1/2両機とも
+- [x] OTA更新（詳細は [ota.md](ota.md)）: **HTTPSプル型で実装済み・device1/2両機とも
       NVS化＋実機でのpull型OTA成功確認済み**
-      （[ota.md §7](ota.md#7-httpsプル型外出先からの更新無人運用向け)。デバイス
-      発信の経路なので上記のネットワーク分離の影響を受けない）。前提としてデバイス
+      （[ota.md §2](ota.md#2-採用した方式-httpsプル型外出先からの更新無人運用向け)）。
+      LAN内push（ArduinoOTA）も一度実装したが、母艦とデバイスが別VLANでespota転送が
+      一度も届かず（ota.md §3）実用にならないまま放置されていたため、2026-08-10に
+      撤去した（静的RAM約3.9KB・Flash約39KB回収）。前提としてデバイス
       識別情報・秘密をコンパイル時定数(旧secrets.h)からNVSへ移した
       （`tools/provision_device.py provision-h` → `[env:provision]`で焼く）。手元の
       `tools/request_ota.py request <id> <version>`で許可すると、デバイスが

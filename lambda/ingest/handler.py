@@ -68,7 +68,7 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
     # 失敗してもバッチ保存自体は成功扱いにする（デバイスに無駄な再送をさせない）。
     # X-Namz-Fw-Version（batch-uplink v1.6.0のextraRequestHeaders経由、firmwareが
     # 毎バッチ乗せる）は「今このデバイスが動かしている版数」。サーバ側からOTAの
-    # 進行状況・停滞原因を見えるようにする（docs/ota.md §7 未決事項1への対応）。
+    # 進行状況・停滞原因を見えるようにする（docs/ota.md §2 未決事項1への対応）。
     try:
         devices.record_batch(b.meta.device_id, b.meta.batch_start_us,
                              int(time.time() * 1e6), last_batch_key=key,
@@ -116,7 +116,7 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
             if item.get("pending_restart_requested_at_us"):
                 extra_headers["X-Namz-Restart"] = "1"
                 devices.clear_restart_request(b.meta.device_id)
-            # pull型OTA（tools/request_ota.py が立てる、docs/ota.md §7）の許可
+            # pull型OTA（tools/request_ota.py が立てる、docs/ota.md §2）の許可
             # バージョンは「あるべき状態」なので、再起動要求と違い達成前は
             # クリアしない——デバイスが実際にそのバージョンで起動する（次に
             # NAMZ_FW_VERSIONが一致したバッチを送ってくる）までヘッダを返し

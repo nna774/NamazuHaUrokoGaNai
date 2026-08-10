@@ -1,4 +1,4 @@
-"""ota_watch.evaluate_ota_stuck の停滞状態遷移（docs/ota.md §7）。
+"""ota_watch.evaluate_ota_stuck の停滞状態遷移（docs/ota.md §2）。
 
 devices.evaluate（欠測判定）と同じ形の純粋関数テスト。しきい値
 stuck=30分, 再送=1日を基準にする。

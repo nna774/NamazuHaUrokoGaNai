@@ -14,8 +14,7 @@
       "env": "esp32dev",
       "wifi_ssid": "your-ssid",
       "wifi_pass": "your-pass",
-      "hmac_secret": "change-me-64-hex-chars",
-      "ota_password": "change-me-32-hex-chars"
+      "hmac_secret": "change-me-64-hex-chars"
     }
   ]
 }
