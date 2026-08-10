@@ -28,6 +28,9 @@
 #include "Iis3dhhc.h"
 #endif
 #include "Shindo.h"
+#ifdef NAMZ_TLS_ALLOC_PROBE
+#include "TlsAllocProbe.h"
+#endif
 #include "TimeSync.h"
 #include "Uploader.h"
 #include "config.h"
@@ -465,6 +468,9 @@ static void uploaderTask(void*) {
     snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
     gUploader->pump();
     esp_task_wdt_reset();
+#ifdef NAMZ_TLS_ALLOC_PROBE
+    tlsallocprobe::printIfChanged();
+#endif
 
     // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、RAMキューを
     // LittleFSへ退避してからすぐ再起動する（OTAのotaOnStartと同じ安全策。
@@ -511,6 +517,11 @@ void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
   Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
+#ifdef NAMZ_TLS_ALLOC_PROBE
+  // WiFi/Uploaderより前、mbedTLSが一度も呼ばれていないうちにフックする
+  // （後から差し替えても、既にそれ以前の呼び出しで確保済みの分は追えない）。
+  tlsallocprobe::install();
+#endif
 #ifndef NAMZ_SENSOR_TEST
   // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
   // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
