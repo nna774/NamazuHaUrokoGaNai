@@ -14,6 +14,39 @@ pull型は2026-08-06にdevice1(esp32dev)・device2(adxl355)両方で実際に自
 関連: [リモート再起動](remote_restart.md)（コマンドラインから再起動要求を送る作戦。
 `flushToSpill()`を共有する）。
 
+## 0. クイックリファレンス（実際に配る時はここだけ読めばいい）
+
+**きれいなworktree（masterから素朴に切った、untrackedファイルも変更も無い状態）で
+ビルドすること。** リポジトリ直下に`memo.md`等の無関係なuntrackedファイルが
+あるだけでも`git status --porcelain`がdirtyと判定し、配布版数が`<hash>-dirty`
+になる（動作は変わらないが、後から見た時に「本当にこの内容か」を素直に信じられ
+なくなる。実際に2026-08-11、手元の作業ディレクトリのスクラッチファイルのせいで
+`--allow-dirty`を使う羽目になった）。`EnterWorktree`等で新しいworktreeを切れば
+untrackedファイルを一切引き継がないので、`--allow-dirty`無しで素直に通る。
+
+```bash
+# 1. きれいなworktreeで確認（念のため）
+git status --short   # 何も出なければOK
+
+# 2. ビルド・S3公開（gitの短縮hashがそのまま配布バージョンになる）
+tools/publish_ota.sh esp32dev   # 1号機(IIS3DHHC)向け。2号機(ADXL355)なら adxl355
+#   最後に「python tools/request_ota.py request <device_id> <version>」が出力される
+
+# 3. 対象デバイスに許可を出す(device_idはtools/devices.json参照。1号機=1・2号機=2)
+NAMZ_DEVICES_TABLE=namazu-devices .venv/bin/python tools/request_ota.py request 1 <version> --yes
+#   --yes を付けないと確認プロンプトで止まる(非対話実行では必須)
+
+# 4. 反映待ち・確認（バッチ送信のたびに照合するので数十秒〜数分かかる）
+NAMZ_DEVICES_TABLE=namazu-devices .venv/bin/python tools/request_ota.py list
+curl -s https://api.namazu.dark-kuins.net/devices/1 | python3 -m json.tool | grep fw_version
+#   fw_versionが指定バージョンに変われば成功
+
+# 取り消したい時
+NAMZ_DEVICES_TABLE=namazu-devices .venv/bin/python tools/request_ota.py cancel 1
+```
+
+設計の経緯・トリガーの仕組み・安全な停止シーケンス等は以下の本編参照。
+
 ## 1. 土台の棚卸し（実装前から整っていたもの）
 
 | 項目 | 状態 |
