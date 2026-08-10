@@ -29,6 +29,7 @@
 #endif
 #include "Shindo.h"
 #include "TimeSync.h"
+#include "TlsMemPool.h"
 #include "Uploader.h"
 #include "config.h"
 
@@ -536,6 +537,10 @@ void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
   Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
+  // WiFi/Uploaderより前、mbedTLSが一度も呼ばれていないうちにフックする
+  // （後から差し替えても、既にそれ以前の呼び出しで確保済みの分は追えない）。
+  // 理由・設計はTlsMemPool.h参照。
+  tlsmempool::install();
 #ifndef NAMZ_SENSOR_TEST
   // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
   // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
