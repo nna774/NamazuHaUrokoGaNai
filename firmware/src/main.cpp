@@ -21,7 +21,9 @@
 #include "DeviceIdentity.h"
 #include "Display.h"
 #include "NamzWire.h"
-#ifdef NAMZ_SENSOR_ADXL355
+#ifdef NAMZ_SENSOR_FAKE
+#include "FakeSensor.h"
+#elif defined(NAMZ_SENSOR_ADXL355)
 #include "Adxl355.h"
 #else
 #include "Iis3dhhc.h"
@@ -34,7 +36,14 @@
 static SPIClass gSpi(VSPI);
 // センサはビルド時に選ぶ（-DNAMZ_SENSOR_ADXL355）。CSが別ピンなので、比較のため
 // 両方を同じバスにぶら下げたままファームだけ焼き分けてもよい。
-#ifdef NAMZ_SENSOR_ADXL355
+#ifdef NAMZ_SENSOR_FAKE
+// 実センサ無しでパイプラインだけ確認する結合試験用(FakeSensor.h参照)。
+// CSピンはSPIを使わないFakeSensorでは意味を持たないが、gSpi.begin()の
+// 引数として要る。
+static constexpr int kPinCsSensor = kPinCsIis3dhhc;
+static constexpr const char* kSensorName = "FAKE";
+static FakeSensor gSensor;
+#elif defined(NAMZ_SENSOR_ADXL355)
 static constexpr int kPinCsSensor = kPinCsAdxl355;
 static constexpr const char* kSensorName = "ADXL355";
 static Adxl355 gSensor(gSpi, kPinCsSensor, kSpiClockHz);
@@ -431,11 +440,12 @@ static void uploaderTask(void*) {
   uint32_t lastResync = 0;
   bool restartRequested = false;  // サーバからのリモート再起動要求（docs/remote_restart.md）
 
-  // このタスクは1周の中でネットワーク待ちを何度もする。TLS接続のタイムアウトは
-  // 1回あたり5秒あり、回線が詰まると「速報送信で5秒＋バッチ送信で5秒」で簡単に
-  // ウォッチドッグの10秒を超える（実機で panic 再起動した）。タスクはハングして
-  // おらず、ソケットを待っているだけなので、ブロックしうる呼び出しの前後で
-  // 明示的に餌をやる。ここを削ると回線が詰まった時に限って再起動する。
+  // このタスクは1周の中でネットワーク待ちを何度もする。DNS解決だけで最大15秒
+  // ブロックしうる(上のwatchdog設定コメント参照)ため、ウォッチドッグは20秒に
+  // 上げてある（実機で10秒時代にpanic再起動を確認した）。それでも単発の呼び出しが
+  // 積み重なれば超えうるので、タスクはハングしておらずソケットを待っているだけと
+  // 分かっている前提で、ブロックしうる呼び出しの前後に明示的に餌をやる。ここを
+  // 削ると回線が詰まった時に限って再起動する。
   for (;;) {
     esp_task_wdt_reset();
 
@@ -552,12 +562,23 @@ void setup() {
     Serial.printf("[sensor] %s ready\n", kSensorName);
   }
 
-  // watchdog: 10秒。WDT APIは ESP-IDF のメジャーバージョンで異なる。
+  // watchdog: 20秒。WDT APIは ESP-IDF のメジャーバージョンで異なる。
+  //
+  // 元は10秒だったが、`WiFi.hostByName()`(WiFiGeneric.cpp)内部のDNS解決待ちが
+  // 最大15秒ブロックしうる(`waitStatusBits(WIFI_DNS_DONE_BIT, 15000)`、コメントに
+  // "real internal timeout in lwip library is 14[s]"とある)と実機で確認した
+  // （2026-08-09、docs/log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md）。
+  // このDNS待ちはHTTPClientの接続タイムアウト(5秒)にもUploaderのTLSハンドシェイク
+  // タイムアウト(4秒、batch-uplink v2.2.0)にも守られていない別枠のブロッキングで、
+  // コード側から制御できない。DNSキャッシュが切れて再解決が要る瞬間だけ10秒の
+  // WDTより先に詰まりパニック再起動していた（パニックはflushToSpill()を経由
+  // しないためRAM上のバッチを毎回失う）。DNS最悪ケース(15秒)に余裕を持って
+  // 収まるよう20秒に上げる。
 #if ESP_IDF_VERSION_MAJOR >= 5
-  esp_task_wdt_config_t wdt = {.timeout_ms = 10000, .idle_core_mask = 0, .trigger_panic = true};
+  esp_task_wdt_config_t wdt = {.timeout_ms = 20000, .idle_core_mask = 0, .trigger_panic = true};
   esp_task_wdt_reconfigure(&wdt);
 #else
-  esp_task_wdt_init(10, true);  // 旧API: timeout[秒], panic
+  esp_task_wdt_init(20, true);  // 旧API: timeout[秒], panic
 #endif
 
 #ifndef NAMZ_SENSOR_TEST
