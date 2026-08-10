@@ -444,6 +444,9 @@ static void pauseSamplingForOta() {
   // 呼べなくなる。転送が終わる（成功時は再起動、失敗時はresumeSamplingで再開）まで
   // ウォッチドッグの監視対象から一時的に外す。
   esp_task_wdt_delete(gSamplingTask);
+  // gBatchQueueは通常batchDrainTaskが即座に吸い出すので既に空のはずだが、
+  // ここでも明示的に空にしておく（enqueue()はmutexで守られているので
+  // batchDrainTaskと同時に呼んでも安全。上のESP.restart()前と同じ保険）。
   Batch* b = nullptr;
   while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) gUploader->enqueue(b);
   size_t flushed = gUploader->flushToSpill();
@@ -549,6 +552,28 @@ static void checkAndPerformPullOta(const String& target) {
   }
 }
 
+// --- 吸い出しタスク（Core0）---
+// gBatchQueue(深さ4、drop-oldest)からUploaderへ渡すだけの薄いタスク。送信タスクと
+// 分けている理由はCPU競合の解消ではなく、送信タスクがWiFi再接続・TLSハンドシェイクで
+// 長時間ブロックする間もこちらは動き続けられるようにするため——分割前は同じループの
+// 中に直列で書かれていたため、送信側の1行が長時間ブロックすると後ろの吸い出し処理に
+// プログラムカウンタが物理的に到達できず、その間gBatchQueueが溢れてUploaderに届く
+// 前にデータが失われ続けた（2026-08-07 device1で実測70分間、docs/design.md参照）。
+// portMAX_DELAYでブロック待ちする間はCPUを使わないので、常時稼働でも実害はない。
+// task watchdogには登録しない——このタスクは「新しいバッチが来るまで待つ」のが
+// 正常状態で、OTA中(サンプリング停止)等でいくらでも長く無応答になりうるため、
+// 待機自体をハング扱いされると困る。Uploader::enqueue()自体はmutexで守られており
+// 送信タスク側のpump()/flushToSpill()と安全に並行できる（batch-uplink側の変更、
+// docs/log/2026-08-11-uploader-task-split-design.md）。
+static void batchDrainTask(void*) {
+  for (;;) {
+    Batch* b = nullptr;
+    if (xQueueReceive(gBatchQueue, &b, portMAX_DELAY) == pdTRUE) {
+      gUploader->enqueue(b);
+    }
+  }
+}
+
 // --- 送信タスク（Core0）---
 static void uploaderTask(void*) {
   esp_task_wdt_add(nullptr);
@@ -561,6 +586,9 @@ static void uploaderTask(void*) {
   // 積み重なれば超えうるので、タスクはハングしておらずソケットを待っているだけと
   // 分かっている前提で、ブロックしうる呼び出しの前後に明示的に餌をやる。ここを
   // 削ると回線が詰まった時に限って再起動する。
+  //
+  // gBatchQueueの吸い出しはbatchDrainTaskの専任（上記コメント参照）。ここでは
+  // 触らない——このタスクが長時間ブロックしても、吸い出しは止まらない。
   for (;;) {
     esp_task_wdt_reset();
 
@@ -574,11 +602,6 @@ static void uploaderTask(void*) {
       lastResync = millis();
     }
 
-    // batchQueue -> uploader
-    Batch* b = nullptr;
-    while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) {
-      gUploader->enqueue(b);
-    }
     // alertQueue -> 即時送信
     AlertMsg m;
     while (xQueueReceive(gAlertQueue, &m, 0) == pdTRUE) {
@@ -641,7 +664,11 @@ static void uploaderTask(void*) {
       Serial.println("[uploader] manual reboot confirmed via button hold, flushing queue to spill");
     }
     if (restartRequested) {
-      // gBatchQueueはこの周のループ冒頭で既にuploaderへ吸い出し済み。
+      // gBatchQueueは通常batchDrainTaskが即座に吸い出すので既に空のはずだが、
+      // 再起動直前の保険として明示的にも空にしておく（enqueue()はmutexで守られて
+      // いるのでbatchDrainTaskと同時に呼んでも安全）。
+      Batch* b = nullptr;
+      while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) gUploader->enqueue(b);
       gUploader->flushToSpill();
       if (gUploader->ramQueued() == 0) {
         Serial.println("[uploader] queue flushed to spill, restarting now");
@@ -762,6 +789,20 @@ void setup() {
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
                            kBatchBufferBytes, /*discardSpillOn400=*/true);
   gUploader->begin();
+
+  // batchDrainTaskは送信タスクより優先度を上げておく——新しいバッチが来た瞬間に
+  // 確実に先へ進めることを保証するため（送信タスクは大半ネットワーク待ちで
+  // ブロックしているのでほぼ影響しないが、CPUを使う場面が万一あっても吸い出しを
+  // 優先させたい）。スタックはTLS/HTTPClientを一切使わないので送信タスク(12288)
+  // より小さくてよいが、LittleFSのspill書き込み(enqueue()がRAM満杯時に呼ぶ)分の
+  // 余裕は見ておく。
+  if (xTaskCreatePinnedToCore(batchDrainTask, "batchDrain", 4096, nullptr, 2, nullptr, 0) !=
+      pdPASS) {
+    for (;;) {
+      Serial.println("[boot] BUG: batchDrainTask creation failed (heap exhausted?). halting.");
+      delay(5000);
+    }
+  }
 
   if (xTaskCreatePinnedToCore(uploaderTask, "uploader", 12288, nullptr, 1, nullptr, 0) != pdPASS) {
     // 戻り値未チェックのままだと、失敗時に後続コードが不定ハンドルへ通知を送り
