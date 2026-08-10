@@ -63,6 +63,17 @@ def _fmt_time(us: int) -> str:
     return dt.datetime.fromtimestamp(us / 1e6, JST).strftime("%Y-%m-%d %H:%M:%S JST")
 
 
+def _device_field(did: int) -> str:
+    """デバイス番号を、ダッシュボードの詳細ページへの Slack mrkdwn リンクにする。
+    NAMZ_DASHBOARD_URL 未設定なら番号文字列のまま返す（notify.event_field と同じ形）。
+    batch-uplink の notify.py には同種の event_url/event_field しか無いのでここに置く。"""
+    label = f"{did:04d}"
+    base = os.environ.get("NAMZ_DASHBOARD_URL", "").rstrip("/")
+    if not base:
+        return label
+    return f"<{base}/#device/{did}|{label}>"
+
+
 def handler(event, context):
     now_us = int(time.time() * 1e6)
     offline_after = int(OFFLINE_AFTER_S * 1e6)
@@ -87,14 +98,14 @@ def handler(event, context):
                 n.notify(
                     title,
                     f"{SLACK_MENTION}device *{did:04d}* から *{age}* データが来ていない。落ちているかもしれない。",
-                    {"最終受信": _fmt_time(last), "経過": age},
+                    {"デバイス": _device_field(did), "最終受信": _fmt_time(last), "経過": age},
                 )
                 devices.mark_offline_notified(did, now_us)
             elif action == "recovery":
                 n.notify(
                     "デバイス復帰",
                     f"{SLACK_MENTION}device *{did:04d}* がデータ送信を再開した。",
-                    {"最終受信": _fmt_time(last)},
+                    {"デバイス": _device_field(did), "最終受信": _fmt_time(last)},
                 )
                 devices.clear_offline(did)
 
@@ -110,14 +121,14 @@ def handler(event, context):
                     title,
                     f"{SLACK_MENTION}device *{did:04d}* のデータが *{lag}* 遅れている。"
                     "受信は続いているが測定時刻が追いついていない（時計ずれか追いつき中）。",
-                    {"最新データ時刻": _fmt_time(last_batch), "遅延": lag},
+                    {"デバイス": _device_field(did), "最新データ時刻": _fmt_time(last_batch), "遅延": lag},
                 )
                 devices.mark_lag_notified(did, now_us)
             elif lag_action == "lag_recovery":
                 n.notify(
                     "データ遅延解消",
                     f"{SLACK_MENTION}device *{did:04d}* のデータ遅延が解消した。",
-                    {"最新データ時刻": _fmt_time(last_batch)},
+                    {"デバイス": _device_field(did), "最新データ時刻": _fmt_time(last_batch)},
                 )
                 devices.clear_lag(did)
 
@@ -136,7 +147,7 @@ def handler(event, context):
                 f"device *{did:04d}* に *{target}* への更新を許可してから *{elapsed}* "
                 "経つが解消していない。証明書検証失敗・ネットワーク不調・配布物の取り違え等、"
                 "実機のシリアルログで原因を確認すること。",
-                {"許可したバージョン": target, "経過": elapsed},
+                {"デバイス": _device_field(did), "許可したバージョン": target, "経過": elapsed},
             )
             ota_watch.mark_ota_stuck_notified(did, now_us)
 
