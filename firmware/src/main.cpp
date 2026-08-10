@@ -62,6 +62,17 @@ static volatile uint32_t gLastShakeMs = 0;  // 瞬時合成加速度がしきい
 // loop()が震度画面の代わりにgDisplay.renderOtaUpdating()を出す。
 static volatile bool gOtaInProgress = false;
 
+// バックログの最古データの経過秒数（uploaderTask/Core0が書き、loop/Core1が読む）。
+// 元はloop()から直接Uploader::oldestQueuedStartUs()を呼んでいたが、これは
+// LittleFSのspillディレクトリを読む（内部でloadOldestSpillPath()を叩く）ため、
+// uploaderTask側のpump()（同じくspillを読む）と別コアから同時に走ると
+// LittleFS内部の整合性チェックが壊れてパニックする実機バグを踏んだ
+// （2026-08-10、docs/log/2026-08-10-littlefs-loop-uploader-race.md）。
+// Uploaderへのmutex持ち込みではなく、他の表示用共有状態と同じ
+// 「1書き手・1読み手のvolatile」パターンに合わせてLittleFSアクセスを
+// Core0側だけに一本化する。
+static volatile uint32_t gBacklogAgeS = 0;
+
 // ボタン長押しによる緊急手動再起動フラグ（gOtaInProgressとは逆方向、
 // loop/Core1が書きuploaderTask/Core0が読む。config.hのkRebootHoldConfirmMs/
 // kRebootHoldTriggerMs参照）。
@@ -466,6 +477,20 @@ static void uploaderTask(void*) {
     gUploader->pump();
     esp_task_wdt_reset();
 
+    // バックログ年齢の表示用値をここ(Core0)で計算してpublishする。
+    // loop()(Core1)から直接呼ぶとLittleFSへ別コアから同時アクセスすることになり
+    // 実機でパニックを踏んだ(上のgBacklogAgeS宣言のコメント参照)。
+    {
+      uint64_t oldestUs;
+      uint32_t backlogAgeS = 0;
+      if ((gUploader->spillCount() + gUploader->ramQueued()) > 0 && timesync::isSynced() &&
+          gUploader->oldestQueuedStartUs(oldestUs)) {
+        uint64_t nowUs = timesync::nowUs();
+        backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
+      }
+      gBacklogAgeS = backlogAgeS;
+    }
+
     // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、RAMキューを
     // LittleFSへ退避してからすぐ再起動する（OTAのotaOnStartと同じ安全策。
     // 通信を待たないので数秒で落とせる）。退避済みデータはUploaderの不変条件
@@ -726,14 +751,10 @@ void loop() {
         snprintf(ip, sizeof(ip), "%u.%u.%u.%u", addr[0], addr[1], addr[2], addr[3]);
       }
       uint32_t backlog = gUploader->spillCount() + gUploader->ramQueued();
-      uint32_t backlogAgeS = 0;
-      uint64_t oldestUs;
-      if (backlog > 0 && timesync::isSynced() &&
-          gUploader->oldestQueuedStartUs(oldestUs)) {
-        uint64_t nowUs = timesync::nowUs();
-        backlogAgeS = nowUs > oldestUs ? (uint32_t)((nowUs - oldestUs) / 1000000ULL) : 0;
-      }
-      gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, backlog, backlogAgeS,
+      // backlogAgeSはuploaderTask(Core0)が計算してpublishした値を読むだけ。
+      // ここでUploader::oldestQueuedStartUs()を直接呼ぶとLittleFSへ別コアから
+      // 同時アクセスすることになりパニックを踏む(gBacklogAgeS宣言のコメント参照)。
+      gDisplay.render(gDispIntensity, gDispPeakGal, wifi, ip, backlog, gBacklogAgeS,
                       status, bg, clock);
     }
 #endif
