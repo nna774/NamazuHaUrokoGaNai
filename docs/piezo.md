@@ -142,6 +142,9 @@ Rs = (25V - 3.6V) / 0.5mA ≈ 42.8kΩ → 標準値で47kΩ
 
 ### 最小スケッチ（Arduino IDE、動作確認用）
 
+[docs/piezo_phase0/piezo_phase0.ino](piezo_phase0/piezo_phase0.ino)にそのまま
+書き込めるスケッチを置いた:
+
 ```cpp
 void setup() {
   Serial.begin(115200);
