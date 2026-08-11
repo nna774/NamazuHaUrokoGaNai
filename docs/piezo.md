@@ -140,27 +140,37 @@ Rs = (25V - 3.6V) / 0.5mA ≈ 42.8kΩ → 標準値で47kΩ
 いる。低電流域(今回の設計電流0.5mA程度)ではVfはさらに下がる傾向があり、
 実際のマージンはこれより広いと見てよい）
 
-### 最小スケッチ（Arduino IDE、動作確認用）
+### 最小スケッチ（PlatformIO、動作確認用）
 
-[docs/piezo_phase0/piezo_phase0.ino](piezo_phase0/piezo_phase0.ino)にそのまま
-書き込めるスケッチを置いた:
+[docs/piezo_phase0/](piezo_phase0/)に、本線(`firmware/`)とは独立したスタンドアロン
+PlatformIOプロジェクトとして置いた（ビルド確認済み、ESP32-C3向け環境
+`esp32-c3-devkitm-1`）:
 
 ```cpp
+#include <Arduino.h>
+
+const int kPiezoPin = 4; // GPIO4
+
 void setup() {
   Serial.begin(115200);
   analogSetAttenuation(ADC_11db); // フルスケール(~0-3.3V)を使う
 }
 
 void loop() {
-  int v = analogRead(4); // GPIO4
+  int v = analogRead(kPiezoPin);
   Serial.println(v);
   delay(2);
 }
 ```
 
-書き込みボードは「ESP32C3 Dev Module」でよい（購入元のレビューでも同ボードでの
-書き込み実績あり）。シリアルプロッタ(Tools > Serial Plotter)で見ながら円板を
-指で弾いて反応を確認する。
+```sh
+cd docs/piezo_phase0
+pio run --target upload
+pio device monitor
+```
+
+シリアルモニタ（`pio device monitor`、または`pio run --target monitor`）で見ながら
+円板を指で弾いて反応を確認する。
 
 ## 5. 次にやること
 
