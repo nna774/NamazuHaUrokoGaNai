@@ -53,7 +53,7 @@ FFTは境界を跨ぐ揺れを扱いにくく、ESP32上で60秒窓FFTを回す�
 
 - 「累計0.3秒超過値」という定義自体が単発スパイクに鈍い
 - 検知条件は「リアルタイム震度 ≥ 閾値 が数秒継続」
-- 閾値・継続秒数は生データ90日分でバックテストしてチューニングする
+- 閾値・継続秒数は生データでバックテストしてチューニングする（raw/の保持期間＝`raw_retention_days`ぶん手に入る。当初90日と決めたが、実際に必要な量を検証しないまま決めた数字だったため2026-08-11に60日へ短縮した。[docs/log/2026-08-11-events-accidental-deletion-protection.md](log/2026-08-11-events-accidental-deletion-protection.md)）
 
 ### detect の実行頻度をバッチ長から切り離す（`NAMZ_DETECT_STRIDE_S`）
 
@@ -311,7 +311,7 @@ YAML ではなく JSON にしたのは、`tools/` に PyYAML 依存を持ち込�
 ## S3レイアウトと保存期間
 
 ```
-raw/YYYY/MM/DD/HH/<device>-<batch_start_us>.bin   # 90日でexpire
+raw/YYYY/MM/DD/HH/<device>-<batch_start_us>.bin   # 60日でexpire（削除後30日は復旧可能）
 events/<event-id>/meta.json                        # 永久
 events/<event-id>/<batch_start_us>.bin             # 永久（検知周辺をコピー）
 ```

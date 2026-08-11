@@ -22,7 +22,7 @@ variable "api_domain" {
 
 variable "raw_retention_days" {
   type        = number
-  default     = 90
+  default     = 60
   description = "raw/ の保持日数。これを過ぎたら削除（イベント周辺は events/ に永久保存）。"
 }
 
