@@ -43,6 +43,19 @@ expirationは「現行バージョンの削除」に留まり、実体は非curr
 `noncurrent_version_expiration { noncurrent_days = 1 }`を同じruleに足し、
 非current化した直後に実体も消えるようにして元の挙動を保った。
 
+## 残っている穴（他セッションのレビューで指摘）
+
+`aws_s3_bucket_policy.data`のDenyは**S3 Lifecycle expirationには効かない**。
+Lifecycleによる削除はS3サービス内部の自動処理であり、特定のIAMプリンシパルに
+よるAPIリクエストとして発行されるわけではないため、バケットポリシー/IAMポリシーの
+評価対象外というのがAWSの既知の挙動。今は`expire-raw`ルールが
+`filter { prefix = "raw/" }`で`events/`を対象外にしているから安全だが、将来
+このfilterを広げる/typoする変更が入ると、今回追加したDenyポリシーを迂回して
+黙って消える。Object Lockなら止められるが、既存バケットには後付けできない
+（バケット作成時にしか有効化できない）ため今回は採用せず、`s3.tf`の
+`expire-raw`ルール直上にコメントで警告を残すに留めた。緊急度は低い
+（今壊れているわけではなく、将来filterを触る時の注意点）。
+
 ## 次に何が可能になったか
 
 `terraform plan`で意図通りの差分（DynamoDBテーブル更新2件・S3ポリシー新規・

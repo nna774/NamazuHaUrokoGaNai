@@ -28,6 +28,13 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
   bucket = aws_s3_bucket.data.id
 
   # raw/ 配下だけを保持期間で削除。events/ は対象外なので永久に残る。
+  #
+  # 【重要】このfilter prefixを広げたりtypoしたりして誤って events/ を含めると、
+  # 下の aws_s3_bucket_policy.data の Deny は一切効かず黙って消える。Lifecycle
+  # expirationはS3サービス内部の自動処理であり、特定のIAMプリンシパルによる
+  # リクエストとして発行されるわけではないため、バケットポリシー/IAMポリシーの
+  # 評価対象外（AWSの既知の挙動）。ここを触る時は "raw/" のままであることを
+  # 必ず確認すること。
   rule {
     id     = "expire-raw"
     status = "Enabled"
