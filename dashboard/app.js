@@ -1198,6 +1198,10 @@ async function refreshDevices() {
       const tr = document.createElement('tr');
       tr.dataset.id = d.device_id;
       tr.onclick = () => { location.hash = deviceHash(d.device_id); };
+      // 監視停止中は行全体を薄くする（イベント一覧の非該当/人工地震と同じ扱い）。
+      // 最終受信・鮮度の警告値も、意図的に黙らせている間は対処が要る情報では
+      // ないので背景色を出さない。
+      if (d.watchdog_muted) tr.style.opacity = '0.45';
       const id = String(d.device_id).padStart(4, '0');
       const restartBadge = d.pending_restart_requested_at_us
         ? ' <span class="badge badge-restart">再起動要求</span>'
@@ -1212,8 +1216,8 @@ async function refreshDevices() {
           : `<span class="warn-hi">→ ${d.pending_ota_version}</span>`;
       }
       tr.innerHTML = `<td>${id}</td><td>${st}</td>`
-        + `<td${warnBg(d.age_s, offlineAt)}>${last}</td>`
-        + `<td${warnBg(d.lag_s, lagAt)}>${fmtAgo(d.lag_s)}遅れ</td>`
+        + `<td${d.watchdog_muted ? '' : warnBg(d.age_s, offlineAt)}>${last}</td>`
+        + `<td${d.watchdog_muted ? '' : warnBg(d.lag_s, lagAt)}>${fmtAgo(d.lag_s)}遅れ</td>`
         + `<td class="col-batches">${d.batches_total ?? 0}</td>`
         + `<td class="col-fw">${fwVersion}</td>`
         + `<td>${d.uptime_s != null ? fmtAgo(d.uptime_s) : '—'}</td>`
