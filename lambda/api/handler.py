@@ -168,8 +168,10 @@ def _events(q):
 
 def _event(q):
     eid = q.get("id", "")
-    # event_id は「デバイス4桁-バケット数値」形式のみ。S3キーに埋め込むため書式を強制する。
-    if not re.fullmatch(r"\d{4}-\d{1,16}", eid):
+    # event_id は「デバイスID(最低4桁ゼロ埋め、uint32まで)-バケット数値」形式のみ。
+    # S3キーに埋め込むため書式を強制する。device_id は :04d 生成のため4桁未満はないが、
+    # テスト機のようにuint32最大値(4294967295, 10桁)まで取り得るので上限は10桁で見る。
+    if not re.fullmatch(r"\d{4,10}-\d{1,16}", eid):
         return _json(400, {"error": "bad id"})
     # meta.json があれば波形付き（クラウド確定済イベント）。
     try:

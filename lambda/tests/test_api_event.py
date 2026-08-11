@@ -1,3 +1,4 @@
+import json
 import os
 
 import numpy as np
@@ -51,3 +52,37 @@ def test_slice_gal_ignores_bad_or_empty():
 def test_slice_gal_empty_waveform():
     gal, start = api._slice_gal(np.empty((0, 3)), START, FS, "1", "2")
     assert gal.shape[0] == 0 and start == START
+
+
+def test_event_rejects_bad_id_format():
+    # 桁が全く違う・区切りが無い等、event_idとして成立しない値は400
+    assert api._event({"id": "not-an-id"})["statusCode"] == 400
+    assert api._event({"id": ""})["statusCode"] == 400
+
+
+class _FakeS3NoSuchKey:
+    """s3.get_objectが常にNoSuchKeyを返すfake（実AWSへ問い合わせない）。"""
+
+    class exceptions:
+        class NoSuchKey(Exception):
+            pass
+
+    def get_object(self, **kwargs):
+        raise self.exceptions.NoSuchKey({}, "GetObject")
+
+
+def test_event_accepts_uint32_max_device_id(monkeypatch):
+    # テスト機のdevice_id(4294967295, uint32最大値, 10桁)のevent_idは、
+    # `\d{4}-...` 固定桁の正規表現だと弾かれていた(400)。可変桁(4〜10桁)を許容し、
+    # フォーマット検証を通過してDynamoDB照会まで進むことを確認する
+    # （meta.jsonが無い＝速報のみのイベント経路。s3はNoSuchKeyのfakeで実AWSを避ける）。
+    monkeypatch.setattr(api, "s3", _FakeS3NoSuchKey())
+    item = {
+        "device_id": 4294967295, "onset_us": 59546597000000, "max_intensity": 3.1,
+    }
+    monkeypatch.setattr(api.events, "get_event",
+                        lambda eid: item if eid == "4294967295-59546597" else None)
+    resp = api._event({"id": "4294967295-59546597"})
+    assert resp["statusCode"] == 200
+    body = json.loads(resp["body"])
+    assert body["meta"]["device_id"] == 4294967295

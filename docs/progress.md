@@ -5,11 +5,8 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
-| 2026-08-11 | **デバイス詳細ページに「起動時刻」行を追加した。** `boot_epoch_us`はAPIレスポンスに
-既に入っていたが画面に出ておらず、見る側が「現在時刻－稼働時間」を頭で計算する必要が
-あった。`最終受信`行と同じ`toLocaleString('ja-JP')`表示。本番API(device0001)で日時が
-正しく出ることを確認済み。ついでに`docs/uptime.md`の「実機・本番デプロイはまだ」という
-記述が2026-08-07〜08-09のロールアウト実績と食い違っていたのを直した | [log/2026-08-11-device-detail-boot-time-display.md](log/2026-08-11-device-detail-boot-time-display.md) |
+| 2026-08-11 | **デバイス詳細ページに「起動時刻」行を追加した。** `boot_epoch_us`はAPIレスポンスに既に入っていたが画面に出ておらず、見る側が「現在時刻－稼働時間」を頭で計算する必要があった。`最終受信`行と同じ`toLocaleString('ja-JP')`表示。本番API(device0001)で日時が正しく出ることを確認済み。ついでに`docs/uptime.md`の「実機・本番デプロイはまだ」という記述が2026-08-07〜08-09のロールアウト実績と食い違っていたのを直した | [log/2026-08-11-device-detail-boot-time-display.md](log/2026-08-11-device-detail-boot-time-display.md) |
+| 2026-08-11 | **イベント詳細API(`GET /event?id=`)がテスト機(device_id=4294967295, uint32最大値)のevent_idを400で拒否する不具合を修正した。** `lambda/api/handler.py`の書式検証`\d{4}-\d{1,16}`がdevice_id部分をちょうど4桁に限定していたが、`event_id()`は`:04d`で「最低4桁」ゼロ埋めするだけなので5桁以上は素通りせず400になっていた。デバイス詳細ルートは同種の問題を先に`\d{1,10}`へ直してあったのに`_event()`だけ直っていなかった。`\d{4,10}-\d{1,16}`へ修正し回帰テストを追加 | [log/2026-08-11-event-api-rejects-uint32-max-device-id.md](log/2026-08-11-event-api-rejects-uint32-max-device-id.md) |
 | 2026-08-11 | **`batch-uplink` PR #22をマージし`v2.13.0`をタグ付け、`firmware/platformio.ini`・`terraform/build_lambda.sh`のpinを揃えて更新した。** `pio run`3env・`test/run.sh`確認済み。device2(ADXL355機)はバッチ周期15秒が元々プール枯渇に近い機体で、今回の修正の恩恵は大きいと見ているが実機未確認・投入保留のまま | [log/2026-08-11-batch-uplink-v2.13.0-pin-bump.md](log/2026-08-11-batch-uplink-v2.13.0-pin-bump.md) |
 | 2026-08-11 | **WiFi遮断の実機試験で、送信が連続失敗しRAMもBatchプールも満杯になると、退避トリガー(`enqueue()`頼み)が二度と来ず`newBatch stuck`が延々回復しない飢餓状態を発見した。** `Uploader::pump()`に自発的`flushToSpill()`を追加して対処([PR #22](https://github.com/nna774/batch-uplink/pull/22)へ追加コミット)。当初「バックオフ上限(60秒)到達時」で実装したが、プール枯渇中はsamplingTaskが生サンプルを即座に捨て続けるため60秒待ちは遅すぎると判明し、`ram_.size() >= maxRam_`という毎`pump()`呼び出し(~50ms)でチェックできる信号へ差し替えた。firmware側の変更は不要。実機での回復確認はまだ | [log/2026-08-11-uploader-starvation-under-sustained-send-failure.md](log/2026-08-11-uploader-starvation-under-sustained-send-failure.md) |
 | 2026-08-11 | **タスク分割版(`batchDrainTask`+送信タスク)とmutex化したUploaderをテスト機(FakeSensor)へ実際に焼き、平常時の動作(enqueue→ram_→pump→POST成功のサイクル、約30秒周期)をシリアルログで確認した。** クラッシュ・再起動ループなし。WiFi瞬断シナリオ(本来の目的)の実機確認はまだ | [log/2026-08-11-uploader-task-split-realhw-check.md](log/2026-08-11-uploader-task-split-realhw-check.md) |
