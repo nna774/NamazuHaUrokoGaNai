@@ -5,6 +5,7 @@ firmware/.piolibdeps/
 firmware/.vscode/
 firmware/**/secrets_provision.h
 docs/piezo_phase0/.pio/
+docs/piezo_phase0/out.log
 
 # デバイスマニフェスト（HMAC鍵を含む。雛形は devices.example.json）
 tools/devices.json
