@@ -37,13 +37,20 @@ sensor_typeガードを1行足すだけで震度計算を丸ごとスキップ�
 `wire.py`の`sensor_type`(u8)に帯域を切ることにした:
 
 - `0〜127`: 加速度センサチップ（gal校正対象。既存2種+予約2種）
-- `128〜254`: 加速度ではない・非校正の生値センサ
+- `128〜249`: 加速度ではない・非校正の生値センサ
+- `250〜254`: 予約（未使用のまま空けておく）
 - `255`: `FAKE`（結合試験用、既存）
 
 ピエゾは`SENSOR_TYPE_PIEZO = 128`。表示名（`SENSOR_TYPE_NAMES`、ダッシュボード
 デバイス詳細ページで使う）は具体的なセンサ名を出したいので、`RAW`のような抽象名
 ではなく個別に採番する方針にした（gal校正済みかどうかの判定は表示名と別に
 allowlistで持てば困らない）。
+
+**`255`(`FAKE`)は迂回対象に含めない。**`firmware/lib/FakeSensor/FakeSensor.h`は
+IIS3DHHCと同じ換算(0.076mg/LSB)でgal相当の値を実際に送る結合試験用センサで、
+震度計算パイプライン自体をend-to-endで試す用途（静穏なノイズしか出さないため
+閾値には掛からないだけで、gal計算自体は通す設計）。detect Lambdaのガードは
+「`sensor_type >= 128`」ではなく「`128〜249`の範囲」で判定する必要がある。
 
 ## 4. ワイヤ形式は`axes: 1`で正直に送り、dashboard対応はapi Lambda 1箇所に閉じる
 
@@ -75,7 +82,8 @@ NVSプロビジョニング配線（`secrets_provision.h`生成、`SENSOR_ENV`�
 phase1着手に必要な設計判断が出揃った。実装順序:
 
 1. `wire.py`に`SENSOR_TYPE_PIEZO=128`と帯域コメントを追加、`axes`可変対応
-2. `lambda/detect/handler.py`の`_process()`にsensor_typeガードを追加
+2. `lambda/detect/handler.py`の`_process()`にsensor_typeガード（`128〜249`の
+   範囲のみスキップ、`255`は除く）を追加
 3. `lambda/api/handler.py`の`_waveform_payload()`にpadding処理を追加
 4. `tools/provision_device.py`の`SENSOR_ENV`にpiezo用env追加
 5. `firmware/`にpiezo用`[env:]`とセンサ読み取りコードを追加（batch-uplink組み込み）
