@@ -84,10 +84,12 @@ Lifecycleによる削除はS3サービス内部の自動処理であり、特定
 維持する理由は薄いと結論した。`docs/design.md`のバックテストの記述からも
 「90日分」という具体的な日数は外し、この決定へのリンクを残した。
 
-## 次に何が可能になったか
+## 適用済み
 
-`terraform plan`で意図通りの差分（DynamoDBテーブル更新・S3ポリシー新規・
-S3 versioning新規・lifecycle rule更新）のみであることを確認済み。
-apply未実施（本番AWSへの変更のため実行者の判断待ち）。`raw_retention_days`は
+`terraform apply`実施済み（2026-08-11）。`raw_retention_days`は
 `terraform.tfvars`（gitignore対象）側の明示的な上書きが実際に効く値なので、
-`variables.tf`のdefault変更とは別に、そちらも60へ手動で書き換える必要がある。
+`variables.tf`のdefault変更とは別にそちらも60へ手動で書き換えた上で適用した。
+適用後、`terraform plan`が"No changes"になること、およびAWS側の実値
+（`describe-table`のDeletionProtection/PITR、`get-bucket-versioning`、
+`get-bucket-policy`、`get-bucket-lifecycle-configuration`）を直接叩いて
+意図通りであることを確認済み。

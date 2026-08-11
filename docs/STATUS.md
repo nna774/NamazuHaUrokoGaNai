@@ -39,8 +39,8 @@
 
 - アカウント: 486414336274 / リージョン: ap-northeast-1
 - Terraform管理（`terraform/`）。19リソース
-- S3 `namazu-data-*`: `raw/`は60日でexpire（バージョニング下で削除後さらに30日は復旧可能）、`events/`は永久＋削除系操作をバケットポリシーでDeny（terraform適用待ち、[docs/log/2026-08-11-events-accidental-deletion-protection.md](log/2026-08-11-events-accidental-deletion-protection.md)）
-- DynamoDB `namazu-events`: イベント（セッション方式でマージ）。`deletion_protection_enabled`＋PITR設定済み（同上、適用待ち）
+- S3 `namazu-data-*`: `raw/`は60日でexpire（バージョニング下で削除後さらに30日は復旧可能）、`events/`は永久＋削除系操作をバケットポリシーでDeny（[docs/log/2026-08-11-events-accidental-deletion-protection.md](log/2026-08-11-events-accidental-deletion-protection.md)）
+- DynamoDB `namazu-events`: イベント（セッション方式でマージ）。`deletion_protection_enabled`＋PITR有効（同上）
 - Lambda×3: ingest / detect / api（Function URL、認証はHMAC/なし）
 - CloudFront + S3 でダッシュボード配信（認証なし）
 
