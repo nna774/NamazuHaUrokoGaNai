@@ -18,7 +18,7 @@ import boto3
 
 from batch_uplink import notify, s3util
 
-from common import detect_core, events, imagehost, quicklook, store
+from common import detect_core, events, imagehost, quicklook, store, wire
 from jismo.rounding import intensity_scale, scale_ordinal
 
 s3 = boto3.client("s3")
@@ -52,6 +52,10 @@ def handler(event, context):
 
 def _process(key: str):
     b = store.get_batch(s3, BUCKET, key)
+    if not wire.is_calibrated(b.meta.sensor_type):
+        # 非校正の生値センサ(ピエゾ等)はgal前提の震度計算に掛けられない
+        # (docs/wire_format.md「sensor_type の帯域」)。
+        return
     batch_len_us = int(b.meta.sample_count / b.meta.sample_rate_hz * 1e6)
     end_us = b.meta.batch_start_us + batch_len_us
 

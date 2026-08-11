@@ -358,11 +358,25 @@ def _device_temp(device_id: int, q):
     return _json(200, {"device_id": device_id, "hours": hours, "points": points})
 
 
+def _pad_to_3ch(gal: np.ndarray) -> np.ndarray:
+    """axes<3の非校正センサ(ピエゾ等)向けに、y,z列を0埋めして3列に揃える。
+
+    dashboardはx,y,zの3チャンネル前提で組んである（軸を可変対応させるのは
+    別タスク、docs/piezo.md §7参照）。ワイヤ形式・detect Lambdaはaxes可変の
+    ままにし、この関数1箇所でdashboard向けの互換性を担保する。
+    """
+    if gal.shape[1] >= 3:
+        return gal[:, :3]
+    pad = np.zeros((gal.shape[0], 3 - gal.shape[1]))
+    return np.hstack([gal, pad])
+
+
 def _waveform_payload(gal: np.ndarray, start_us: int, fs: float) -> dict:
     n = gal.shape[0]
     if n == 0:
         return {"mode": "raw", "fs": fs, "start_us": start_us, "n": 0,
                 "x": [], "y": [], "z": []}
+    gal = _pad_to_3ch(gal)
     if n <= MAX_POINTS:
         return {
             "mode": "raw", "fs": fs, "start_us": int(start_us), "n": n,

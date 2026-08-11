@@ -262,12 +262,20 @@ GPIO4へ実接続してやり直した結果を以下に示す。
       離れているか確認する → 約50Hz(10ms/divで複数周期の減衰振動を確認、
       信頼できる測定)。1-10Hz帯から5〜10倍以上離れており問題無し（§5）
 
-## 7. phase1（クラウド統合）の設計方針（未実装）
+## 7. phase1（クラウド統合）
 
 phase0達成を受け、[other-sensors.md §2](other-sensors.md#2-アーキテクチャ上の要点-配送と物理量前提ロジックを分けて考える)
-で未定としていた設計を詰めた（経緯は
-[docs/log/2026-08-12-piezo-phase1-plan.md](log/2026-08-12-piezo-phase1-plan.md)）。
-コードはまだ変更していない。
+で未定としていた設計を詰め（[docs/log/2026-08-12-piezo-phase1-plan.md](log/2026-08-12-piezo-phase1-plan.md)）、
+Lambda側・firmware側とも実装し、**実機の書き込み・クラウド送信・dashboard表示
+まで確認した**（[docs/log/2026-08-12-piezo-phase1-impl.md](log/2026-08-12-piezo-phase1-impl.md)）。
+device_id=3を払い出し、クラウド側は`https://api.namazu.dark-kuins.net/devices/3`
+で稼働中。
+
+設計時点では「本線`firmware/`配下の`[env:]`として統合する」としていたが、
+実装時にESP32-C3スーパーミニが**シングルコア**（本線`main.cpp`はデュアルコア
+分離が前提、[docs/design.md](design.md)「ESP32ボードの差し替え」）と判明し、
+`piezo_main.cpp`という別エントリポイントに測定・送信の2タスク構成を新規実装する
+形に修正した。詳細は実装ログ参照。
 
 - **物理量前提ロジックの迂回**: DynamoDBを都度引く必要は無い。detect Lambda
   (`lambda/detect/handler.py`)はバッチをパースした時点で`BatchMeta.sensor_type`を
@@ -290,10 +298,21 @@ phase0達成を受け、[other-sensors.md §2](other-sensors.md#2-アーキテ�
   3列に揃える）は`lambda/api/handler.py`の`_waveform_payload()`1箇所に閉じる。
   `dashboard/app.js`は無改修。
 - **firmwareの配置**: `docs/piezo_phase0/`のまま育てず、本線`firmware/`配下の
-  `[env:]`として統合する。`tools/provision_device.py`のNVSプロビジョニング配線を
-  再利用できる。
+  `[env:piezo]`として統合した。ただし本線`main.cpp`をそのまま拡張したのではなく、
+  ESP32-C3がシングルコアなため別エントリポイント`piezo_main.cpp`を新設した
+  （下記「実装状況」参照）。`tools/provision_device.py`のNVSプロビジョニング
+  配線はそのまま再利用できた。
 
-実装順序: (1) `wire.py`にsensor_type追加・axes可変化 → (2) detect Lambdaに
-ガード追加（`128〜249`の範囲のみ、`255`は除く） → (3) api Lambdaにpadding追加 → (4) `provision_device.py`に
-piezo用env追加 → (5) `firmware/`にpiezo用envとセンサ読み取りコードを追加 →
-(6) device_id払い出し・サーバapply・焼く → (7) 実機送信確認。
+### 実装状況
+
+- [x] `wire.py`にsensor_type追加・axes可変化
+- [x] detect Lambdaにガード追加（`128〜249`の範囲のみ、`255`は除く）
+- [x] api Lambdaにpadding追加
+- [x] `provision_device.py`にpiezo用env追加
+- [x] `firmware/`にpiezo用envとセンサ読み取りコードを追加
+      （`piezo_main.cpp`・`RawSensor`/`PiezoSensor`・`NamzWire`のN軸対応）
+- [x] device_id払い出し・サーバapply・焼く → device_id=3、terraform apply済み、
+      `pio run -e piezo-provision`→`pio run -e piezo -t upload`で実機書き込み済み
+- [x] 実機送信確認・S3格納/dashboard波形表示の確認・RAM実測 → 起動時空きヒープ
+      162KB・maxblock 143KBと健全。`/devices/3`でonline確認、dashboardで波形
+      表示も確認（詳細は実装ログ参照）

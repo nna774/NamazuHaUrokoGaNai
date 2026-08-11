@@ -50,6 +50,10 @@ SECRETS_PROVISION_H = ROOT / "firmware" / "src" / "secrets_provision.h"
 SENSOR_ENV = {
     "iis3dhhc": "esp32dev",
     "adxl355": "adxl355",
+    # ESP32-C3スーパーミニ(docs/piezo.md)。provision専用envは[env:piezo-provision]
+    # （加速度センサ2種のように<env>-provisionを機械的に付けても導出できるが、
+    # NVS書き込み先ボード種別を明示するため既定envの表にはそのまま載せておく）。
+    "piezo": "piezo",
 }
 
 REQUIRED_FIELDS = ("id", "env", "wifi_ssid", "wifi_pass", "hmac_secret")
