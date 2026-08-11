@@ -15,22 +15,41 @@ ESP32 → ingest Lambda に送るバイナリ。リトルエンディアン。
 |--------|--------|-----------------|------|
 | 0      | u32    | magic           | `0x4E414D5A` (`"NAMZ"`) |
 | 4      | u8     | version         | `1` = トレイラー無し / `2` = 付きうる |
-| 5      | u8     | sensor_type     | 0=IIS3DHHC, 1=ADXL355, 2=LSM6DSO, ... |
+| 5      | u8     | sensor_type     | 0=IIS3DHHC, 1=ADXL355, 2=LSM6DSO, ...（帯域の意味は下記） |
 | 6      | u8     | sample_format   | 0=int16, 1=int32（将来20bitセンサ用） |
-| 7      | u8     | axes            | `3` |
+| 7      | u8     | axes            | サンプルの軸数。既存の加速度センサは`3`固定 |
 | 8      | u64    | batch_start_us  | バッチ先頭サンプルの UNIX時刻 [µs] |
 | 16     | u32    | sample_rate_mhz | サンプルレート [milli-Hz]（100Hz→100000） |
 | 20     | u32    | sample_count    | サンプル数 N |
 | 24     | f32    | scale_mg_per_lsb| 1 LSB あたりの mg（milli-g） |
 | 28     | u32    | device_id       | デバイス識別子 |
 
+### sensor_type の帯域（未実装、設計のみ）
+
+`sensor_type`(u8)は加速度センサチップの型番だけでなく、将来「加速度ではない・
+校正しない生値センサ」も同じフィールドに乗せる想定で帯域を切ってある
+（[docs/piezo.md §7](piezo.md#7-phase1クラウド統合の設計方針未実装)）:
+
+- `0〜127`: 加速度センサチップ（gal校正対象。`config.h`の`SensorType`enumと対応）
+- `128〜254`: 加速度ではない・非校正の生値センサ（例: `SENSOR_TYPE_PIEZO=128`）
+- `255`: `FAKE`（結合試験用ダミー、既存）
+
+detect Lambda等の物理量前提ロジックは、この帯域を見て`128`以上なら震度計算を
+スキップする想定。「センサの素性で読み手が分岐を変える」設計は
+[トレーラーの節](#トレーラー-v2省略可)の考え方と矛盾するように見えるが、
+`sensor_type`は元々センサの素性そのものを表すフィールドなので、そこにgal校正の
+可否という**センサの素性から決まる性質**を帯域として乗せるのは筋が異なる
+（トレーラーの型で分岐しない、はTLV項目の話）。
+
 ## ペイロード
 
-`sample_format` が int16 なら `int16_t data[N][3]`（x,y,z の順）、int32 なら `int32_t data[N][3]`。
+`sample_format` が int16 なら `int16_t data[N][axes]`、int32 なら `int32_t data[N][axes]`。
+既存の加速度センサは`axes=3`固定でx,y,zの順。
 サンプル `i` の時刻は `batch_start_us + round(i * 1e9 / sample_rate_mhz)` [µs]。
 
 物理量への変換: `accel_mg = raw_lsb * scale_mg_per_lsb`。
 gal (cm/s²) へは `accel_gal = accel_mg * 0.980665`。
+非校正の生値センサ(`sensor_type >= 128`)にはこの変換の意味が無い（[§sensor_typeの帯域](#sensor_type-の帯域未実装設計のみ)参照）。
 
 ## トレイラー (v2〜・省略可)
 

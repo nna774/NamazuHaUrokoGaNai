@@ -146,6 +146,8 @@ artificial を立てる）。
   クラウド側 `lambda/common/wire.py` は**感度もビット幅もヘッダから読む**（16/32bitすら
   固定していない）。計測震度は gal ベースなのでスケールさえ正しければパイプラインは共通。
 - `config.h` の `SensorType` enum は `kSensorAdxl355=1`・`kSensorLsm6dso=2` を予約済み。
+  加速度センサではない非校正の生値センサ（ピエゾ等）は別帯域(`128〜`)を使う想定
+  （未実装、[docs/wire_format.md](wire_format.md#sensor_type-の帯域未実装設計のみ)参照）。
 - **新センサ追加で本当に要る作業**: (1) `AccelSensor` を継承したドライバを1本書く、
   (2) `config.h` にピン追加・`main.cpp` の `static Iis3dhhc gSensor(...)` の行を差し替え、
   (3) クラウドは変更ゼロ。ただし不変条件として **`tools/backtest.py` で `tools/jismo` と
