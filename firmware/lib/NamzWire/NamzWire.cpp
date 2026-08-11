@@ -4,8 +4,8 @@
 
 namespace namzwire {
 
-Batch* newBatch(uint32_t capacitySamples, uint8_t sampleFormat) {
-  return new Batch(capacitySamples, sampleBytes(sampleFormat), kWireHeaderSize,
+Batch* newBatch(uint32_t capacitySamples, uint8_t sampleFormat, uint8_t axes) {
+  return new Batch(capacitySamples, sampleBytes(sampleFormat, axes), kWireHeaderSize,
                    kMaxTrailerBytes);
 }
 
@@ -17,6 +17,20 @@ bool addSample(Batch& b, int32_t x, int32_t y, int32_t z) {
   int16_t v[3] = {static_cast<int16_t>(x), static_cast<int16_t>(y),
                   static_cast<int16_t>(z)};
   return b.addRecord(v, sizeof(v));
+}
+
+bool addSampleN(Batch& b, const int32_t* values, uint8_t axes) {
+  bool isInt32 = b.recordBytes() == axes * sizeof(int32_t);
+  if (isInt32) {
+    return b.addRecord(values, axes * sizeof(int32_t));
+  }
+  // int16: 範囲外の値は飽和ではなく切り詰めになる。呼び出し側が
+  // scaleMgPerLsb相当のスケールでint16に収まることを保証すること。
+  int16_t v[8];  // axesは現状高々数個の想定。実用上十分な上限を静的に確保する。
+  for (uint8_t i = 0; i < axes && i < 8; ++i) {
+    v[i] = static_cast<int16_t>(values[i]);
+  }
+  return b.addRecord(v, axes * sizeof(int16_t));
 }
 
 bool addTrailer(Batch& b, uint16_t type, const void* data, uint16_t len) {
@@ -32,13 +46,13 @@ bool addTrailer(Batch& b, uint16_t type, const void* data, uint16_t len) {
 }
 
 void fillHeader(Batch& b, uint8_t sensorType, float scaleMgPerLsb,
-                uint32_t sampleRateHz, uint32_t deviceId) {
+                uint32_t sampleRateHz, uint32_t deviceId, uint8_t axes) {
   BatchHeader h{};
   h.magic = kWireMagic;
   h.version = kWireVersion;
   h.sensor_type = sensorType;
-  h.sample_format = b.recordBytes() == 3 * sizeof(int32_t) ? 1 : 0;
-  h.axes = 3;
+  h.sample_format = b.recordBytes() == axes * sizeof(int32_t) ? 1 : 0;
+  h.axes = axes;
   h.batch_start_us = b.startUs();
   h.sample_rate_mhz = sampleRateHz * 1000;  // Hz -> milli-Hz
   h.sample_count = b.recordCount();
