@@ -2,7 +2,9 @@
 
 デバイス詳細ページ（[device_overlay.md](device_overlay.md)とは別件、[progress.md](progress.md)
 2026-08-07の温度トレンド追加の派生）で「最終起動からの経過時間」を出したいという
-要望から。**実装済み（実機・本番デプロイはまだ）**。
+要望から。**実装済み・実機2台(device1/device2)へロールアウト済み**（[progress.md](progress.md)
+2026-08-07〜2026-08-09、2026-08-08のボタン長押し緊急再起動で`boot_epoch_us`更新・
+再起動検知も実地確認済み）。
 
 ## 1. なぜ今は出せないか
 
@@ -129,12 +131,16 @@ boot_epoch_us = batch_start_us - uptime_us
 
 ## 4. ダッシュボード表示
 
-デバイス詳細ページ（`#device/<id>`）の情報テーブルに「稼働時間」行を1つ足した。
+デバイス詳細ページ（`#device/<id>`）の情報テーブルに「起動時刻」「稼働時間」の2行を足した。
 `api`の`_device_view()`が`boot_epoch_us`（生値）と`uptime_s = (now_us - boot_epoch_us) / 1e6`
 （計算済み秒数）の両方を返す（既存の`age_s`/`lag_s`と同じ「サーバ側で計算して返す」流儀）。
-ダッシュボード側は既存の`fmtAgo()`（`age_s`/`lag_s`表示と同じ粗い相対表記ヘルパー）を
+「起動時刻」は`boot_epoch_us`を`最終受信`と同じ`toLocaleString('ja-JP')`でそのまま
+日時表示するだけ（`age_s`のような相対表記は付けない。頭の中で「現在時刻－稼働時間」を
+逆算させないためのものなので、絶対時刻そのものを見せるのが目的）。「稼働時間」は
+既存の`fmtAgoExact()`（`age_s`/`lag_s`表示と同じ粗い相対表記＋秒数併記ヘルパー）を
 そのまま流用した。旧ファーム（稼働時間ヘッダ未送信）は`boot_epoch_us`が無く、
-`uptime_s`は`null`→「不明」と表示される。
+どちらも「不明」と表示される。一覧テーブルには`uptime_s`の列のみで起動時刻は出さない
+（列数がすでに8つで狭い、[progress.md](progress.md)2026-08-07参照）。
 
 **やるかは好み**: 温度トレンドと同じ折れ線チャートで「稼働時間」を時系列表示すると
 鋸波になり、ゼロ近くに落ちた瞬間＝再起動、が一目で分かる。ただし表示のためだけに
@@ -188,6 +194,8 @@ static void checkAndPerformPullOta(const String& target) {
 
 firmware（`X-Namz-Uptime-Us`ヘッダ送信・`millis()`折り返しバグ修正）・
 ingest（`boot_epoch_us`逆算・再起動検知）・api（`boot_epoch_us`/`uptime_s`公開）・
-ダッシュボード（デバイス詳細ページの「稼働時間」行）まで実装済み。
-`firmware/test/run.sh`・`pio run`（esp32dev/adxl355両env）・`pytest lambda/tests`
-（97件）は確認済み。**実機での動作確認・本番デプロイはまだ**。
+ダッシュボード（デバイス詳細ページの「起動時刻」「稼働時間」行、一覧の「稼働時間」列）
+まで実装済み。`firmware/test/run.sh`・`pio run`（esp32dev/adxl355両env）・
+`pytest lambda/tests`は確認済み。**実機2台(device1/device2)へOTAロールアウト済み・
+本番デプロイ済み**（[progress.md](progress.md)2026-08-07〜2026-08-09）。「起動時刻」行は
+実機（device1）で日時が正しく出ることを本番APIで確認済み。
