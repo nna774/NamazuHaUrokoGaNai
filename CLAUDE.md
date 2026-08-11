@@ -17,6 +17,8 @@
 | 実機のノイズ特性・検出限界・センサ選定の知見 | [docs/noise.md](docs/noise.md) |
 | 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
 | ADXL355機の追加計画（未着手） | [docs/adxl355.md](docs/adxl355.md) |
+| ジオフォン(速度センサ)導入作戦（検討中・未着手） | [docs/geophone.md](docs/geophone.md) |
+| 安価な代替センサ(圧電等)による補強検知の構想（雑談ベース・未着手） | [docs/other-sensors.md](docs/other-sensors.md) |
 | ファームのOTA更新（実装済み・実機確認済み。使い方は§0クイックリファレンス） | [docs/ota.md](docs/ota.md) |
 | コマンドラインからのリモート再起動要求（実装済み・実機確認待ち） | [docs/remote_restart.md](docs/remote_restart.md) |
 | デバイスの稼働時間・再起動検知の作戦（未着手） | [docs/uptime.md](docs/uptime.md) |

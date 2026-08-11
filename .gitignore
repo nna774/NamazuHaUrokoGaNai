@@ -42,6 +42,9 @@ data/
 *.bin
 !firmware/**/*.bin.example
 
+# S3生波形のローカルキャッシュ（解析セッション間で使い回す。git管理対象外）
+.s3cache/
+
 # Claude Code（作業用 worktree の置き場。設定を共有したくなったら .claude/ 自体は追跡する）
 .claude/worktrees/
 
