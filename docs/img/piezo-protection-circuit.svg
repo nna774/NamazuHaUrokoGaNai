@@ -2,7 +2,7 @@
   <rect x="0" y="0" width="900" height="430" fill="white"/>
 
   <text x="450" y="28" text-anchor="middle" font-size="18" font-weight="bold" fill="black">
-    ピエゾ保護回路（Rs=33kΩ, Rb=10MΩ, D1/D2=1N60）
+    ピエゾ保護回路（Rs=47kΩ, Rb=10MΩ, D1/D2=1N60）
   </text>
 
   <!-- rails -->
@@ -40,7 +40,7 @@
   <line x1="280" y1="195" x2="340" y2="195" stroke="black" stroke-width="2"/>
   <rect x="340" y="183" width="80" height="24" fill="none" stroke="black" stroke-width="2"/>
   <line x1="420" y1="195" x2="470" y2="195" stroke="black" stroke-width="2"/>
-  <text x="380" y="172" text-anchor="middle" font-size="14" fill="black">Rs 33kΩ</text>
+  <text x="380" y="172" text-anchor="middle" font-size="14" fill="black">Rs 47kΩ</text>
 
   <!-- Node B -->
   <circle cx="470" cy="195" r="4" fill="black"/>
