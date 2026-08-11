@@ -1280,6 +1280,11 @@ function renderDeviceInfo(d) {
   const last = d.last_ingest_at_us
     ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
     : '—';
+  // boot_epoch_us はTimeSync同期済みのbatch_start_usから逆算したサーバ側算出値
+  // （ファームは経過時間しか送らない、docs/uptime.md §3）。uptime_sと同じく無ければ「不明」。
+  const boot = d.boot_epoch_us
+    ? new Date(d.boot_epoch_us / 1000).toLocaleString('ja-JP')
+    : '不明';
   const rows = [
     ['状態', st],
     ['最終受信', last],
@@ -1287,6 +1292,7 @@ function renderDeviceInfo(d) {
     ['累計バッチ', String(d.batches_total ?? 0)],
     ['版数', fwVersionHtml(d.fw_version)],
     ['センサ', d.sensor || '不明'],
+    ['起動時刻', boot],
     ['稼働時間', d.uptime_s != null ? fmtAgoExact(d.uptime_s) : '不明'],
     ['前回の再起動理由', d.reset_reason ? escapeHtml(d.reset_reason) : '不明'],
   ];
