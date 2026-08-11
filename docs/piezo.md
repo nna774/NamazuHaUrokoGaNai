@@ -266,8 +266,10 @@ GPIO4へ実接続してやり直した結果を以下に示す。
 
 phase0達成を受け、[other-sensors.md §2](other-sensors.md#2-アーキテクチャ上の要点-配送と物理量前提ロジックを分けて考える)
 で未定としていた設計を詰め（[docs/log/2026-08-12-piezo-phase1-plan.md](log/2026-08-12-piezo-phase1-plan.md)）、
-Lambda側・firmware側とも実装した（[docs/log/2026-08-12-piezo-phase1-impl.md](log/2026-08-12-piezo-phase1-impl.md)）。
-**コードのビルド確認までは完了、実機の書き込み・動作確認はまだ**。
+Lambda側・firmware側とも実装し、**実機の書き込み・クラウド送信・dashboard表示
+まで確認した**（[docs/log/2026-08-12-piezo-phase1-impl.md](log/2026-08-12-piezo-phase1-impl.md)）。
+device_id=3を払い出し、クラウド側は`https://api.namazu.dark-kuins.net/devices/3`
+で稼働中。
 
 設計時点では「本線`firmware/`配下の`[env:]`として統合する」としていたが、
 実装時にESP32-C3スーパーミニが**シングルコア**（本線`main.cpp`はデュアルコア
@@ -308,7 +310,9 @@ Lambda側・firmware側とも実装した（[docs/log/2026-08-12-piezo-phase1-im
 - [x] api Lambdaにpadding追加
 - [x] `provision_device.py`にpiezo用env追加
 - [x] `firmware/`にpiezo用envとセンサ読み取りコードを追加
-      （`piezo_main.cpp`・`RawSensor`/`PiezoSensor`・`NamzWire`のN軸対応。
-      `pio run -e piezo`等ビルド確認済み、実機の書き込みはまだ）
-- [ ] device_id払い出し・サーバapply・焼く
-- [ ] 実機送信確認・S3格納/dashboard波形表示の確認・RAM実測
+      （`piezo_main.cpp`・`RawSensor`/`PiezoSensor`・`NamzWire`のN軸対応）
+- [x] device_id払い出し・サーバapply・焼く → device_id=3、terraform apply済み、
+      `pio run -e piezo-provision`→`pio run -e piezo -t upload`で実機書き込み済み
+- [x] 実機送信確認・S3格納/dashboard波形表示の確認・RAM実測 → 起動時空きヒープ
+      162KB・maxblock 143KBと健全。`/devices/3`でonline確認、dashboardで波形
+      表示も確認（詳細は実装ログ参照）

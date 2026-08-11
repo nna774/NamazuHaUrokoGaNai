@@ -1,8 +1,8 @@
 # ピエゾ実験機、phase1（クラウド統合）を実装した
 
 [docs/piezo.md §7](../piezo.md#7-phase1クラウド統合の設計方針)で決めた設計方針を
-実装した。Lambda側3箇所・firmware側は新規`[env:piezo]`まで到達。**実機の書き込み・
-動作確認はまだ**（コードはビルド確認のみ）。
+実装した。Lambda側3箇所・firmware側は新規`[env:piezo]`まで到達し、**実機の
+書き込み・クラウド送信・dashboard表示まで確認した**（詳細は末尾「実機確認」）。
 
 ## Lambda側: 設計方針通り3コミットで収まった
 
@@ -65,13 +65,31 @@
 上書きするenv（`provision`/`*-probe`系）はそもそも`piezo_main.cpp`を意識する
 必要が無いことも実際にビルドして確認した。
 
+## 実機確認
+
+同じセッションで実機作業まで通した。device_id=3を新規払い出し
+（`tools/provision_device.py add --id 3 --label ピエゾ実験機 --sensor piezo`）、
+`terraform.tfvars`の`device_hmac_secrets`へ追記して`terraform apply`
+（4Lambda関数のコード更新+ingestの環境変数更新、既存の1号機・2号機の設定は
+変更なし）。`pio run -e piezo-provision -t upload`でNVS書き込み・検証OK、
+続けて`pio run -e piezo -t upload`で本体を書き込んだ。
+
+- **起動確認**: `[boot] ... piezo fw=53c0629` → TLSプール(53248B)インストール →
+  WiFi接続成功(IP取得) → `[uploader] spill files on boot: 0` → `[mem] free heap
+  162136 maxblock 143348, batch 6000 B x 1`。懸念していたRAM不足の兆候は
+  出なかった（本線が苦しんだ「maxblock_8bitが1396〜1972まで落ち込む」ような
+  断片化とは程遠い、健全な状態）。
+- **クラウド到達確認**: `curl https://api.namazu.dark-kuins.net/devices/3` で
+  `online: true`・`batches_total: 5`・`sensor: "ピエゾ"`（`SENSOR_TYPE_NAMES`が
+  正しく表示名に変換されている）を確認。
+- **dashboard表示確認**: `/recent?minutes=2&device=3`のenvelopeペイロードで
+  `y_min`/`y_max`/`z_min`/`z_max`が全て0、`x_min`/`x_max`のみ実データ
+  （246〜289付近で変動、`docs/piezo.md`のベースラインpp実測値とオーダーが
+  一致）と確認——`_pad_to_3ch()`が実データでも正しく機能している。
+  ダッシュボードの画面上でも波形が表示されることを目視確認した。
+
 ## 次に可能になったこと
 
-コードはここまで。残りは実機作業:
-
-1. `python tools/provision_device.py add --id N --sensor piezo` でdevice_id払い出し
-2. `tools/provision_device.py tfvars` → `terraform/terraform.tfvars`に貼って
-   `terraform apply`（サーバ側を先に登録、順序厳守）
-3. `python tools/provision_device.py provision-h --id N` → `pio run -e piezo-provision`
-4. `pio run -e piezo -t upload` → 実機で送信確認
-5. S3への格納・dashboardでの波形表示確認、RAM/ヒープの実測
+コードの実装・実機確認とも完了。残りは運用上の細部（OTA対応の要否、
+カンチレバー+おもりを付けた状態での長時間運用確認、既知イベントとの
+タイミング突き合わせ=other-sensors.md §4のphase2）。
