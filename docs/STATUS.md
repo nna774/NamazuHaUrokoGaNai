@@ -13,6 +13,17 @@
 - Slack通知（速報/確定報、閾値で選別、イベントリンク付き）
 - CloudFrontダッシュボードで波形・イベントを可視化
 
+## デバイス一覧
+
+払い出しの単一の真実は `tools/devices.json`（HMAC鍵等を含むためgitignore対象。
+詳細は [design.md](design.md#多点運用時のデバイス払い出し) 参照）。ここでは各機の素性だけ書く。
+
+| device_id | ラベル | センサ | 位置づけ |
+|---|---|---|---|
+| 1 | 湯沢-IIS3DHHC | IIS3DHHC | 実運用機（1号機）。設置場所は湯沢。下記「ハードウェア」節のスペックはこの機体のもの |
+| 2 | ADXL355-2号機 | ADXL355 | 実運用機（2号機）。ADXL355機の検証・展開は [adxl355.md](adxl355.md) 参照 |
+| 4294967295 | テスト機(newBatchプール検証用、使い捨て) | なし（FakeSensor） | 物理センサ未接続。newBatchバッファプール等の結合試験専用。device_idはuint32最大値をあえて使っている（実機と衝突しないsentinel）。ファームは`env:fake-sensor`系（`FakeSensor`が`sensorType()=255`を返し、ダッシュボードには「ダミー」と表示される）。event_id・device詳細APIがdevice_idを4桁固定で見ていたバグを2件踏んで直した実績あり（`docs/log/2026-08-11-event-api-rejects-uint32-max-device-id.md`ほか） |
+
 ## ハードウェア
 
 | 項目 | 値 |
