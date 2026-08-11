@@ -171,10 +171,12 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       見て欠測をSlack通知。落ちている間は1日ごとに再送、受信再開で復帰通知。
       ダッシュボードに「デバイス」タブ（`/devices`）。しきい値・間隔は変数化
       （既定: 欠測5分・再送1日・監視5分間隔）
-- [ ] デバイスの退役（引退）手順を考える。`namazu-devices` の項目をどう扱うか
-      （削除する / 無効フラグを立てる）。退役後に watchdog が延々と欠測通知しないように、
-      台帳から外すか監視対象外にする運用を決める。`tools/flag_event.py` 相当の手元CLIで
-      台帳を編集する形が素直か
+- [x] デバイスの退役（引退）・試験機の一時停止: `namazu-devices` に `watchdog_muted`
+      フラグを追加し、mute中は watchdog が完全に無視する（[docs/log/2026-08-11-watchdog-mute.md](log/2026-08-11-watchdog-mute.md)）。
+      `tools/mute_device.py mute/unmute/list` で手元から操作。ingest がバッチを
+      受信すると自動でunmuteされるので、`tools/devices.json` の試験機
+      （fake-sensor、device 4294967295 等）のように「試験のたび繋いでは黙る」
+      機体でも、mute後に再接続すれば手動unmute不要で監視が復帰する
 - [x] OTA更新（詳細は [ota.md](ota.md)）: **HTTPSプル型で実装済み・device1/2両機とも
       NVS化＋実機でのpull型OTA成功確認済み**
       （[ota.md §2](ota.md#2-採用した方式-httpsプル型外出先からの更新無人運用向け)）。

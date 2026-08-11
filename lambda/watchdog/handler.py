@@ -21,7 +21,7 @@ import time
 
 from batch_uplink import devices, notify
 
-from common import ota_watch
+from common import ota_watch, watchdog_mute
 
 # 生存とみなす最終受信からの猶予[s]。バッチは30秒間隔なので、既定300秒＝約10バッチ落ち。
 OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))
@@ -86,6 +86,10 @@ def handler(event, context):
     actions = []
 
     for item in devices.list_devices():
+        if watchdog_mute.is_muted(item):
+            # 退役・試験機など監視対象外（tools/mute_device.py）。実際に送信が
+            # 来ればingestが自動でunmuteするので、ここでは何も評価しない。
+            continue
         did = int(item.get("device_id", 0))
         last = int(item.get("last_ingest_at_us", 0))
         age = _humanize(devices.staleness_us(item, now_us) / 1e6)
