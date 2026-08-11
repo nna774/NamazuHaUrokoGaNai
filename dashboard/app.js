@@ -1175,6 +1175,16 @@ function fmtLastIngestCell(us, ageS) {
   return `${dt.toLocaleDateString('ja-JP')}<br>${dt.toLocaleTimeString('ja-JP')}（${fmtAgo(ageS)}前）`;
 }
 
+// 状態バッジ。監視停止(watchdog_muted)中は、実際にオンラインかどうかに関わらず
+// 灰色「監視停止」を優先表示する（試験機を意図的に黙らせている状態と、対処が
+// 要る本当の欠測とを取り違えないため。tools/mute_device.py参照）。
+function deviceStatusHtml(d) {
+  if (d.watchdog_muted) return '<span class="status-muted">● 監視停止</span>';
+  return d.online
+    ? '<span class="status-ok">● オンライン</span>'
+    : '<span class="status-ng">● 欠測</span>';
+}
+
 async function refreshDevices() {
   const status = document.getElementById('devices-status');
   const tbody = document.querySelector('#devices-table tbody');
@@ -1188,13 +1198,15 @@ async function refreshDevices() {
       const tr = document.createElement('tr');
       tr.dataset.id = d.device_id;
       tr.onclick = () => { location.hash = deviceHash(d.device_id); };
+      // 監視停止中は行全体を薄くする（イベント一覧の非該当/人工地震と同じ扱い）。
+      // 最終受信・鮮度の警告値も、意図的に黙らせている間は対処が要る情報では
+      // ないので背景色を出さない。
+      if (d.watchdog_muted) tr.style.opacity = '0.45';
       const id = String(d.device_id).padStart(4, '0');
       const restartBadge = d.pending_restart_requested_at_us
         ? ' <span class="badge badge-restart">再起動要求</span>'
         : '';
-      const st = (d.online
-        ? '<span class="status-ok">● オンライン</span>'
-        : '<span class="status-ng">● 欠測</span>') + restartBadge;
+      const st = deviceStatusHtml(d) + restartBadge;
       const last = fmtLastIngestCell(d.last_ingest_at_us, d.age_s);
       const fwVersion = d.fw_version || '—';
       let ota = '—';
@@ -1204,8 +1216,8 @@ async function refreshDevices() {
           : `<span class="warn-hi">→ ${d.pending_ota_version}</span>`;
       }
       tr.innerHTML = `<td>${id}</td><td>${st}</td>`
-        + `<td${warnBg(d.age_s, offlineAt)}>${last}</td>`
-        + `<td${warnBg(d.lag_s, lagAt)}>${fmtAgo(d.lag_s)}遅れ</td>`
+        + `<td${d.watchdog_muted ? '' : warnBg(d.age_s, offlineAt)}>${last}</td>`
+        + `<td${d.watchdog_muted ? '' : warnBg(d.lag_s, lagAt)}>${fmtAgo(d.lag_s)}遅れ</td>`
         + `<td class="col-batches">${d.batches_total ?? 0}</td>`
         + `<td class="col-fw">${fwVersion}</td>`
         + `<td>${d.uptime_s != null ? fmtAgo(d.uptime_s) : '—'}</td>`
@@ -1213,9 +1225,14 @@ async function refreshDevices() {
       tbody.appendChild(tr);
     }
     const n = (data.devices || []).length;
-    const off = (data.devices || []).filter(d => !d.online).length;
+    // 監視停止中は「欠測」に数えない（意図的に黙らせているだけで対処は不要なため）。
+    const off = (data.devices || []).filter(d => !d.online && !d.watchdog_muted).length;
+    const muted = (data.devices || []).filter(d => d.watchdog_muted).length;
+    const parts = [];
+    if (off) parts.push(`欠測 ${off} 台`);
+    if (muted) parts.push(`監視停止 ${muted} 台`);
     status.textContent = n
-      ? `${n} 台` + (off ? `・欠測 ${off} 台` : '・全台オンライン')
+      ? `${n} 台` + (parts.length ? `・${parts.join('・')}` : '・全台オンライン')
       : 'まだ受信したデバイスがない';
   } catch (e) {
     status.textContent = 'エラー: ' + e.message;
@@ -1274,9 +1291,7 @@ function cloudwatchBacklogUrl(deviceId) {
 
 function renderDeviceInfo(d) {
   const tbody = document.getElementById('device-info');
-  const st = d.online
-    ? '<span class="status-ok">● オンライン</span>'
-    : '<span class="status-ng">● 欠測</span>';
+  const st = deviceStatusHtml(d);
   const last = d.last_ingest_at_us
     ? `${new Date(d.last_ingest_at_us / 1000).toLocaleString('ja-JP')}（${fmtAgo(d.age_s)}前）`
     : '—';

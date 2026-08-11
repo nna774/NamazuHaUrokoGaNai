@@ -16,7 +16,7 @@ import boto3
 
 from batch_uplink import auth, devices, notify, s3util
 
-from common import device_meta, device_temp, events, metrics, ota_watch, wire
+from common import device_meta, device_temp, events, metrics, ota_watch, watchdog_mute, wire
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
@@ -75,6 +75,14 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
                              fw_version=headers.get("x-namz-fw-version", ""))
     except Exception as e:  # noqa: BLE001
         print(f"devices.record_batch failed: {e!r}")
+
+    # mute中(watchdog監視対象外、tools/mute_device.py参照)でも実際に送信が来た
+    # 以上は監視を復帰させる。試験用に繋いだ機体がそのまま黙って再送スパムに
+    # ならないよう、試験開始（＝最初のバッチ受信）で自動的にunmuteする。
+    try:
+        watchdog_mute.clear_mute(b.meta.device_id)
+    except Exception as e:  # noqa: BLE001
+        print(f"watchdog_mute.clear_mute failed: {e!r}")
 
     # センサ種別をデバイス詳細ページ表示用に記録（ヘッダに毎回乗っているので追加コスト無し）。
     try:
