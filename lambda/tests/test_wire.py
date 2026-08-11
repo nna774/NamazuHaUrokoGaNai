@@ -7,15 +7,18 @@ from common import wire
 
 
 def build_batch(device_id=1, start_us=1_720_000_000_000_000, fs=100, scale=0.076,
-                samples=None, version=1, sensor_type=0, sample_format=0, trailer=b""):
+                samples=None, version=1, sensor_type=0, sample_format=0, trailer=b"",
+                axes=None):
     """firmware WireFormat.h と同じバイト列を作る。"""
     if samples is None:
         samples = np.array([[1, -2, 3], [100, 200, -300]], dtype=np.int16)
+    if axes is None:
+        axes = samples.shape[1]
     dtype = "<i4" if sample_format == 1 else "<i2"
     count = samples.shape[0]
     header = struct.pack(
         wire.HEADER_FMT,
-        wire.MAGIC, version, sensor_type, sample_format, 3, start_us,
+        wire.MAGIC, version, sensor_type, sample_format, axes, start_us,
         fs * 1000, count, scale, device_id)
     return header + samples.astype(dtype).tobytes() + trailer
 
@@ -138,3 +141,36 @@ def test_temp_c_for_adxl355_and_iis3dhhc_via_meta():
 def test_temp_c_none_without_trailer():
     meta = wire.parse(build_batch(version=2, sensor_type=wire.SENSOR_TYPE_ADXL355)).meta
     assert wire.temp_c(meta) is None
+
+
+def test_axes_1_piezo_like_sensor():
+    """非校正の1軸センサ(ピエゾ等)はaxes=1で送る想定（docs/wire_format.md）。"""
+    samples = np.array([[10], [-20], [30]], dtype=np.int16)
+    b = wire.parse(build_batch(sensor_type=wire.SENSOR_TYPE_PIEZO, samples=samples))
+    assert b.meta.axes == 1
+    assert b.raw.shape == (3, 1)
+    assert b.gal.shape == (3, 1)
+    np.testing.assert_array_equal(b.raw, samples.astype(np.int64))
+
+
+def test_axes_0_rejected():
+    data = build_batch(axes=0)
+    with pytest.raises(ValueError):
+        wire.parse(data)
+
+
+def test_is_calibrated_accel_sensors():
+    assert wire.is_calibrated(wire.SENSOR_TYPE_IIS3DHHC)
+    assert wire.is_calibrated(wire.SENSOR_TYPE_ADXL355)
+    assert wire.is_calibrated(127)  # 加速度センサ帯の上限
+
+
+def test_is_calibrated_piezo_and_reserved_are_not():
+    assert not wire.is_calibrated(wire.SENSOR_TYPE_PIEZO)
+    assert not wire.is_calibrated(249)  # 非校正センサ帯の上限
+    assert not wire.is_calibrated(250)  # 予約域
+
+
+def test_is_calibrated_fake_is_treated_as_calibrated():
+    """FAKEは結合試験用にgal相当の値を実際に送るため、非校正扱いにしない。"""
+    assert wire.is_calibrated(wire.SENSOR_TYPE_FAKE)

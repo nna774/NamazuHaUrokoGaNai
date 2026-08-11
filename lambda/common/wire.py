@@ -27,8 +27,11 @@ TRAILER_SENSOR_TEMP = 1
 # 温度の換算式はチップ依存なので、どのチップかの判定に使う（TLVのtypeとは無関係）。
 SENSOR_TYPE_IIS3DHHC = 0
 SENSOR_TYPE_ADXL355 = 1
+# 加速度ではない・非校正の生値センサの帯（docs/wire_format.md「sensor_type の帯域」）。
+SENSOR_TYPE_PIEZO = 128
 # firmware FakeSensor::sensorType()。結合試験用のダミーセンサであることを示す
-# sentinel値（実チップの型番と衝突しないuint8_tの最大値）。
+# sentinel値（実チップの型番と衝突しないuint8_tの最大値）。IIS3DHHCと同じ換算で
+# gal相当の値を実際に送るため、非校正センサの帯には含めない（is_calibrated参照）。
 SENSOR_TYPE_FAKE = 255
 
 # 表示用の名前。ダッシュボードのデバイス詳細ページで使う。未記録(古いデータ等)と
@@ -36,8 +39,23 @@ SENSOR_TYPE_FAKE = 255
 SENSOR_TYPE_NAMES = {
     SENSOR_TYPE_IIS3DHHC: "IIS3DHHC",
     SENSOR_TYPE_ADXL355: "ADXL355",
+    SENSOR_TYPE_PIEZO: "ピエゾ",
     SENSOR_TYPE_FAKE: "ダミー",
 }
+
+# sensor_type の帯域（docs/wire_format.md「sensor_type の帯域」参照）。
+# 0〜127: 加速度センサチップ(gal校正対象)。128〜249: 非校正の生値センサ。
+# 250〜254: 予約。255: FAKE(結合試験用、gal相当の値を実際に送るため校正対象扱い)。
+_SENSOR_TYPE_ACCEL_MAX = 127
+
+
+def is_calibrated(sensor_type: int) -> bool:
+    """detect Lambda等の物理量前提ロジックに、このsensor_typeのバッチを掛けてよいか。
+
+    「128以上なら非校正」という単純な閾値ではない——255(FAKE)は結合試験用に
+    gal相当の値を実際に送るセンサなので校正対象として扱う。
+    """
+    return sensor_type == SENSOR_TYPE_FAKE or sensor_type <= _SENSOR_TYPE_ACCEL_MAX
 
 # ADXL355 の内蔵温度の換算（データシートの公称値）。
 #   温度[℃] = 25 + (raw - TEMP_AT_25C) / LSB_PER_DEGC
@@ -117,8 +135,8 @@ class BatchMeta:
 @dataclass
 class Batch:
     meta: BatchMeta
-    raw: np.ndarray   # shape (N, 3) int
-    gal: np.ndarray   # shape (N, 3) float [gal]
+    raw: np.ndarray   # shape (N, axes) int
+    gal: np.ndarray   # shape (N, axes) float [gal]（非校正センサでは意味を持たない）
 
     def timestamps_us(self) -> np.ndarray:
         n = self.meta.sample_count
@@ -133,7 +151,7 @@ def parse(data: bytes) -> Batch:
      rate_mhz, count, scale, device_id) = struct.unpack(HEADER_FMT, data[:HEADER_SIZE])
     if magic != MAGIC:
         raise ValueError(f"bad magic {magic:#x}")
-    if axes != 3:
+    if axes < 1:
         raise ValueError(f"unexpected axes {axes}")
 
     meta = BatchMeta(
@@ -150,10 +168,10 @@ def parse(data: bytes) -> Batch:
     else:
         raise ValueError(f"unknown sample_format {sample_format}")
 
-    need = count * 3 * dtype.itemsize
+    need = count * axes * dtype.itemsize
     if len(payload) < need:
         raise ValueError(f"payload short: {len(payload)} < {need}")
-    raw = np.frombuffer(payload[:need], dtype=dtype).reshape(count, 3).astype(np.int64)
+    raw = np.frombuffer(payload[:need], dtype=dtype).reshape(count, axes).astype(np.int64)
     gal = raw.astype(float) * scale * MG_TO_GAL
     meta.trailer = parse_trailer(payload[need:])
     return Batch(meta=meta, raw=raw, gal=gal)
