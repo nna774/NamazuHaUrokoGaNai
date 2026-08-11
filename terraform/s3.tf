@@ -1,4 +1,4 @@
-# データ用バケット: raw/（90日でexpire）と events/（永久）
+# データ用バケット: raw/（60日でexpire、削除後さらに30日分は復旧可能）と events/（永久）
 resource "aws_s3_bucket" "data" {
   bucket = local.data_bucket
 }
@@ -12,11 +12,14 @@ resource "aws_s3_bucket_public_access_block" "data" {
 }
 
 # events/ の誤delete・誤上書きから復元できるようにバージョニングを有効化する。
-# raw/ は versioning が無かった前提で「90日で本当に消える」設計なので、有効化した
-# ままだと expiration が current version を消すだけで旧バージョンが非current化して
-# 課金上は残り続けてしまう（意図した「消える」が壊れる）。下の lifecycle 側で
-# noncurrent_version_expiration を足して raw/ の旧バージョンも即座に消し、実質的に
-# バージョニング無しだった頃と同じ「90日で本当に消える」挙動を保つ。
+# バージョニング下では expiration は current version に delete marker を乗せる
+# だけで、実体（旧 current version）は noncurrent_version_expiration の日数が
+# 経つまで物理的に残り続ける（課金もされるが、その間は復旧可能）。下の
+# expire-raw ルールの noncurrent_days=30 はこれを利用していて、万一そのルールの
+# filter prefix が誤って広がり events/ を巻き込んでも（Denyポリシーが効かない
+# 既知の穴。下のコメント参照）、実体が消えるまで最大30日の発見・復旧猶予がある。
+# raw/ 自身にとっては「消える予定だったデータを30日長く残す」だけなので、
+# アプリから見える寿命(raw_retention_days)には影響しない。
 resource "aws_s3_bucket_versioning" "data" {
   bucket = aws_s3_bucket.data.id
   versioning_configuration {
@@ -45,7 +48,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
       days = var.raw_retention_days
     }
     noncurrent_version_expiration {
-      noncurrent_days = 1
+      noncurrent_days = 30
     }
   }
 }
