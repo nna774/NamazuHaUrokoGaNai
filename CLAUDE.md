@@ -46,10 +46,12 @@
     こちらの次回ビルドで黙って混入し、「何も変えていないのに再ビルドで壊れる」という
     最悪の壊れ方をする。版は `firmware/platformio.ini` の `lib_deps` と
     `terraform/build_lambda.sh` の `UPLINK_VERSION` の**2箇所。上げるなら揃えろ**。
-  - **ワイヤ形式は共有しない。** `Batch` は「ヘッダ領域 + 固定長レコード列 + tail」しか
-    知らない。magic・32バイトヘッダ・TLVトレイラーを知っているのは `firmware/lib/NamzWire`
-    だけで、ヘッダを書くのは**サンプルを積み終えた後**（`sample_count` が確定するのが
-    そこだから）。`firmware/test/run.sh` がバイト等価を守る（golden は切り出し前の実出力）。
+  - **ワイヤ形式は共有しない。** Electabuzzと複数プロジェクトで共有するライブラリのため、
+    「測る対象に依存しない部分だけ」を`batch-uplink`に残す設計になっている——`Batch`は
+    「ヘッダ領域 + 固定長レコード列 + tail」しか知らない。magic・32バイトヘッダ・TLV
+    トレイラーを知っているのは`firmware/lib/NamzWire`だけで、ヘッダを書くのは
+    **サンプルを積み終えた後**（`sample_count` が確定するのがそこだから）。
+    `firmware/test/run.sh` がバイト等価を守る（golden は切り出し前の実出力）。
   - Lambda の zip は pip を**2回に分けて**呼ぶ。`--platform` は `--only-binary=:all:` を
     要求するが `git+` はソースツリーなので同一呼び出しに混ぜると失敗する。
   - 手元でテストを回すには `.venv/bin/pip install --no-deps "git+...@<tag>"` が要る。
