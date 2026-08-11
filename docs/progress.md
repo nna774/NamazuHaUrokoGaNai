@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-11 | **`docs/STATUS.md`に「デバイス一覧」節を追加し、1号機・2号機・テスト機(device_id=4294967295)の素性を一箇所にまとめた。** それまで各機の情報は`tools/devices.json`（gitignore対象）と`docs/log/`の断片ログにしか無かった | [log/2026-08-11-devices-list-doc.md](log/2026-08-11-devices-list-doc.md) |
 | 2026-08-11 | **デバイス詳細ページに「起動時刻」行を追加した。** `boot_epoch_us`はAPIレスポンスに既に入っていたが画面に出ておらず、見る側が「現在時刻－稼働時間」を頭で計算する必要があった。`最終受信`行と同じ`toLocaleString('ja-JP')`表示。本番API(device0001)で日時が正しく出ることを確認済み。ついでに`docs/uptime.md`の「実機・本番デプロイはまだ」という記述が2026-08-07〜08-09のロールアウト実績と食い違っていたのを直した | [log/2026-08-11-device-detail-boot-time-display.md](log/2026-08-11-device-detail-boot-time-display.md) |
 | 2026-08-11 | **イベント詳細API(`GET /event?id=`)がテスト機(device_id=4294967295, uint32最大値)のevent_idを400で拒否する不具合を修正した。** `lambda/api/handler.py`の書式検証`\d{4}-\d{1,16}`がdevice_id部分をちょうど4桁に限定していたが、`event_id()`は`:04d`で「最低4桁」ゼロ埋めするだけなので5桁以上は素通りせず400になっていた。デバイス詳細ルートは同種の問題を先に`\d{1,10}`へ直してあったのに`_event()`だけ直っていなかった。`\d{4,10}-\d{1,16}`へ修正し回帰テストを追加 | [log/2026-08-11-event-api-rejects-uint32-max-device-id.md](log/2026-08-11-event-api-rejects-uint32-max-device-id.md) |
 | 2026-08-11 | **`batch-uplink` PR #22をマージし`v2.13.0`をタグ付け、`firmware/platformio.ini`・`terraform/build_lambda.sh`のpinを揃えて更新した。** `pio run`3env・`test/run.sh`確認済み。device2(ADXL355機)はバッチ周期15秒が元々プール枯渇に近い機体で、今回の修正の恩恵は大きいと見ているが実機未確認・投入保留のまま | [log/2026-08-11-batch-uplink-v2.13.0-pin-bump.md](log/2026-08-11-batch-uplink-v2.13.0-pin-bump.md) |
