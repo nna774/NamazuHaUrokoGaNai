@@ -125,6 +125,19 @@ def test_device_view_reports_fake_sensor_name(monkeypatch):
     assert json.loads(resp["body"])["device"]["sensor"] == "ダミー"
 
 
+def test_device_view_reports_watchdog_muted(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "watchdog_muted": True})
+    resp = api._device(2)
+    assert json.loads(resp["body"])["device"]["watchdog_muted"] is True
+
+
+def test_device_view_watchdog_muted_false_by_default(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)
+    assert json.loads(resp["body"])["device"]["watchdog_muted"] is False
+
+
 def test_device_view_reports_uptime(monkeypatch):
     monkeypatch.setattr(api.time, "time", lambda: 2000.0)
     monkeypatch.setattr(api.devices, "get_device",

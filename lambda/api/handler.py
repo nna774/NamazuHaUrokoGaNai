@@ -23,7 +23,7 @@ import numpy as np
 
 from batch_uplink import devices, s3util
 
-from common import device_temp, events, metrics, store, wire
+from common import device_temp, events, metrics, store, watchdog_mute, wire
 from jismo.rounding import intensity_scale
 
 s3 = boto3.client("s3")
@@ -265,6 +265,10 @@ def _device_view(item: dict, now_us: int) -> dict:
         "age_s": (age_us / 1e6) if age_us is not None else None,
         "lag_s": ((now_us - last_batch) / 1e6) if last_batch else None,
         "online": age_us is not None and age_us <= int(OFFLINE_AFTER_S * 1e6),
+        # watchdogの監視対象外(tools/mute_device.py、lambda/common/watchdog_mute.py)。
+        # 立っている間はonlineの真偽に関わらずダッシュボードは「監視停止」を表示する
+        # （試験機の再送スパム対策で意図的に黙らせている状態と、本当の欠測を区別する）。
+        "watchdog_muted": watchdog_mute.is_muted(item),
         # pull型OTA(docs/ota.md §2)。手元のtools/request_ota.pyが立てる更新許可。
         # 実際のトリガーはバッチ送信レスポンスヘッダ(X-Namz-Ota-Version)経由で
         # デバイスに伝わる。ここはダッシュボード表示用の参照値。

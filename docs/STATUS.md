@@ -176,7 +176,9 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       `tools/mute_device.py mute/unmute/list` で手元から操作。ingest がバッチを
       受信すると自動でunmuteされるので、`tools/devices.json` の試験機
       （fake-sensor、device 4294967295 等）のように「試験のたび繋いでは黙る」
-      機体でも、mute後に再接続すれば手動unmute不要で監視が復帰する
+      機体でも、mute後に再接続すれば手動unmute不要で監視が復帰する。
+      ダッシュボードの「デバイス」タブもmute中は「欠測」ではなく灰色
+      「監視停止」を表示し、本当に対処が要る欠測と区別する
 - [x] OTA更新（詳細は [ota.md](ota.md)）: **HTTPSプル型で実装済み・device1/2両機とも
       NVS化＋実機でのpull型OTA成功確認済み**
       （[ota.md §2](ota.md#2-採用した方式-httpsプル型外出先からの更新無人運用向け)）。
