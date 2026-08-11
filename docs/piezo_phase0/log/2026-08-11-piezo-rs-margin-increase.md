@@ -3,8 +3,8 @@
 ## 何を決めたか
 
 保護回路の直列抵抗Rsを**33kΩ→47kΩ**に引き上げた。想定する最悪電圧を20V→25Vへ
-見直した結果。[docs/piezo.md §4](../piezo.md#4-ピン選定と最小配線phase0)と
-[docs/img/piezo-protection-circuit.svg](../img/piezo-protection-circuit.svg)を
+見直した結果。[docs/piezo.md §4](../../piezo.md#4-ピン選定と最小配線phase0)と
+[docs/img/piezo-protection-circuit.svg](../../img/piezo-protection-circuit.svg)を
 更新した。
 
 ## なぜ

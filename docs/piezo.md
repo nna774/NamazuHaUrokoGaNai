@@ -190,7 +190,7 @@ pio device monitor -p /dev/cu.usbmodemXXXX
 ```
 
 **【訂正の経緯】** 最初の測定はGPIO4を接続し忘れたフローティングピンの誤測定
-だった（[docs/log/2026-08-11-piezo-gpio4-not-connected.md](log/2026-08-11-piezo-gpio4-not-connected.md)）。
+だった（[docs/log/2026-08-11-piezo-gpio4-not-connected.md](piezo_phase0/log/2026-08-11-piezo-gpio4-not-connected.md)）。
 GPIO4へ実接続してやり直した結果を以下に示す。
 
 **実機での確認結果（GPIO4に実接続後）**: 無入力時のベースラインは
@@ -207,7 +207,7 @@ GPIO4へ実接続してやり直した結果を以下に示す。
 ### 固定方法
 
 割り箸2本で円板の外周（セラミックが無い金属フチ）を挟み、その状態で固定した
-（[docs/log/2026-08-11-piezo-cantilever-and-mass.md](log/2026-08-11-piezo-cantilever-and-mass.md)参照）。
+（[docs/log/2026-08-11-piezo-cantilever-and-mass.md](piezo_phase0/log/2026-08-11-piezo-cantilever-and-mass.md)参照）。
 
 ### おもり
 

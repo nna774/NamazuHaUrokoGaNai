@@ -2,7 +2,7 @@
 
 ## 何を決めたか
 
-[docs/other-sensors.md](../other-sensors.md)で検討したピエゾによる補強検知構想を、
+[docs/other-sensors.md](../../other-sensors.md)で検討したピエゾによる補強検知構想を、
 実際に手を動かすフェーズへ進めた。
 
 - 部品箱からピエゾブザー素子（真鍮円板+セラミック層、リード線半田付け済み、
@@ -13,7 +13,7 @@
 - **既存のテスト機(device_id=4294967295)は使わない方針**にした（他の実験と混線
   させたくないため。新規に独立した機体として扱う）。
 
-詳細は[docs/piezo.md](../piezo.md)にまとめた（このログは経緯、doc本体が現状の結論）。
+詳細は[docs/piezo.md](../../piezo.md)にまとめた（このログは経緯、doc本体が現状の結論）。
 
 ## なぜ
 
@@ -25,7 +25,7 @@
 - Arduino Nano(古典ATmega328P想定)はADCはあるがWiFi非搭載。「反応するか」だけの
   最速確認にはUSBシリアルで一番手軽だが、常設運用にはWiFi中継がもう1台要る。
 - ESP32-C3スーパーミニはWiFi・ADCとも内蔵で、既存ファーム資産(ESP32系・
-  PlatformIO)と地続き。[docs/other-sensors.md §4](../other-sensors.md#4-統合方針案-geophoneのフェーズ構造を流用)
+  PlatformIO)と地続き。[docs/other-sensors.md §4](../../other-sensors.md#4-統合方針案-geophoneのフェーズ構造を流用)
   のphase0(ローカルログ)からphase1(batch-uplink配送層に乗せる)まで、買い替え無しで
   進められる。
 
@@ -38,4 +38,4 @@
 - ESP32-C3の実物が届いたらピン配置を確認し、ADCに使うGPIOを決められる。
 - センサ・マイコンとも部品は揃った（または調達方針が決まった）ので、次は
   カンチレバー固定・おもり選定・バイアス抵抗値設計というハード設計に進める
-  ([docs/piezo.md §4](../piezo.md#4-次にやること)のTODO)。
+  ([docs/piezo.md §4](../../piezo.md#4-次にやること)のTODO)。
