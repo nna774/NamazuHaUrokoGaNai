@@ -261,3 +261,39 @@ GPIO4へ実接続してやり直した結果を以下に示す。
 - [x] おもり装着後のリンギング周期をオシロで確認し、固有周波数が1-10Hz帯から
       離れているか確認する → 約50Hz(10ms/divで複数周期の減衰振動を確認、
       信頼できる測定)。1-10Hz帯から5〜10倍以上離れており問題無し（§5）
+
+## 7. phase1（クラウド統合）の設計方針（未実装）
+
+phase0達成を受け、[other-sensors.md §2](other-sensors.md#2-アーキテクチャ上の要点-配送と物理量前提ロジックを分けて考える)
+で未定としていた設計を詰めた（経緯は
+[docs/log/2026-08-12-piezo-phase1-plan.md](log/2026-08-12-piezo-phase1-plan.md)）。
+コードはまだ変更していない。
+
+- **物理量前提ロジックの迂回**: DynamoDBを都度引く必要は無い。detect Lambda
+  (`lambda/detect/handler.py`)はバッチをパースした時点で`BatchMeta.sensor_type`を
+  既に手元に持っているので、`_process()`冒頭にsensor_typeガードを1行足すだけで
+  震度計算をスキップできる（既にingest Lambdaが毎バッチ`namazu-devices`に
+  `sensor_type`を記録済みだが、detect側はDynamoDBを引く必要すら無い）。
+  **ガード条件は`128〜249`の範囲であって「128以上」ではない**——`255`の`FAKE`は
+  結合試験用にIIS3DHHCと同じ換算でgal相当の値を実際に送るセンサ
+  (`firmware/lib/FakeSensor/FakeSensor.h`)で、震度計算パイプライン自体を
+  試す用途なので従来通り計算に掛ける必要がある。
+- **`device_prompt`自動生成**: ファーム側でアラートAPIを叩く実装をしなければ
+  自然に発火しない。コード変更不要。
+- **sensor_type番号**: `SENSOR_TYPE_PIEZO = 128`。`config.h`の`SensorType`enumが
+  `kSensorAdxl355=1`・`kSensorLsm6dso=2`を予約済み（BMI160も候補）で`0〜127`は
+  「加速度センサチップ」の列として埋まりかけているため、`128〜249`を
+  「加速度ではない・非校正の生値センサ」の帯として新設する（`250〜254`は予約、
+  `255`は既存の`FAKE`）。
+- **ワイヤ形式(axes)**: `axes: 1`で正直に送る。`lambda/common/wire.py`の
+  `parse()`を`axes`可変対応にし、dashboard向けのpadding（y,z列を0埋めして
+  3列に揃える）は`lambda/api/handler.py`の`_waveform_payload()`1箇所に閉じる。
+  `dashboard/app.js`は無改修。
+- **firmwareの配置**: `docs/piezo_phase0/`のまま育てず、本線`firmware/`配下の
+  `[env:]`として統合する。`tools/provision_device.py`のNVSプロビジョニング配線を
+  再利用できる。
+
+実装順序: (1) `wire.py`にsensor_type追加・axes可変化 → (2) detect Lambdaに
+ガード追加（`128〜249`の範囲のみ、`255`は除く） → (3) api Lambdaにpadding追加 → (4) `provision_device.py`に
+piezo用env追加 → (5) `firmware/`にpiezo用envとセンサ読み取りコードを追加 →
+(6) device_id払い出し・サーバapply・焼く → (7) 実機送信確認。
