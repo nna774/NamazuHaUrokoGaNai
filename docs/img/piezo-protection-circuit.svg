@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" font-family="sans-serif">
+  <rect x="0" y="0" width="900" height="430" fill="white"/>
+
+  <text x="450" y="28" text-anchor="middle" font-size="18" font-weight="bold" fill="black">
+    ピエゾ保護回路（Rs=33kΩ, Rb=10MΩ, D1/D2=1N60）
+  </text>
+
+  <!-- rails -->
+  <line x1="470" y1="55" x2="820" y2="55" stroke="black" stroke-width="2"/>
+  <text x="830" y="60" font-size="16" fill="black">3.3V</text>
+
+  <line x1="60" y1="385" x2="820" y2="385" stroke="black" stroke-width="2"/>
+  <text x="830" y="390" font-size="16" fill="black">GND</text>
+
+  <!-- piezo element -->
+  <rect x="60" y="175" width="100" height="80" fill="none" stroke="black" stroke-width="2"/>
+  <text x="110" y="208" text-anchor="middle" font-size="15" fill="black">圧電素子</text>
+  <text x="110" y="228" text-anchor="middle" font-size="15" fill="black">(ピエゾ)</text>
+
+  <!-- piezo leads -->
+  <line x1="160" y1="195" x2="280" y2="195" stroke="black" stroke-width="2"/>
+  <text x="168" y="188" font-size="14" fill="black">+</text>
+
+  <line x1="160" y1="235" x2="230" y2="235" stroke="black" stroke-width="2"/>
+  <line x1="230" y1="235" x2="230" y2="385" stroke="black" stroke-width="2"/>
+  <text x="168" y="250" font-size="14" fill="black">－</text>
+
+  <!-- Node A -->
+  <circle cx="280" cy="195" r="4" fill="black"/>
+  <text x="280" y="145" text-anchor="middle" font-size="12" fill="#555">Node A</text>
+
+  <!-- Rb branch (bias resistor, vertical, Node A -> GND) -->
+  <line x1="280" y1="195" x2="280" y2="230" stroke="black" stroke-width="2"/>
+  <rect x="268" y="230" width="24" height="100" fill="none" stroke="black" stroke-width="2"/>
+  <line x1="280" y1="330" x2="280" y2="385" stroke="black" stroke-width="2"/>
+  <text x="302" y="275" font-size="14" fill="black">Rb</text>
+  <text x="302" y="293" font-size="14" fill="black">10MΩ</text>
+
+  <!-- Rs branch (series protection resistor, horizontal, Node A -> Node B) -->
+  <line x1="280" y1="195" x2="340" y2="195" stroke="black" stroke-width="2"/>
+  <rect x="340" y="183" width="80" height="24" fill="none" stroke="black" stroke-width="2"/>
+  <line x1="420" y1="195" x2="470" y2="195" stroke="black" stroke-width="2"/>
+  <text x="380" y="172" text-anchor="middle" font-size="14" fill="black">Rs 33kΩ</text>
+
+  <!-- Node B -->
+  <circle cx="470" cy="195" r="4" fill="black"/>
+  <text x="470" y="145" text-anchor="middle" font-size="12" fill="#555">Node B</text>
+
+  <!-- D1: Node B -> 3.3V, anode at node(bottom), cathode at rail(top) -->
+  <line x1="470" y1="195" x2="470" y2="155" stroke="black" stroke-width="2"/>
+  <polygon points="455,155 485,155 470,120" fill="none" stroke="black" stroke-width="2"/>
+  <line x1="455" y1="120" x2="485" y2="120" stroke="black" stroke-width="2"/>
+  <line x1="470" y1="120" x2="470" y2="55" stroke="black" stroke-width="2"/>
+  <text x="495" y="128" font-size="14" fill="black">D1</text>
+  <text x="495" y="146" font-size="14" fill="black">1N60</text>
+
+  <!-- D2: GND -> Node B, anode at GND(bottom), cathode at node(top) -->
+  <line x1="470" y1="385" x2="470" y2="270" stroke="black" stroke-width="2"/>
+  <polygon points="455,270 485,270 470,235" fill="none" stroke="black" stroke-width="2"/>
+  <line x1="455" y1="235" x2="485" y2="235" stroke="black" stroke-width="2"/>
+  <line x1="470" y1="235" x2="470" y2="195" stroke="black" stroke-width="2"/>
+  <text x="495" y="255" font-size="14" fill="black">D2</text>
+  <text x="495" y="273" font-size="14" fill="black">1N60</text>
+
+  <!-- Node B -> GPIO4 -->
+  <line x1="470" y1="195" x2="700" y2="195" stroke="black" stroke-width="2"/>
+  <rect x="700" y="175" width="110" height="40" fill="none" stroke="black" stroke-width="2"/>
+  <text x="755" y="192" text-anchor="middle" font-size="14" fill="black">GPIO4</text>
+  <text x="755" y="208" text-anchor="middle" font-size="12" fill="black">(ESP32-C3)</text>
+
+  <text x="450" y="415" text-anchor="middle" font-size="12" fill="#555">
+    実測Vpp 17.64V（強く弾いた場合）を踏まえた保護回路。Rbは過電圧保護にならない点に注意。
+  </text>
+</svg>
