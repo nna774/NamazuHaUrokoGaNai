@@ -1,11 +1,19 @@
+# イベントはS3のraw/と違って唯一の原本（再生成不可）。誤ってDeleteTableされる事故を
+# AWS側で拒否させる（Terraform経由でなくAWS CLI/コンソールから直接叩かれても効く）。
+# 本当に消す時はこの属性をfalseにしてからでないとDeleteTableが通らない。
 resource "aws_dynamodb_table" "events" {
-  name         = "${local.name}-events"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "event_id"
+  name                        = "${local.name}-events"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "event_id"
+  deletion_protection_enabled = true
 
   attribute {
     name = "event_id"
     type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = true
   }
 }
 

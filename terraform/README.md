@@ -7,8 +7,8 @@ EventBridge→watchdog定期起動・CloudFrontダッシュボード・IAM。
 
 | ファイル | 内容 |
 |----------|------|
-| `s3.tf` | データバケット。raw/ は lifecycle で90日expire、events/ は対象外で永久。raw/作成で detect起動 |
-| `dynamodb.tf` | イベントテーブル＋デバイス生存台帳（PAY_PER_REQUEST） |
+| `s3.tf` | データバケット。raw/ は lifecycle で90日expire、events/ は対象外で永久＋削除系操作をバケットポリシーでDeny。バケット全体でversioning有効。raw/作成で detect起動 |
+| `dynamodb.tf` | イベントテーブル（`deletion_protection_enabled`+PITR）＋デバイス生存台帳（PAY_PER_REQUEST） |
 | `lambda.tf` | ingest/detect/api/watchdog。ingest・api に Function URL(認証NONE)、watchdog は EventBridge 定期起動 |
 | `iam.tf` | Lambda実行ロール（S3/DynamoDB/logs） |
 | `dashboard.tf` | 非公開S3 + CloudFront(OAC)。認証なし配信 |
@@ -69,5 +69,10 @@ Function URL のまま(両方セット時のみ有効)。api.namazu は2階層�
 
 - `lifecycle` は prefix 単位でしか expiration できないため、「イベント周辺だけ永久保存」は
   detect が `events/` へ**コピー**して実現している（raw/ は消えても events/ は残る）。
+- `events/` は唯一の原本（raw/ と違い再生成不可）なので、`namazu-events`テーブルの
+  `deletion_protection_enabled`・S3バケットポリシーのDenyとも、**Terraformの外側から
+  直接AWS CLI/コンソールを叩く誤操作**を止めるためのもの（`prevent_destroy`は
+  Terraform経由の削除しか防げないため不採用）。本当に消す時は該当属性・ポリシーを
+  先に外してからでないと通らない。
 - Function URL は認証NONE。バッチ/アラートはアプリ層のHMACで守り、apiは読み取り専用で公開。
 - numpy は `build_lambda.sh` が manylinux ホイールで同梱する。scipyは不要（FFT版のみ使用）。
