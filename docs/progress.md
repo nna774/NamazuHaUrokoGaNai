@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-11 | **ピエゾ実験機の保護回路の抵抗値を計算で決めた。** 直列抵抗Rs=33kΩ(実測Vpp17.64Vを踏まえ最悪20V・0.5mA以下を想定)、バイアス抵抗Rb=10MΩ(ピエゾの静電容量~20nF仮定でRC高域通過のカットオフを0.8Hz付近に)。当初の「Rb=1MΩ前後」は計算するとカットオフ8Hzで1-10Hz帯を削ってしまう誤りだったため訂正。クランプダイオードも1N4148からショットキー推奨に変更 | [log/2026-08-11-piezo-protection-resistor-design.md](log/2026-08-11-piezo-protection-resistor-design.md) |
 | 2026-08-11 | **ピエゾ実験機、ESP32接続前のオシロ実測でVpp 17.64V(Vmax+11.76V/Vmin-5.88V)という想定外の高電圧を確認した。** 指で強く弾いただけでこの電圧が出ており、ESP32のADC定格(3.3V)を大きく超える。「軽い入力なら保護回路は任意でいい」という直前の判断を撤回し、直列抵抗+クランプダイオードを必須に格上げ。接続前に実測したためESP32・GPIO4は無事 | [log/2026-08-11-piezo-overvoltage-damage.md](log/2026-08-11-piezo-overvoltage-damage.md) |
 | 2026-08-11 | **ピエゾ実験機のADCピンをGPIO4に決め、最小配線(カンチレバー・おもり無し、バイアス抵抗のみ)と動作確認用の最小Arduinoスケッチを設計した。** ESP32-C3のADC1はGPIO0-4のみでGPIO9はBOOTボタン専有・GPIO2は起動ストラップピンのため避けた | [log/2026-08-11-piezo-pin-and-wiring.md](log/2026-08-11-piezo-pin-and-wiring.md) |
 | 2026-08-11 | **ピエゾによる補強検知構想（docs/other-sensors.md）を実機着手に進めた。** 部品箱からリード線付きピエゾブザー素子を発見、マイコンは手持ち4候補(ESP32-C3スーパーミニ/Pi Zero v1.3/micro:bitコピー品/Arduino Nano)からWiFi・ADC両方内蔵のESP32-C3スーパーミニに決定。既存のテスト機(device_id=4294967295)は使わず新規の独立機体として扱う方針 | [log/2026-08-11-piezo-project-kickoff.md](log/2026-08-11-piezo-project-kickoff.md) |
