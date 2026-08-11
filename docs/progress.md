@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-11 | **ピエゾ実験機の「phase0達成」報告を撤回した。** GPIO4を実際には接続し忘れていた誤測定と判明。フローティングピンのノイズ+指を近づける動作の静電結合(ゴーストタッチ)で、あたかも反応してるように見えていた。phase0は未達成に戻し、GPIO4への実接続後に再検証する | [log/2026-08-11-piezo-gpio4-not-connected.md](log/2026-08-11-piezo-gpio4-not-connected.md) |
 | 2026-08-11 | **ピエゾ実験機が実機で初めて反応を確認できた(phase0達成)。** 無入力時のベースラインppは常時220〜240、指で弾くとpp~700まで跳ねベースラインと明確に区別できた。ESP32-C3のUSB CDC設定漏れ(ARDUINO_USB_MODE/CDC_ON_BOOT)と生値出力が速すぎて読めない問題を解決し、100ms窓のmin/max/pp集計方式に変更した | [log/2026-08-11-piezo-phase0-first-signal.md](log/2026-08-11-piezo-phase0-first-signal.md) |
 | 2026-08-11 | **ピエゾの過大電圧を再測定し再現性を確認、保護回路の直列抵抗Rsを33kΩ→47kΩに引き上げた。** 2回目の実測でVpp 20.74V(Vmax+10.32V/Vmin-10.44V)を記録し前回の17.64Vを上回った。想定最悪電圧を20V→25Vへ見直して再計算 | [log/2026-08-11-piezo-rs-margin-increase.md](log/2026-08-11-piezo-rs-margin-increase.md) |
 | 2026-08-11 | **ピエゾ保護回路のASCII配線図をSVG図に差し替えた(`docs/img/piezo-protection-circuit.svg`)。** 併せて「トン」と軽く叩く程度でも約1.5Vが出ることを確認し、「操作を制限すれば保護回路は不要」という案は採らないことにした | [log/2026-08-11-piezo-circuit-svg-diagram.md](log/2026-08-11-piezo-circuit-svg-diagram.md) |
