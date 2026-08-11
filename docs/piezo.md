@@ -143,13 +143,22 @@ Rs = (25V - 3.6V) / 0.5mA ≈ 42.8kΩ → 標準値で47kΩ
 ### 最小スケッチ（PlatformIO、動作確認用）
 
 [docs/piezo_phase0/](piezo_phase0/)に、本線(`firmware/`)とは独立したスタンドアロン
-PlatformIOプロジェクトとして置いた（ビルド確認済み、ESP32-C3向け環境
-`esp32-c3-devkitm-1`）:
+PlatformIOプロジェクトとして置いた（実機での書き込み・動作確認済み、ESP32-C3向け
+環境`esp32-c3-devkitm-1`）。
+
+**注意: ESP32-C3 SuperMiniはUSB-シリアル変換チップを積んでおらず、ネイティブUSBを
+`Serial`のCDCとして使うには`build_flags`で`ARDUINO_USB_MODE=1`と
+`ARDUINO_USB_CDC_ON_BOOT=1`を明示する必要がある**（`platformio.ini`に設定済み）。
+無いと書き込み自体は成功するのに`Serial.print`等がどこにも出ず、原因が分かりにくい。
+
+生値を毎サンプル出すと流れて読めないため、**100msごとのmin/max/振れ幅(peak-to-peak)
+だけ**を1行で出す:
 
 ```cpp
 #include <Arduino.h>
 
 const int kPiezoPin = 4; // GPIO4
+const unsigned long kWindowMs = 100; // この時間内のmin/maxをまとめて出す
 
 void setup() {
   Serial.begin(115200);
@@ -157,20 +166,31 @@ void setup() {
 }
 
 void loop() {
-  int v = analogRead(kPiezoPin);
-  Serial.println(v);
-  delay(2);
+  int vmin = 4095;
+  int vmax = 0;
+  unsigned long windowStart = millis();
+  while (millis() - windowStart < kWindowMs) {
+    int v = analogRead(kPiezoPin);
+    if (v < vmin) vmin = v;
+    if (v > vmax) vmax = v;
+  }
+  Serial.print(vmin);
+  Serial.print(",");
+  Serial.print(vmax);
+  Serial.print(",");
+  Serial.println(vmax - vmin); // peak-to-peak
 }
 ```
 
 ```sh
 cd docs/piezo_phase0
-pio run --target upload
-pio device monitor
+pio run --target upload --upload-port /dev/cu.usbmodemXXXX
+pio device monitor -p /dev/cu.usbmodemXXXX
 ```
 
-シリアルモニタ（`pio device monitor`、または`pio run --target monitor`）で見ながら
-円板を指で弾いて反応を確認する。
+実機での確認結果（無入力時のベースライン）: `min,max,pp`で**ppが常時220〜240程度**
+出ている。ゼロではなく、常時何らかのノイズ/共振が乗っている状態。指で弾いた瞬間は
+ppが700前後まで跳ねる行が観測でき、ベースラインから明確に区別できた。
 
 ## 5. 次にやること
 
@@ -179,8 +199,10 @@ pio device monitor
       保護回路必須と判明（§4）。ESP32本体は未接続のため無事
 - [x] 保護回路の抵抗値(Rs=47kΩ・Rb=10MΩ)を設計する → §4「抵抗値の設計根拠」
 - [ ] ピエゾ本体の静電容量を実測し、Rbの前提(仮定20nF)を検算する
-- [ ] 保護回路込みの配線（§4）でGPIO4に接続し、phase0
-      （足音・指弾き等に反応するかSerialで確認）を行う
+- [x] 保護回路込みの配線（§4）でGPIO4に接続し、phase0
+      （足音・指弾き等に反応するかSerialで確認）を行う → 実機で書き込み・
+      動作確認済み。無入力時ppは常時220〜240、指で弾くとpp~700まで跳ね
+      ベースラインと明確に区別できた
 - [ ] カンチレバー固定方法（円板の縁を何に・どう固定するか）を決める
 - [ ] 自由端に載せる「おもり」を選定する（重すぎると共振周波数が下がりすぎる、
       軽すぎると信号が小さい——トレードオフは未検討）

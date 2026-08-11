@@ -3,10 +3,13 @@
 //
 // 確認方法: 書き込み後 `pio device monitor` 等でシリアルを見ながら、
 //           円板を指で軽く叩く/机を叩く等で値が動くか見る。
+// 生値を毎サンプル出すと流れて読めないため、kWindowMsごとにmin/max/振れ幅
+// (peak-to-peak)だけを出す。
 
 #include <Arduino.h>
 
 const int kPiezoPin = 4; // GPIO4
+const unsigned long kWindowMs = 100; // この時間内のmin/maxをまとめて出す
 
 void setup() {
   Serial.begin(115200);
@@ -14,7 +17,17 @@ void setup() {
 }
 
 void loop() {
-  int v = analogRead(kPiezoPin);
-  Serial.println(v);
-  delay(2);
+  int vmin = 4095;
+  int vmax = 0;
+  unsigned long windowStart = millis();
+  while (millis() - windowStart < kWindowMs) {
+    int v = analogRead(kPiezoPin);
+    if (v < vmin) vmin = v;
+    if (v > vmax) vmax = v;
+  }
+  Serial.print(vmin);
+  Serial.print(",");
+  Serial.print(vmax);
+  Serial.print(",");
+  Serial.println(vmax - vmin); // peak-to-peak
 }
