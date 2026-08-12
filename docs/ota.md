@@ -10,7 +10,10 @@
 [log/2026-08-10-drop-lan-push-ota.md](log/2026-08-10-drop-lan-push-ota.md)。
 
 pull型は2026-08-06にdevice1(esp32dev)・device2(adxl355)両方で実際に自己更新
-（旧バージョン→再ビルド版）まで成功している。
+（旧バージョン→再ビルド版）まで成功している。2026-08-12、device3(ピエゾ、
+`piezo`env)にも同じロジックを移植した（[log/2026-08-12-piezo-ota-and-observability-headers.md](log/2026-08-12-piezo-ota-and-observability-headers.md)）。
+シングルコア(ESP32-C3)でも成立する設計だが、**実機投入・実OTA転送確認は
+まだ**（コード実装・ビルド確認・パーティション確認のみ完了）。
 関連: [リモート再起動](remote_restart.md)（コマンドラインから再起動要求を送る作戦。
 `flushToSpill()`を共有する）。
 
@@ -29,10 +32,10 @@ untrackedファイルを一切引き継がないので、`--allow-dirty`無し�
 git status --short   # 何も出なければOK
 
 # 2. ビルド・S3公開（gitの短縮hashがそのまま配布バージョンになる）
-tools/publish_ota.sh esp32dev   # 1号機(IIS3DHHC)向け。2号機(ADXL355)なら adxl355
+tools/publish_ota.sh esp32dev   # 1号機(IIS3DHHC)向け。2号機(ADXL355)なら adxl355、3号機(ピエゾ)なら piezo
 #   最後に「python tools/request_ota.py request <device_id> <version>」が出力される
 
-# 3. 対象デバイスに許可を出す(device_idはtools/devices.json参照。1号機=1・2号機=2)
+# 3. 対象デバイスに許可を出す(device_idはtools/devices.json参照。1号機=1・2号機=2・3号機=3)
 NAMZ_DEVICES_TABLE=namazu-devices .venv/bin/python tools/request_ota.py request 1 <version> --yes
 #   --yes を付けないと確認プロンプトで止まる(非対話実行では必須)
 

@@ -322,6 +322,12 @@ device_id=3を払い出し、クラウド側は`https://api.namazu.dark-kuins.ne
 - [x] 実機送信確認・S3格納/dashboard波形表示の確認・RAM実測 → 起動時空きヒープ
       162KB・maxblock 143KBと健全。`/devices/3`でonline確認、dashboardで波形
       表示も確認（詳細は実装ログ参照）
+- [x] pull型OTA・可観測性ヘッダ(版数/稼働時間/ヒープ/再起動理由/バックログ)・
+      リモート再起動監視をmain.cppから移植（2026-08-12、
+      [log/2026-08-12-piezo-ota-and-observability-headers.md](log/2026-08-12-piezo-ota-and-observability-headers.md)）。
+      当初「今回見送り」としていたが、`fw_version`が空文字のままだったのを機に
+      対応した。コード実装・ビルド確認・パーティション確認まで完了、
+      **実機投入・実OTA転送確認はまだ**
 
 ### 運用開始後の観測
 
