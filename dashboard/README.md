@@ -55,6 +55,55 @@ x/y/z波形の代わりに複数機を重ねて描く（[docs/device_overlay.md]
 - 選んだ機の`calibration_ref_device`が食い違う組み合わせ、較正値が無い機を含む組み合わせは
   エラー表示にする（重ねられないため）。
 
+## URLハッシュルーティング
+
+画面状態（タブ・表示範囲・自動更新・軸表示・ページ等）は `location.hash` に持たせている
+（`app.js` の `parseHash`/`route`、実装は同ファイル1429行目以降）。リロード・共有URLで
+状態が復元される。ハッシュはSPA内部の状態表現であり、サーバ側に対応するエンドポイントは
+無い（`curl`や`fetch`でこのURLを直接取っても、返るのは静的な`index.html`だけで
+`#`以降のJS側の状態は反映されない。中身を見るにはブラウザでJSを実行させる必要がある）。
+
+- `#live?m=<分>&auto=<0|1>&r=<レンジ>&ax=<軸文字列>&s=<epoch秒>&t=<fromUs>-<toUs>&d=<device_id>&overlay=<id>,<id>,...`
+  ライブタブ。`m`は表示分数(1/3/5/10/30)、`auto`は自動更新、`r`は縦軸レンジ。
+  `ax`は表示中の軸を連結した文字列（例 `xy`=z非表示、``=全非表示、省略=全表示=`xyz`と同じ扱い）。
+  `s`を指定すると「今」ではなくその時刻を起点に表示（ドラッグ拡大等で付く）。
+  `t`はドラッグ拡大した固定の時間窓（マイクロ秒epoch、`fromUs-toUs`）。
+  `d`は単一機表示時のデバイス絞り込み。`overlay`は較正済み機の重ね表示
+  （2台以上、詳細は下記「重ね表示」節）。
+- `#events?p=<頁>&all=<0|1>&d=<device_id>`
+  イベント一覧タブ。`p`はページ番号、`all`はartificial/未確定も含めるフィルタ、
+  `d`はデバイス絞り込み（既定`all`は省略）。
+- `#event/<id>?p=&all=&d=&r=&ax=&t=<fromUs>-<toUs>`
+  イベント詳細。`p`/`all`/`d`は戻り先の一覧状態、`r`/`ax`/`t`は詳細波形の縦軸レンジ・
+  軸表示・時間ズーム。
+- `#devices`
+  デバイス一覧タブ。
+- `#device/<id>?h=<時間>`
+  デバイス詳細。`h`は温度トレンドの表示期間（時間）。
+
+ハッシュが上記どれにもマッチしない場合（空文字含む）は既定でライブタブになる（`route()`の
+`else`節）。
+
+### エージェントがURLの中身を確認する時はAPIを直接叩け
+
+**このURLをChromeで開いて中身を確認しようとするな。** 波形は`<canvas>`描画でDOM/テキストに
+出ないため、DOM読み取りでは何も取れずスクリーンショット頼みになり不確実・低速。ハッシュの
+パラメータは下表でAPIのクエリに機械的に変換できるので、そのAPIを`curl`/`fetch`で直接叩いて
+JSONを見る方が確実で速い（APIは認証なし・読み取り専用。ベースURLは`config.js`の
+`window.NAMZ_API_URL`、本番は`https://api.namazu.dark-kuins.net`）。
+
+| ハッシュ | 対応するAPI呼び出し |
+|---|---|
+| `#live?m=<m>&d=<device>&s=<sec>` | `GET /recent?minutes=<m>&device=<device>` （`s`があれば`&start=<sec*1e6>`） |
+| `#live?...&t=<fromUs>-<toUs>`（ドラッグ拡大） | `GET /recent?minutes=<max(0.1,(toUs-fromUs)/60e6)>&start=<fromUs>&device=<device>` |
+| `#events?p=<p>&all=<all>&d=<device>` | `GET /events?page=<p-1>&size=20&all=<all>&device=<device>` |
+| `#event/<id>?...` | `GET /event?id=<id>` |
+| `#devices` | `GET /devices` |
+| `#device/<id>?h=<h>` | `GET /devices/<id>` （温度トレンドは`GET /devices/<id>/temp?hours=<h>`） |
+
+`d`/`device`はデバイス絞り込み無し（`all`扱い）なら省略。`m`や`d`等の元パラメータの意味は
+上のハッシュ一覧を参照。
+
 ## API URL の指定
 
 優先度: `?api=<url>` クエリ > 画面の入力欄(localStorage) > `config.js` の `window.NAMZ_API_URL`。
