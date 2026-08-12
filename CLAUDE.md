@@ -24,6 +24,7 @@
 | コマンドラインからのリモート再起動要求（実装済み・実機確認待ち） | [docs/remote_restart.md](docs/remote_restart.md) |
 | デバイスの稼働時間・再起動検知の作戦（未着手） | [docs/uptime.md](docs/uptime.md) |
 | 複数機の波形を重ねる（姿勢・方位・震度ビュー） | [docs/device_overlay.md](docs/device_overlay.md) |
+| ダッシュボードのURLハッシュルーティング（`#live?...`等の各パラメータ） | [dashboard/README.md](dashboard/README.md#urlハッシュルーティング) |
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
 | 決定の経緯・作業ログ索引（**新しいものから読む**） | [docs/progress.md](docs/progress.md) → `docs/log/` |
