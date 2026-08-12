@@ -284,6 +284,12 @@ def _device_view(item: dict, now_us: int) -> dict:
         # ヘッダのsensor_typeをingestが記録したもの(device_meta.record_sensor_type)。
         # 表示名はwire.SENSOR_TYPE_NAMESが単一の真実。未記録(古いデータ等)はNone。
         "sensor": wire.SENSOR_TYPE_NAMES.get(item.get("sensor_type")),
+        # gal単位の物理量として扱ってよいか。detect Lambdaのガードと同じ
+        # wire.is_calibrated()が単一の真実（docs/wire_format.md「sensor_typeの帯域」）。
+        # dashboardはこれを見て概算震度計算・縦軸のgal表示を非校正センサでは出さない。
+        # 未記録(古いデータ・sensor_type未着地)はhasTemp同様「見えないよりまし」で校正扱い。
+        "calibrated": (True if item.get("sensor_type") is None
+                       else wire.is_calibrated(int(item["sensor_type"]))),
         # 稼働時間(docs/uptime.md)。boot_epoch_usはingestがX-Namz-Uptime-Usヘッダから
         # 逆算・記録したもの(device_meta.record_boot_epoch)。未記録(旧ファーム等)はNone。
         "boot_epoch_us": int(item["boot_epoch_us"]) if item.get("boot_epoch_us") else None,

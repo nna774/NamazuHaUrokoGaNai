@@ -125,6 +125,35 @@ def test_device_view_reports_fake_sensor_name(monkeypatch):
     assert json.loads(resp["body"])["device"]["sensor"] == "ダミー"
 
 
+def test_device_view_reports_calibrated_true_for_accel_sensor(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "sensor_type": wire.SENSOR_TYPE_IIS3DHHC})
+    resp = api._device(2)
+    assert json.loads(resp["body"])["device"]["calibrated"] is True
+
+
+def test_device_view_reports_calibrated_false_for_piezo(monkeypatch):
+    """非校正センサ(ピエゾ等、sensor_type 128〜249)はgal前提のロジックの対象外。"""
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "sensor_type": wire.SENSOR_TYPE_PIEZO})
+    resp = api._device(2)
+    assert json.loads(resp["body"])["device"]["calibrated"] is False
+
+
+def test_device_view_reports_calibrated_true_for_fake_sensor(monkeypatch):
+    """FAKE(255)はgal相当の値を実際に送るので校正対象扱い。"""
+    monkeypatch.setattr(api.devices, "get_device",
+                        lambda did: {"device_id": did, "sensor_type": wire.SENSOR_TYPE_FAKE})
+    resp = api._device(2)
+    assert json.loads(resp["body"])["device"]["calibrated"] is True
+
+
+def test_device_view_calibrated_true_when_sensor_type_not_yet_recorded(monkeypatch):
+    monkeypatch.setattr(api.devices, "get_device", lambda did: {"device_id": did})
+    resp = api._device(2)
+    assert json.loads(resp["body"])["device"]["calibrated"] is True
+
+
 def test_device_view_reports_watchdog_muted(monkeypatch):
     monkeypatch.setattr(api.devices, "get_device",
                         lambda did: {"device_id": did, "watchdog_muted": True})
