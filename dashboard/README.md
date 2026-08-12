@@ -110,8 +110,13 @@ JSONを見る方が確実で速い（APIは認証なし・読み取り専用。�
 を直接読め。既存の`tools/detectlab.py --at "<時刻>" --minutes <分> [--device <id>...]`
 （または`--event <id>`）がまさにこれをやる（フルレートの生波形を取得してSTA/LTA・
 スペクトログラム等の解析まで一気にやる。用途に合わなければ`--dump-csv`で生窓だけCSV保存
-できる）。自前で組む場合は`lambda/common/store.py`の`load_window`/`list_raw_keys_in_range`
-（**device_id必須**。理由は`CLAUDE.md`の「波形を組み立てる時は必ずdevice_idで絞る」参照）。
+できる）。`detectlab.py`で足りず自前で`load_window`/`list_raw_keys_in_range`等でS3の
+rawオブジェクトを直接取ってくる場合は、**必ず`tools/README.md`の
+「[何度も条件を変えて解析するときのS3キャッシュ](../tools/README.md#何度も条件を変えて解析するときのs3キャッシュ)」
+（リポジトリ直下`.s3cache/`にobject keyをそのままミラーする薄いキャッシュ）を通すこと。**
+閾値や窓を変えて何度も同じ期間を掘り返す解析になりがちで、キャッシュ無しだと同じraw
+バッチを毎回取り直して遅い。（`device_id必須`の理由は`CLAUDE.md`の「波形を組み立てる時は
+必ずdevice_idで絞る」参照）。
 
 ## API URL の指定
 
