@@ -15,6 +15,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
 
@@ -37,6 +38,56 @@ static Uploader* gUploader = nullptr;
 static QueueHandle_t gBatchQueue;
 static TaskHandle_t gSamplingTask;
 static esp_timer_handle_t gSampleTimer;
+
+// --- 可観測性ヘッダ・リモート再起動監視（本線main.cppからの移植） ---
+// これまで本線が送っている以下のヘッダを一切送っておらず、dashboard/watchdogから
+// 版数・稼働状況が見えなかった（2026-08-12指摘）。ExtraRequestHeaders/
+// WatchResponseHeadersの仕組み自体はUploaderの汎用APIなのでbatch-uplink側の
+// 変更は不要、本線から値の出し方だけ持ってくる。
+static constexpr const char* kFwVersionHeader = "X-Namz-Fw-Version";
+static constexpr const char* kUptimeHeader = "X-Namz-Uptime-Us";
+static char sUptimeBuf[24];
+static constexpr const char* kHeapFreeHeader = "X-Namz-Heap-Free";
+static constexpr const char* kHeapMaxblockHeader = "X-Namz-Heap-Maxblock";
+static char sHeapFreeBuf[16];
+static char sHeapMaxblockBuf[16];
+static constexpr const char* kSpillCountHeader = "X-Namz-Spill-Count";
+static constexpr const char* kRamQueuedHeader = "X-Namz-Ram-Queued";
+static char sSpillCountBuf[16];
+static char sRamQueuedBuf[16];
+static constexpr const char* kResetReasonHeader = "X-Namz-Reset-Reason";
+static char sResetReasonBuf[16] = "UNKNOWN";
+
+static const char* resetReasonToString(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON: return "POWERON";
+    case ESP_RST_EXT: return "EXT";
+    case ESP_RST_SW: return "SW";
+    case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT: return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "UNKNOWN";
+  }
+}
+
+static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
+                                                  kHeapFreeHeader, kHeapMaxblockHeader,
+                                                  kResetReasonHeader, kSpillCountHeader,
+                                                  kRamQueuedHeader, nullptr};
+static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
+                                                   sHeapFreeBuf, sHeapMaxblockBuf,
+                                                   sResetReasonBuf, sSpillCountBuf,
+                                                   sRamQueuedBuf};
+
+// リモート再起動要求（docs/remote_restart.md）。OTAのpull型監視(X-Namz-Ota-Version)は
+// まだ移植していない(docs/piezo.md §7、TODO(OTA)コメント参照)ため、今回は
+// この1本だけをwatchする。
+static constexpr const char* kRestartHeader = "X-Namz-Restart";
+static constexpr const char* kWatchedHeaders[] = {kRestartHeader, nullptr};
 
 static void IRAM_ATTR onSampleTimer(void*) {
   vTaskNotifyGiveFromISR(gSamplingTask, nullptr);
@@ -105,12 +156,41 @@ static void samplingTask(void*) {
 // docs/log/2026-08-11-uploader-task-split.md)が、ここではまず1タスクに
 // まとめる。詰まりが実機で見えたら分割を検討する。
 static void uploaderTask(void*) {
+  bool restartRequested = false;  // サーバからのリモート再起動要求（docs/remote_restart.md）
   for (;;) {
     Batch* b = nullptr;
     while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) {
       gUploader->enqueue(b);
     }
+    // 送信直前に稼働時間・ヒープヘッダを更新（Uploaderは値をコピーせずポインタを
+    // 保持するため、pump()がPOSTする直前の値を確実に使わせるにはこの位置で書く
+    // 必要がある。本線main.cppと同じ理由）。
+    snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
+    snprintf(sHeapFreeBuf, sizeof(sHeapFreeBuf), "%u", (unsigned)ESP.getFreeHeap());
+    snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
+    snprintf(sSpillCountBuf, sizeof(sSpillCountBuf), "%u", (unsigned)gUploader->spillCount());
+    snprintf(sRamQueuedBuf, sizeof(sRamQueuedBuf), "%u", (unsigned)gUploader->ramQueued());
     gUploader->pump();
+
+    // リモート再起動要求: バッチ送信のレスポンスヘッダで気づいたら、RAMキューを
+    // LittleFSへ退避してからすぐ再起動する（本線main.cppと同じ「2xxが返るまで
+    // 捨てない」不変条件を守った安全な再起動）。
+    if (!restartRequested && gUploader->lastResponseHeaderValue(kRestartHeader) == "1") {
+      restartRequested = true;
+      Serial.println("[uploader] restart requested by server, flushing queue to spill");
+    }
+    if (restartRequested) {
+      Batch* pending = nullptr;
+      while (xQueueReceive(gBatchQueue, &pending, 0) == pdTRUE) gUploader->enqueue(pending);
+      gUploader->flushToSpill();
+      if (gUploader->ramQueued() == 0) {
+        Serial.println("[uploader] queue flushed to spill, restarting now");
+        Serial.flush();
+        delay(200);
+        ESP.restart();
+      }
+    }
+
     // TODO(OTA): ここにpull型OTAのチェック呼び出しを足せる(docs/piezo.md §7、
     // 今回は未実装)。
     delay(50);
@@ -121,6 +201,11 @@ void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
   Serial.printf("\n[boot] NamazuHaUrokoGaNai piezo fw=%s\n", kFwVersion);
+
+  // ヘッダ送信用の再起動理由をここで確定する(本線main.cppと同じ理由、
+  // ネットワーク送信より前の起動直後に1回だけ)。
+  snprintf(sResetReasonBuf, sizeof(sResetReasonBuf), "%s", resetReasonToString(esp_reset_reason()));
+  Serial.printf("[boot] reset_reason=%s\n", sResetReasonBuf);
 
   // WiFi/Uploaderより前、mbedTLSが一度も呼ばれていないうちにフックする
   // (本線main.cppと同じ理由)。
@@ -154,9 +239,8 @@ void setup() {
   gUploader = new Uploader(gIdentity.ingestUrl.c_str(), gIdentity.alertUrl.c_str(),
                            gIdentity.hmacSecret.c_str(), gIdentity.deviceId,
                            kMaxRamBatches, kSpillDir, /*dropOldestWhenFull=*/true,
-                           /*watchResponseHeaders=*/nullptr,
-                           /*extraRequestHeaderNames=*/nullptr,
-                           /*extraRequestHeaderValues=*/nullptr,
+                           kWatchedHeaders,
+                           kExtraRequestHeaderNames, kExtraRequestHeaderValues,
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
   gUploader->begin();
 
