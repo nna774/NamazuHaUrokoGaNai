@@ -296,7 +296,13 @@ device_id=3を払い出し、クラウド側は`https://api.namazu.dark-kuins.ne
 - **ワイヤ形式(axes)**: `axes: 1`で正直に送る。`lambda/common/wire.py`の
   `parse()`を`axes`可変対応にし、dashboard向けのpadding（y,z列を0埋めして
   3列に揃える）は`lambda/api/handler.py`の`_waveform_payload()`1箇所に閉じる。
-  `dashboard/app.js`は無改修。
+- **dashboardの非校正表示**（2026-08-12追記）: 波形表示自体は無改修で済んだが、
+  ライブ画面のクライアント側概算震度（`JMA_FIR_TAPS`、gal前提）と縦軸の
+  「gal」表示は、device3(ピエゾ)を選んでも素通しで嘘の値・単位を出していた
+  （[docs/log/2026-08-12-dashboard-non-calibrated-display.md](log/2026-08-12-dashboard-non-calibrated-display.md)）。
+  detect Lambdaと同じ`wire.is_calibrated()`を単一の真実として`/devices`
+  APIに`calibrated`真偽値を足し、dashboardはそれを見て概算震度計算をスキップ・
+  縦軸レンジ選択肢とヘルプ文言から「gal」を落とすようにした。
 - **firmwareの配置**: `docs/piezo_phase0/`のまま育てず、本線`firmware/`配下の
   `[env:piezo]`として統合した。ただし本線`main.cpp`をそのまま拡張したのではなく、
   ESP32-C3がシングルコアなため別エントリポイント`piezo_main.cpp`を新設した
