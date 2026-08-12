@@ -84,6 +84,26 @@ x/y/z波形の代わりに複数機を重ねて描く（[docs/device_overlay.md]
 ハッシュが上記どれにもマッチしない場合（空文字含む）は既定でライブタブになる（`route()`の
 `else`節）。
 
+### エージェントがURLの中身を確認する時はAPIを直接叩け
+
+**このURLをChromeで開いて中身を確認しようとするな。** 波形は`<canvas>`描画でDOM/テキストに
+出ないため、DOM読み取りでは何も取れずスクリーンショット頼みになり不確実・低速。ハッシュの
+パラメータは下表でAPIのクエリに機械的に変換できるので、そのAPIを`curl`/`fetch`で直接叩いて
+JSONを見る方が確実で速い（APIは認証なし・読み取り専用。ベースURLは`config.js`の
+`window.NAMZ_API_URL`、本番は`https://api.namazu.dark-kuins.net`）。
+
+| ハッシュ | 対応するAPI呼び出し |
+|---|---|
+| `#live?m=<m>&d=<device>&s=<sec>` | `GET /recent?minutes=<m>&device=<device>` （`s`があれば`&start=<sec*1e6>`） |
+| `#live?...&t=<fromUs>-<toUs>`（ドラッグ拡大） | `GET /recent?minutes=<max(0.1,(toUs-fromUs)/60e6)>&start=<fromUs>&device=<device>` |
+| `#events?p=<p>&all=<all>&d=<device>` | `GET /events?page=<p-1>&size=20&all=<all>&device=<device>` |
+| `#event/<id>?...` | `GET /event?id=<id>` |
+| `#devices` | `GET /devices` |
+| `#device/<id>?h=<h>` | `GET /devices/<id>` （温度トレンドは`GET /devices/<id>/temp?hours=<h>`） |
+
+`d`/`device`はデバイス絞り込み無し（`all`扱い）なら省略。`m`や`d`等の元パラメータの意味は
+上のハッシュ一覧を参照。
+
 ## API URL の指定
 
 優先度: `?api=<url>` クエリ > 画面の入力欄(localStorage) > `config.js` の `window.NAMZ_API_URL`。
