@@ -336,7 +336,17 @@ device_id=3を払い出し、クラウド側は`https://api.namazu.dark-kuins.ne
   窓・玄関・架台(コンクリートブロック)は目視で揺れていないとの現場確認から、
   むき出しのカンチレバー構造自体が風で直接励振されていると判断（詳細:
   [docs/log/2026-08-12-piezo-wind-sensitivity-observation.md](log/2026-08-12-piezo-wind-sensitivity-observation.md)）。
-  風除け筐体の要否・設計はまだ未着手。
+- **共振(約50Hz)は`kSampleRateHz=100Hz`のナイキスト周波数(50Hz)とちょうど
+  重なっており、エイリアシングで1-10Hz帯（震度算出の対象帯域）に不可逆に
+  折り返りうる**。地震動本体(1-10Hz)の標本化には影響しない（ナイキストに
+  対し5倍の余裕がある）ため実害は無いが、次期センサLDT0-028Kのmass選定に
+  影響する——mass=1(共振90Hz)はfs=100Hzで畳み込むとちょうど10Hzに直撃し
+  最悪の相性と判明、以前の推奨(mass=1か2)を見直す材料になった。対策は
+  **風防(励起源を減らす)+ADC手前のアナログRCローパス(fsに依存せず除去可能に
+  する)を主軸**に決めた。本線と同じオーバーサンプリング+間引きの転用も
+  検討したが、狭帯域の共振ノイズには効果が薄いと分かり主軸には採用しなかった
+  （詳細: [docs/log/2026-08-12-piezo-resonance-noise-diagnosis-and-mitigation-plan.md](log/2026-08-12-piezo-resonance-noise-diagnosis-and-mitigation-plan.md)）。
+  風除け筐体・アナログローパスの設計はまだ未着手。
 
 ## 8. 3軸化(X/Y/Z)に向けた準備（検討中・ピン予約のみ実施、実装は未着手）
 
