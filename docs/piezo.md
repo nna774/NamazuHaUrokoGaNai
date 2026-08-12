@@ -337,3 +337,28 @@ device_id=3を払い出し、クラウド側は`https://api.namazu.dark-kuins.ne
   むき出しのカンチレバー構造自体が風で直接励振されていると判断（詳細:
   [docs/log/2026-08-12-piezo-wind-sensitivity-observation.md](log/2026-08-12-piezo-wind-sensitivity-observation.md)）。
   風除け筐体の要否・設計はまだ未着手。
+
+## 8. 3軸化(X/Y/Z)に向けた準備（検討中・ピン予約のみ実施、実装は未着手）
+
+LDT0-028K([§7末尾](log/2026-08-12-piezo-phase1-impl.md#ldt0-028kte-connectivity製pvdfフィルム振動センサを導入する時の注意)で
+導入時の注意点、[抵抗設計](log/2026-08-12-piezo-phase1-impl.md#ldt0-028k導入時の抵抗設計データシート実測値ベース購入前の見積もり)を
+検討済み)を2個購入したことを受け、既存Z軸(圧電ブザー、GPIO4)に加えて
+X/Y水平2軸を足す3軸化を検討した。経緯・判断理由は
+[docs/log/2026-08-12-piezo-phase1-impl.md「3軸化に向けた準備」](log/2026-08-12-piezo-phase1-impl.md#3軸化xyzに向けた準備ピンアサイン固定方針device_idram見積もり)参照。
+
+- **ピンアサイン（予約）**: ADC1(GPIO0〜4)のうちGPIO4=Z(既存)・GPIO2=ストラップピン
+  除外済み。**X=GPIO0、Y=GPIO1**を予約する。GPIO3は予備として空けておく。
+- **固定方針**: Zは既存(ブロックに直接固定済み)のまま。X/Yは
+  LDT0-028Kのcrimped contactsをユニバーサル基板へ直接ハンダ付け
+  （データシート推奨の取り付け方法、割り箸カンチレバーの自作は不要）し、
+  その基板をブロックに固定する。X用・Y用は膜面が互いに直交するよう配置する
+  こと（LDTシリーズは膜面に垂直な方向が最感度軸のため）。
+- **device_id**: 新規に割らず**既存device_id=3を再利用する**。同一筐体・
+  同一ESP32-C3に軸を足すだけで、`axes`は`NamzWire`が既にN軸対応済みの
+  ワイヤ形式属性であり、device_id/sensor_typeとは独立。device1/2も
+  元々「1台=複数軸」の設計なのでこれに合わせる。
+- **RAM見積もり**: 現状(1軸・30秒バッチ)は`kBatchSamples=3000`×2B=6000Bで、
+  実機起動時`free heap 162KB / maxblock 143KB`を確認済み。3軸化で
+  1サンプルあたり2B→6Bになるため、バッチは概算18KB程度（3倍）。
+  `kMaxRamBatches=1`のままでも143KBの連続空きに対して十分収まる見込み
+  だが、実装後は起動時ヒープログで実測確認すること。
