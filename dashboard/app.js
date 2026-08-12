@@ -87,7 +87,9 @@ function fitCanvas(cv) {
 }
 
 // axes は描画する軸の配列（既定は全軸）。チェックで一部を隠せる。値域も表示軸だけで決める。
-function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
+// unit はレンジ外表示に添える単位（既定'gal'）。非校正センサ(ピエゾ等)はセンサ生値で
+// gal相当ではないので、呼び出し側が''を渡して単位表示を落とす。
+function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z'], unit = 'gal') {
   const { ctx, w, h } = fitCanvas(cv);
   ctx.clearRect(0, 0, w, h);
   const pad = PAD;
@@ -158,7 +160,7 @@ function drawWaveform(cv, wf, fixedRange, axes = ['x', 'y', 'z']) {
   if (clipped) {
     ctx.fillStyle = '#e67e22';
     ctx.textAlign = 'right';
-    ctx.fillText(`レンジ外 実測±${clipped.toFixed(0)} gal`, w - pad, pad + 28);
+    ctx.fillText(`レンジ外 実測±${clipped.toFixed(0)}${unit ? ' ' + unit : ''}`, w - pad, pad + 28);
     ctx.textAlign = 'left';
   }
 
@@ -697,15 +699,22 @@ function redrawLive() {
   if (overlayActive()) { redrawLiveOverlay(); return; }
   if (!lastLiveWaveform) return;
   const yrange = Number(document.getElementById('yrange').value) || 0;
-  drawWaveform(document.getElementById('live-canvas'), displayedLiveWf(), yrange, visibleAxes('live'));
+  const unit = isLiveDeviceCalibrated() ? 'gal' : '';
+  drawWaveform(document.getElementById('live-canvas'), displayedLiveWf(), yrange, visibleAxes('live'), unit);
 }
 
 // ライブの概算震度バッジを更新する。rawの生波形が手元にある時だけ計算する
 // （envelope=間引き済みでは計算不能。「3分」以上の窓や拡大表示中は出さない）。
-function updateLiveIntensity(wf) {
+// calibrated=false（ピエゾ等の非校正センサ）は生値がgal相当ではないので、
+// 計算式に掛けると嘘の震度になる。計算自体をスキップする。
+function updateLiveIntensity(wf, calibrated = true) {
   const el = document.getElementById('live-intensity');
   if (!el) return;
   if (!wf || !wf.n) { el.innerHTML = ''; return; }
+  if (!calibrated) {
+    el.innerHTML = '<span class="muted">概算震度: 非校正センサのため計算しません（gal単位の値ではない）</span>';
+    return;
+  }
   if (wf.mode !== 'raw') {
     el.innerHTML = '<span class="muted">概算震度: 表示範囲が広いため計算できません（「1分」表示でのみ計算）</span>';
     return;
@@ -739,6 +748,36 @@ function updateLiveIntensityMulti(waveforms) {
 // 空なので、DOM を真実にすると URL 復元と埋め込みの順序に依存してしまう。
 let liveDeviceId = null;
 let liveDevices = [];
+// device_id -> calibrated(bool)。/devices の "calibrated" を写した鏡（gal校正済みか、
+// wire.is_calibrated()が単一の真実。ピエゾ等はfalse）。未取得時は校正扱いで安全側に倒す。
+let liveDeviceCalibrated = {};
+
+function isLiveDeviceCalibrated() {
+  if (liveDeviceId == null) return true;
+  const v = liveDeviceCalibrated[Number(liveDeviceId)];
+  return v === undefined ? true : v;
+}
+
+// 非校正センサ選択中は縦軸の「gal」表示を落とす（値がgal相当ではなく嘘になるため）。
+function updateLiveUnitLabels() {
+  const calibrated = isLiveDeviceCalibrated();
+  const sel = document.getElementById('yrange');
+  if (sel) {
+    for (const opt of sel.options) {
+      if (opt.value === '0') continue;  // 「自動」に単位は付かない
+      opt.textContent = calibrated ? `±${opt.value} gal` : `±${opt.value}`;
+    }
+  }
+  const help = document.getElementById('live-axes-help');
+  if (help) {
+    help.innerHTML = (calibrated
+      ? '縦軸: 加速度 [gal]。'
+      : '縦軸: センサ生値（非校正、gal単位ではない）。')
+      + 'x=赤 y=緑 z=青。範囲が広いときは min/max エンベロープ表示。'
+      + 'ドラッグで時間方向に拡大（その区間を取り直すので細かくなる。自動更新は止まる）。'
+      + 'ダブルクリックか「ライブ」で戻る。';
+  }
+}
 
 // 重ね表示。真実は liveOverlayIds（チェック済みdevice_id、2件以上で有効）に置く。
 // liveDeviceCal は /devices から拾った較正済み機の { tiltUp, azimuthDeg, refDevice }。
@@ -777,6 +816,9 @@ async function fillLiveDevices() {
         };
       }
     }
+    liveDeviceCalibrated = {};
+    for (const d of all) liveDeviceCalibrated[Number(d.device_id)] = d.calibrated !== false;
+    updateLiveUnitLabels();
     renderOverlayChecks();
   } catch (e) {
     // デバイス一覧が引けなくても波形表示は続ける（api 側が最若番を選ぶ）。
@@ -894,7 +936,7 @@ async function refreshLive() {
       + (sec ? '&start=' + sec * 1e6 : '') + liveDeviceParam());
     lastLiveWaveform = wf;
     redrawLive();
-    updateLiveIntensity(wf);
+    updateLiveIntensity(wf, isLiveDeviceCalibrated());
     if (sec) {
       // 指定時刻表示は過去の固定窓なので鮮度は無意味。指定範囲を表示する。
       const from = new Date(sec * 1000).toLocaleString('ja-JP');
