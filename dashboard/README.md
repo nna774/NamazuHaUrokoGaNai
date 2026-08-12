@@ -104,6 +104,20 @@ JSONを見る方が確実で速い（APIは認証なし・読み取り専用。�
 `d`/`device`はデバイス絞り込み無し（`all`扱い）なら省略。`m`や`d`等の元パラメータの意味は
 上のハッシュ一覧を参照。
 
+**`/recent`はMAX_POINTS(=6000点、100Hzで1分)を超える窓ではenvelope（min/max間引き）
+にした値しか返さない。** `m=5`のような数分の窓は既にenvelopeで、生サンプルではない。
+詳細な波形解析や複数分/長時間ぶんの生波形が要る時は、`/recent`を叩くのではなくS3の`raw/`
+を直接読め。既存の`tools/detectlab.py --at "<時刻>" --minutes <分> [--device <id>...]`
+（または`--event <id>`）がまさにこれをやる（フルレートの生波形を取得してSTA/LTA・
+スペクトログラム等の解析まで一気にやる。用途に合わなければ`--dump-csv`で生窓だけCSV保存
+できる）。`detectlab.py`で足りず自前で`load_window`/`list_raw_keys_in_range`等でS3の
+rawオブジェクトを直接取ってくる場合は、**必ず`tools/README.md`の
+「[何度も条件を変えて解析するときのS3キャッシュ](../tools/README.md#何度も条件を変えて解析するときのs3キャッシュ)」
+（リポジトリ直下`.s3cache/`にobject keyをそのままミラーする薄いキャッシュ）を通すこと。**
+閾値や窓を変えて何度も同じ期間を掘り返す解析になりがちで、キャッシュ無しだと同じraw
+バッチを毎回取り直して遅い。（`device_id必須`の理由は`CLAUDE.md`の「波形を組み立てる時は
+必ずdevice_idで絞る」参照）。
+
 ## API URL の指定
 
 優先度: `?api=<url>` クエリ > 画面の入力欄(localStorage) > `config.js` の `window.NAMZ_API_URL`。
