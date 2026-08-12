@@ -24,6 +24,7 @@
 | コマンドラインからのリモート再起動要求（実装済み・実機確認待ち） | [docs/remote_restart.md](docs/remote_restart.md) |
 | デバイスの稼働時間・再起動検知の作戦（未着手） | [docs/uptime.md](docs/uptime.md) |
 | 複数機の波形を重ねる（姿勢・方位・震度ビュー） | [docs/device_overlay.md](docs/device_overlay.md) |
+| ダッシュボードのURLハッシュルーティング（`#live?...`等の各パラメータ） | [dashboard/README.md](dashboard/README.md#urlハッシュルーティング) |
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
 | 決定の経緯・作業ログ索引（**新しいものから読む**） | [docs/progress.md](docs/progress.md) → `docs/log/` |
@@ -122,17 +123,11 @@ aws cloudfront create-invalidation \
 `config.js` は本番APIのURL(`https://api.namazu.dark-kuins.net`)が入る。sync対象なので消すな。
 カスタムドメインまわりの順序は [terraform/README.md](terraform/README.md) を参照。
 
-**S3オブジェクトに`--cache-control`は付けるな（意図的に付けていない）。** ブラウザの
-キャッシュ制御は`terraform/dashboard.tf`の`aws_cloudfront_response_headers_policy`
-（`Cache-Control: no-cache`をビューワー応答へ強制的に付与）で行う。CloudFront自体の
-エッジキャッシュTTLは`cache_policy_id`（Managed-CachingOptimized、既定1日）任せで、
-デプロイのたびのinvalidationで鮮度を保証する。**この2つはレイヤーが違う**——
-S3オブジェクト側に`Cache-Control: no-cache`を付けてしまうと、CloudFrontは
-Cache PolicyのDefaultTTLより「オリジンが明示した鮮度ヘッダー」を優先するため、
-エッジ↔S3間の再検証が毎回発生してしまう（実際に踏んで直した、2026-08-06）。
-ブラウザが`app.js`だけ古いキャッシュを使い続けて`index.html`と食い違う元々の
-不具合（「新しい列のヘッダーは出るが中身も罫線も途中で切れる」）は、Response
-Headers Policy側のno-cacheで別途防げている。
+**S3オブジェクトに`--cache-control`は付けるな（意図的に付けていない）。** ブラウザ向けの
+`Cache-Control: no-cache`は`terraform/dashboard.tf`の`aws_cloudfront_response_headers_policy`
+側が付与している。S3とCloudFrontで混ぜるとエッジ↔S3間の再検証が毎回発生する
+（試した順序・実測・元の不具合の経緯は`terraform/dashboard.tf`のコメントと
+[docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md](docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md)参照）。
 
 ## 開発の約束（グローバル設定に加えて）
 
