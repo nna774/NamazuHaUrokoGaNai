@@ -8,11 +8,12 @@
 // 変えてコアを指定するだけで済むよう、キュー経由の連携にしてある。
 //
 // 校正しない・タイミング一致だけを狙う非校正センサ(docs/other-sensors.md)なので、
-// 本線のリアルタイム震度計算(Shindo)・device_promptアラート・TFT表示・OTAは
-// 持たない。OTAは後で足しやすいよう、送信タスクにチェック呼び出しの余地は
-// 空けてあるが今回は実装しない(docs/piezo.md §7)。
+// 本線のリアルタイム震度計算(Shindo)・device_promptアラート・TFT表示は持たない。
+// pull型OTA(docs/ota.md §2)は本線から移植した(docs/piezo.md §7)。TFT/OLED画面が
+// 無いため「更新中」の視覚表示は無い。
 
 #include <Arduino.h>
+#include <HTTPUpdate.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <esp_system.h>
@@ -29,7 +30,8 @@
 #include "piezo_config.h"
 
 // firmware/certs/amazon_root_ca1.pem を platformio.ini の board_build.embed_txtfiles
-// でリンクする（本線main.cppと同じ手法）。
+// でリンクする（本線main.cppと同じ手法）。OTA取得先(CloudFront)とingest先の両方の
+// TLS検証に使う。
 extern const uint8_t amazon_root_ca1_pem_start[] asm("_binary_certs_amazon_root_ca1_pem_start");
 
 static PiezoSensor gSensor(kPiezoPin, kSensorTypePiezo);
@@ -83,11 +85,12 @@ static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
                                                    sResetReasonBuf, sSpillCountBuf,
                                                    sRamQueuedBuf};
 
-// リモート再起動要求（docs/remote_restart.md）。OTAのpull型監視(X-Namz-Ota-Version)は
-// まだ移植していない(docs/piezo.md §7、TODO(OTA)コメント参照)ため、今回は
-// この1本だけをwatchする。
+// リモート再起動要求（docs/remote_restart.md）とpull型OTA更新許可
+// （docs/ota.md §2）。どちらも本線main.cppと同じ「バッチ送信レスポンスへの
+// 便乗」で気づく。
 static constexpr const char* kRestartHeader = "X-Namz-Restart";
-static constexpr const char* kWatchedHeaders[] = {kRestartHeader, nullptr};
+static constexpr const char* kOtaVersionHeader = "X-Namz-Ota-Version";
+static constexpr const char* kWatchedHeaders[] = {kRestartHeader, kOtaVersionHeader, nullptr};
 
 static void IRAM_ATTR onSampleTimer(void*) {
   vTaskNotifyGiveFromISR(gSamplingTask, nullptr);
@@ -151,6 +154,86 @@ static void samplingTask(void*) {
   }
 }
 
+// --- OTA更新の安全な停止・再開（docs/ota.md、本線main.cppから移植） ---
+// フラッシュ書き込み中はキャッシュが無効になり命令フェッチが止まるため、
+// 100Hzの測定タイマーは転送中に確実に取りこぼす。転送開始時点で一旦止め、
+// キューに残っているバッチはLittleFSへ退避してから焼く。
+static void pauseSamplingForOta() {
+  Serial.println("[ota] start: pausing sampling, flushing queue to spill");
+  esp_timer_stop(gSampleTimer);
+  // タイマーを止めるとsamplingTaskへの通知も止まり、自分でesp_task_wdt_reset()を
+  // 呼べなくなる。転送が終わるまでウォッチドッグの監視対象から一時的に外す。
+  esp_task_wdt_delete(gSamplingTask);
+  Batch* b = nullptr;
+  while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) gUploader->enqueue(b);
+  size_t flushed = gUploader->flushToSpill();
+  Serial.printf("[ota] flushed %u batch(es) to spill\n", (unsigned)flushed);
+  // ingest向けの使い回し接続を閉じてからOTA取得へ進む。開けたままだと、これから
+  // 張るOTA先(CloudFront)向けの新規TLS接続と2本同時に生きてしまい、TlsMemPool
+  // (単一TLS接続前提でサイズを見積もった固定プール)を超えうる（本線と同じ理由。
+  // ESP32-C3はRAM総量も少ないため、この対策の重要度はむしろ本線より高い）。
+  gUploader->closeConnection();
+}
+
+// 成功時はESP.restart()するのでここは通らない。失敗時は測定を止めたままに
+// しないよう再開する。
+static void resumeSamplingAfterOtaFailure(const char* reason) {
+  Serial.printf("[ota] %s: resuming sampling\n", reason);
+  esp_task_wdt_add(gSamplingTask);
+  esp_timer_start_periodic(gSampleTimer, kSamplePeriodUs);
+}
+
+// OTA本体を取得して書き込む。安全停止(pauseSamplingForOta)は呼び出し側の責務。
+// TLS検証は本線と同じくAmazon Root CA 1を明示指定する（docs/ota.md §2.6、
+// 既定CAバンドルはPlatformIO Arduinoビルドでは機能しないと実機で確認済み）。
+static bool performPullOta(const String& targetVersion) {
+  char url[256];
+  snprintf(url, sizeof(url), "%s/ota/%s/%s.bin", gIdentity.otaBaseUrl.c_str(), kOtaEnv,
+           targetVersion.c_str());
+  Serial.printf("[ota-pull] fetching %s\n", url);
+
+  WiFiClientSecure client;
+  client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
+  httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
+  httpUpdate.onProgress([](int, int) {
+    esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う
+  });
+
+  t_httpUpdate_return ret = httpUpdate.update(client, url);
+  if (ret != HTTP_UPDATE_OK) {
+    Serial.printf("[ota-pull] failed: %d (%s)\n", (int)ret, httpUpdate.getLastErrorString().c_str());
+    return false;
+  }
+  Serial.println("[ota-pull] write OK, restarting");
+  Serial.flush();
+  return true;
+}
+
+// 失敗後に間を置かず再試行すると、ヘッダ値は次の成功バッチPOSTまで更新されない
+// （Uploaderがキャッシュする値）ため、バックオフ無しだと高頻度リトライで測定が
+// 止まったままになる（本線が実機で踏んだ不具合、docs/ota.md §2.7）。同じ1分の
+// バックオフを踏襲する。
+static constexpr int64_t kOtaRetryBackoffUs = 60LL * 1000000LL;
+
+// バージョン不一致を見つけたら、安全停止→取得→(成功なら再起動/失敗なら復旧)まで
+// 一息に行う。uploaderTaskのループでバッチ送信レスポンスを見た時に呼ぶ。
+static void checkAndPerformPullOta(const String& target) {
+  static int64_t sNextAttemptUs = 0;
+  if (target.length() == 0 || target == kFwVersion) return;
+  int64_t now = esp_timer_get_time();
+  if (now < sNextAttemptUs) return;  // 直近の失敗からバックオフ中
+  Serial.printf("[ota-pull] update available: %s -> %s\n", kFwVersion, target.c_str());
+  pauseSamplingForOta();
+  if (performPullOta(target)) {
+    esp_task_wdt_reset();
+    delay(200);
+    ESP.restart();
+  } else {
+    resumeSamplingAfterOtaFailure("pull failed");
+    sNextAttemptUs = now + kOtaRetryBackoffUs;
+  }
+}
+
 // --- 送信タスク ---
 // 本線は「吸い出し」「送信」を2タスクに分けている(LittleFS競合回避、
 // docs/log/2026-08-11-uploader-task-split.md)が、ここではまず1タスクに
@@ -191,8 +274,10 @@ static void uploaderTask(void*) {
       }
     }
 
-    // TODO(OTA): ここにpull型OTAのチェック呼び出しを足せる(docs/piezo.md §7、
-    // 今回は未実装)。
+    // pull型OTA更新の確認（docs/ota.md §2）。同じバッチ送信レスポンスヘッダで
+    // 気づく。不一致なら取得〜書き込みまで一息に行い、完了までここでブロックする
+    // （performPullOta内でWDTを養う）。
+    checkAndPerformPullOta(gUploader->lastResponseHeaderValue(kOtaVersionHeader));
     delay(50);
   }
 }
@@ -200,7 +285,7 @@ static void uploaderTask(void*) {
 void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
-  Serial.printf("\n[boot] NamazuHaUrokoGaNai piezo fw=%s\n", kFwVersion);
+  Serial.printf("\n[boot] NamazuHaUrokoGaNai piezo fw=%s env=%s\n", kFwVersion, kOtaEnv);
 
   // ヘッダ送信用の再起動理由をここで確定する(本線main.cppと同じ理由、
   // ネットワーク送信より前の起動直後に1回だけ)。

@@ -44,6 +44,15 @@ static constexpr const char* kNtpServer1 = "ntp.nict.jp";
 static constexpr const char* kNtpServer2 = "pool.ntp.org";
 static constexpr uint32_t kNtpStepThresholdSeconds = 5;
 
-// --- ビルド版数 ---
-// get_fw_version.py(platformio.ini の extra_scripts)がgitの短縮hashを注入する。
+// --- ビルド識別（docs/ota.md §2、pull型OTA） ---
+// NAMZ_FW_VERSIONはget_fw_version.py(pre extra_script)がgitの短縮hashを、
+// NAMZ_OTA_ENVは同スクリプトがenv名(piezo/piezo-provision)から一元的に
+// "piezo"を注入する（本線config.hと同じパターン）。
+#ifndef NAMZ_FW_VERSION
+#define NAMZ_FW_VERSION "unknown"
+#endif
+#ifndef NAMZ_OTA_ENV
+#define NAMZ_OTA_ENV "unknown"
+#endif
 static constexpr const char* kFwVersion = NAMZ_FW_VERSION;
+static constexpr const char* kOtaEnv = NAMZ_OTA_ENV;
