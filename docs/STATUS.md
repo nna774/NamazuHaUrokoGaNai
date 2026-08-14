@@ -22,6 +22,7 @@
 |---|---|---|---|
 | 1 | 湯沢-IIS3DHHC | IIS3DHHC | 実運用機（1号機）。設置場所は湯沢。下記「ハードウェア」節のスペックはこの機体のもの |
 | 2 | ADXL355-2号機 | ADXL355 | 実運用機（2号機）。ADXL355機の検証・展開は [adxl355.md](adxl355.md) 参照 |
+| 3 | ピエゾ実験機 | ピエゾブザー素子（保護回路経由でGPIO4、ESP32-C3スーパーミニ） | 実験機（3号機）。gal校正はせず「同時刻にバーストが立ったか」の一致だけを狙う補強検知。`sensor_type=SENSOR_TYPE_PIEZO(128)`は震度計算をスキップ（`128〜249`帯）。2026-08-12にphase1（クラウド統合）まで実機確認済み、`https://api.namazu.dark-kuins.net/devices/3`で稼働中。詳細は [piezo.md](piezo.md) 参照 |
 | 4294967295 | テスト機(newBatchプール検証用、使い捨て) | なし（FakeSensor） | 物理センサ未接続。newBatchバッファプール等の結合試験専用。device_idはuint32最大値をあえて使っている（実機と衝突しないsentinel）。ファームは`env:fake-sensor`系（`FakeSensor`が`sensorType()=255`を返し、ダッシュボードには「ダミー」と表示される）。event_id・device詳細APIがdevice_idを4桁固定で見ていたバグを2件踏んで直した実績あり（`docs/log/2026-08-11-event-api-rejects-uint32-max-device-id.md`ほか） |
 
 ## ハードウェア
