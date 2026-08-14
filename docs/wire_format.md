@@ -31,14 +31,14 @@ ESP32 → ingest Lambda に送るバイナリ。リトルエンディアン。
 | 0 | IIS3DHHC | 実装済み・稼働中（`kSensorIis3dhhc`） |
 | 1 | ADXL355 | 実装済み・稼働中（`kSensorAdxl355`。[docs/adxl355.md](adxl355.md)） |
 | 2 | LSM6DSO | `config.h`の`SensorType`enumに予約のみ（`kSensorLsm6dso`）。ドライバ未実装 |
-| 128 | PIEZO | 設計のみ、未実装（`SENSOR_TYPE_PIEZO`。[docs/piezo.md §7](piezo.md#7-phase1クラウド統合の設計方針未実装)） |
+| 128 | PIEZO | 実装済み・稼働中（`SENSOR_TYPE_PIEZO`。device_id=3。[docs/piezo.md §7](piezo.md#7-phase1クラウド統合)） |
 | 255 | FAKE | 結合試験用ダミー、実装済み（`firmware/lib/FakeSensor/`。本番機には含めないため`SensorType`enumには入れず直値`255`で定義） |
 
-### sensor_type の帯域（未実装、設計のみ）
+### sensor_type の帯域
 
-`sensor_type`(u8)は加速度センサチップの型番だけでなく、将来「加速度ではない・
-校正しない生値センサ」も同じフィールドに乗せる想定で帯域を切ってある
-（[docs/piezo.md §7](piezo.md#7-phase1クラウド統合の設計方針未実装)）:
+`sensor_type`(u8)は加速度センサチップの型番だけでなく、「加速度ではない・
+校正しない生値センサ」も同じフィールドに乗せる帯域を切ってある。ピエゾ実験機
+(device_id=3)で実装済み・稼働中（[docs/piezo.md §7](piezo.md#7-phase1クラウド統合)）:
 
 - `0〜127`: 加速度センサチップ（gal校正対象。`config.h`の`SensorType`enumと対応）
 - `128〜249`: 加速度ではない・非校正の生値センサ（例: `SENSOR_TYPE_PIEZO=128`）
@@ -46,7 +46,7 @@ ESP32 → ingest Lambda に送るバイナリ。リトルエンディアン。
 - `255`: `FAKE`（結合試験用ダミー、既存）
 
 detect Lambda等の物理量前提ロジックは、`128〜249`の範囲なら震度計算をスキップ
-する想定。**単純な「128以上ならスキップ」ではない**——`255`の`FAKE`は
+する（実装済み）。**単純な「128以上ならスキップ」ではない**——`255`の`FAKE`は
 IIS3DHHCと同じ換算でgal相当の値を実際に送る結合試験用センサ
 （`firmware/lib/FakeSensor/FakeSensor.h`）で、震度計算パイプライン自体を
 end-to-endで試す用途なので従来通り計算に掛ける。「センサの素性で読み手が
@@ -64,7 +64,7 @@ end-to-endで試す用途なので従来通り計算に掛ける。「センサ�
 
 物理量への変換: `accel_mg = raw_lsb * scale_mg_per_lsb`。
 gal (cm/s²) へは `accel_gal = accel_mg * 0.980665`。
-非校正の生値センサ(`sensor_type >= 128`)にはこの変換の意味が無い（[§sensor_typeの帯域](#sensor_type-の帯域未実装設計のみ)参照）。
+非校正の生値センサ(`sensor_type >= 128`)にはこの変換の意味が無い（[§sensor_typeの帯域](#sensor_type-の帯域)参照）。
 
 ## トレイラー (v2〜・省略可)
 

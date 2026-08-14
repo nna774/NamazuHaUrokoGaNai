@@ -1,4 +1,4 @@
-# 実装状況まとめ（2026-08-04 時点、ADXL355 2号機設置・検証開始）
+# 実装状況まとめ（2026-08-14 時点、ピエゾ実験機(device 3) phase1・OTA・欠測監視 稼働中）
 
 自宅地震計 NamazuHaUrokoGaNai の、実機立ち上げ〜クラウド〜可視化まで一通り動作した記録。
 
@@ -22,6 +22,7 @@
 |---|---|---|---|
 | 1 | 湯沢-IIS3DHHC | IIS3DHHC | 実運用機（1号機）。設置場所は湯沢。下記「ハードウェア」節のスペックはこの機体のもの |
 | 2 | ADXL355-2号機 | ADXL355 | 実運用機（2号機）。ADXL355機の検証・展開は [adxl355.md](adxl355.md) 参照 |
+| 3 | ピエゾ実験機 | ピエゾブザー素子（保護回路経由でGPIO4、ESP32-C3スーパーミニ） | 実験機（3号機）。gal校正はせず「同時刻にバーストが立ったか」の一致だけを狙う補強検知。`sensor_type=SENSOR_TYPE_PIEZO(128)`は震度計算をスキップ（`128〜249`帯）。2026-08-12にphase1（クラウド統合）まで実機確認済み、`https://api.namazu.dark-kuins.net/devices/3`で稼働中。詳細は [piezo.md](piezo.md) 参照 |
 | 4294967295 | テスト機(newBatchプール検証用、使い捨て) | なし（FakeSensor） | 物理センサ未接続。newBatchバッファプール等の結合試験専用。device_idはuint32最大値をあえて使っている（実機と衝突しないsentinel）。ファームは`env:fake-sensor`系（`FakeSensor`が`sensorType()=255`を返し、ダッシュボードには「ダミー」と表示される）。event_id・device詳細APIがdevice_idを4桁固定で見ていたバグを2件踏んで直した実績あり（`docs/log/2026-08-11-event-api-rejects-uint32-max-device-id.md`ほか） |
 
 ## ハードウェア
@@ -202,7 +203,6 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       検知して安全に再起動する（v1.4.0の`flushToSpill()`で通信完了を待たず数秒で
       再起動できるようになった）
 - [ ] （イベントが数万件規模になったら）DynamoDB時刻レンジGSIで本格ページング
-- [ ] ADXL355 2号機（device 0002）のセンサ検証・設置（進行中。2026-08-02基板着荷、ファーム/配線/初期確認済み。2026-08-03設置材料調達、エポキシ硬化待ち。next: [§6検証フロー](adxl355.md#6-検証-designmd-の不変条件)）
 
 ## 済んだ主な機能
 
@@ -211,4 +211,8 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
 Slack通知（閾値・エスカレーション・チャンネル設定・イベントリンク・太字修正）/
 ダッシュボード（URLルーティング・ページング・震度表示の一貫化・非該当フィルタ・
 情報パネル・縦軸固定レンジ・時刻目盛り・鮮度表示・適応更新間隔・デバイスタブ）/
-公開apiのセキュリティハードニング / 欠測監視（生存台帳＋watchdog＋復帰/再送通知）
+公開apiのセキュリティハードニング / 欠測監視（生存台帳＋watchdog＋復帰/再送通知・
+退役デバイスのmute） / OTA更新（HTTPSプル型、device1/2実機確認済み） /
+ADXL355 2号機の本運用化（[adxl355.md](adxl355.md)） / ピエゾ実験機(device 3)の
+phase1（クラウド統合、[piezo.md](piezo.md)） / 複数機の較正・重ね表示
+（[device_overlay.md](device_overlay.md)）
