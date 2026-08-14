@@ -5,7 +5,7 @@ pull型OTAはビルドバージョンの一致判定でトリガーするので�
 「どのコミットか」を自己申告できないと成立しない。作業ツリーが汚れていたら
 -dirtyを付け、未コミット状態を配布版として掴む事故に気付けるようにする。
 
-NAMZ_OTA_ENVは「センサ・ボードの組」を表す（esp32dev/adxl355）。platformio.ini側の
+NAMZ_OTA_ENVは「センサ・ボードの組」を表す（esp32dev/adxl355/piezo）。platformio.ini側の
 各envに`-DNAMZ_OTA_ENV=...`を個別に書くと、adxl355が`${env:esp32dev.build_flags}`
 ごと継承する際に二重定義警告が出るので、ここでenv名から一元的に決める。
 """
@@ -34,7 +34,11 @@ def _git_version() -> str:
 
 def _ota_env() -> str:
     pioenv = env["PIOENV"]
-    return "adxl355" if pioenv.startswith("adxl355") else "esp32dev"
+    if pioenv.startswith("adxl355"):
+        return "adxl355"
+    if pioenv.startswith("piezo"):
+        return "piezo"
+    return "esp32dev"
 
 
 env.Append(BUILD_FLAGS=[

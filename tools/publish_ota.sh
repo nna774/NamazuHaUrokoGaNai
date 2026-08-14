@@ -9,6 +9,7 @@
 # 使い方:
 #   tools/publish_ota.sh esp32dev   # IIS3DHHC機向け
 #   tools/publish_ota.sh adxl355    # ADXL355機向け
+#   tools/publish_ota.sh piezo      # ピエゾ実験機(device3)向け
 #   tools/publish_ota.sh esp32dev --allow-dirty   # 未コミットの変更があっても公開する
 #
 # 公開しただけでは配らない。実際にデバイスへ許可を出すには別途:
@@ -21,7 +22,7 @@ FIRMWARE_DIR="$ROOT/firmware"
 TERRAFORM_DIR="$ROOT/terraform"
 
 usage() {
-  echo "usage: $0 <esp32dev|adxl355> [--allow-dirty]" >&2
+  echo "usage: $0 <esp32dev|adxl355|piezo> [--allow-dirty]" >&2
   exit 1
 }
 
@@ -36,7 +37,7 @@ for arg in "$@"; do
   esac
 done
 case "$OTA_ENV" in
-  esp32dev|adxl355) ;;
+  esp32dev|adxl355|piezo) ;;
   *) usage ;;
 esac
 
