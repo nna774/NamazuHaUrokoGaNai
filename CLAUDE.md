@@ -16,13 +16,13 @@
 | いま何がどこまで動いているか・実機の検証結果・ハード配線 | [docs/STATUS.md](docs/STATUS.md) |
 | 実機のノイズ特性・検出限界・センサ選定の知見 | [docs/noise.md](docs/noise.md) |
 | 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
-| ADXL355機の追加計画（未着手） | [docs/adxl355.md](docs/adxl355.md) |
+| ADXL355機（device 2）の導入経緯・実装済み内容 | [docs/adxl355.md](docs/adxl355.md) |
 | ジオフォン(速度センサ)導入作戦（検討中・未着手） | [docs/geophone.md](docs/geophone.md) |
 | 安価な代替センサ(圧電等)による補強検知の構想（雑談ベース・未着手） | [docs/other-sensors.md](docs/other-sensors.md) |
 | ピエゾ加速度センサ実験機（着手・進行中） | [docs/piezo.md](docs/piezo.md) |
 | ファームのOTA更新（実装済み・実機確認済み。使い方は§0クイックリファレンス） | [docs/ota.md](docs/ota.md) |
 | コマンドラインからのリモート再起動要求（実装済み・実機確認待ち） | [docs/remote_restart.md](docs/remote_restart.md) |
-| デバイスの稼働時間・再起動検知の作戦（未着手） | [docs/uptime.md](docs/uptime.md) |
+| デバイスの稼働時間・再起動検知（実装済み・実機2台へロールアウト済み） | [docs/uptime.md](docs/uptime.md) |
 | 複数機の波形を重ねる（姿勢・方位・震度ビュー） | [docs/device_overlay.md](docs/device_overlay.md) |
 | ダッシュボードのURLハッシュルーティング（`#live?...`等の各パラメータ） | [dashboard/README.md](dashboard/README.md#urlハッシュルーティング) |
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
