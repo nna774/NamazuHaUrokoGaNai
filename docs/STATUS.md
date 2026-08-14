@@ -1,4 +1,4 @@
-# 実装状況まとめ（2026-08-04 時点、ADXL355 2号機設置・検証開始）
+# 実装状況まとめ（2026-08-14 時点、ピエゾ実験機(device 3) phase1・OTA・欠測監視 稼働中）
 
 自宅地震計 NamazuHaUrokoGaNai の、実機立ち上げ〜クラウド〜可視化まで一通り動作した記録。
 
@@ -203,7 +203,6 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       検知して安全に再起動する（v1.4.0の`flushToSpill()`で通信完了を待たず数秒で
       再起動できるようになった）
 - [ ] （イベントが数万件規模になったら）DynamoDB時刻レンジGSIで本格ページング
-- [ ] ADXL355 2号機（device 0002）のセンサ検証・設置（進行中。2026-08-02基板着荷、ファーム/配線/初期確認済み。2026-08-03設置材料調達、エポキシ硬化待ち。next: [§6検証フロー](adxl355.md#6-検証-designmd-の不変条件)）
 
 ## 済んだ主な機能
 
@@ -212,4 +211,8 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
 Slack通知（閾値・エスカレーション・チャンネル設定・イベントリンク・太字修正）/
 ダッシュボード（URLルーティング・ページング・震度表示の一貫化・非該当フィルタ・
 情報パネル・縦軸固定レンジ・時刻目盛り・鮮度表示・適応更新間隔・デバイスタブ）/
-公開apiのセキュリティハードニング / 欠測監視（生存台帳＋watchdog＋復帰/再送通知）
+公開apiのセキュリティハードニング / 欠測監視（生存台帳＋watchdog＋復帰/再送通知・
+退役デバイスのmute） / OTA更新（HTTPSプル型、device1/2実機確認済み） /
+ADXL355 2号機の本運用化（[adxl355.md](adxl355.md)） / ピエゾ実験機(device 3)の
+phase1（クラウド統合、[piezo.md](piezo.md)） / 複数機の較正・重ね表示
+（[device_overlay.md](device_overlay.md)）
