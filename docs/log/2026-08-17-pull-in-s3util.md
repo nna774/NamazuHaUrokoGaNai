@@ -25,8 +25,8 @@
 
 ## 次に何が可能になったか
 
-- batch-uplink側のPR #24がマージされ`v3.0.0`が打たれれば、`firmware/platformio.ini`と
-  `terraform/build_lambda.sh`の`UPLINK_VERSION`をv3.0.0へ上げられる(このレポはもう
-  `batch_uplink.s3util`をimportしていないので、上げても即座に壊れることはない)。
-  **マージ・タグ付けはユーザー側の作業として残っている。**
+- batch-uplink側のPR #24がマージされ`v3.0.0`が打たれたので(2026-08-17)、
+  `firmware/platformio.ini`と`terraform/build_lambda.sh`の`UPLINK_VERSION`もこのPRで
+  `v3.0.0`へ上げた。`.venv`へv3.0.0を試験インストールし、`s3util`がimportできなくなった
+  ことと`pytest lambda/tests`(139件)が引き続き通ることを確認済み。
 - Electabuzz側は元々`s3util`を使っていないので、pinの更新は向こう側の任意のタイミングでよい。
