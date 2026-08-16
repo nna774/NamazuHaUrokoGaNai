@@ -21,9 +21,9 @@ import time
 import boto3
 import numpy as np
 
-from batch_uplink import devices, s3util
+from batch_uplink import devices
 
-from common import device_temp, events, metrics, store, watchdog_mute, wire
+from common import device_temp, events, metrics, s3util, store, watchdog_mute, wire
 from jismo.rounding import intensity_scale
 
 s3 = boto3.client("s3")

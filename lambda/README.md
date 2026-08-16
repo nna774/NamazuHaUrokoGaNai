@@ -16,6 +16,7 @@ Python。計測震度は `tools/jismo`（FFT版・numpyのみ）を共有する�
 | module | 内容 |
 |--------|------|
 | `wire.py`        | バッチのバイナリ形式パース（firmware `lib/NamzWire/WireFormat.h` と一致） |
+| `s3util.py`      | S3キー組み立て・時間範囲の列挙。20桁ゼロ埋めで辞書順＝時系列順になる命名（旧`batch_uplink.s3util`。Electabuzzは保存方針が違うため独自の`s3keys.py`を持っており実質共有されていなかったので引き上げた） |
 | `store.py`       | raw/ からバッチを読み時間窓を連結 |
 | `detect_core.py` | 検知の純関数（jismo使用・副作用なし・バックテスト可能） |
 | `events.py`      | DynamoDBイベント管理（デバイス速報とクラウド確定報の突合・重複排除） |
@@ -32,7 +33,6 @@ Python。計測震度は `tools/jismo`（FFT版・numpyのみ）を共有する�
 | module | 内容 |
 |--------|------|
 | `auth.py`        | HMAC-SHA256 検証 |
-| `s3util.py`      | S3キー組み立て・時間範囲の列挙 |
 | `devices.py`     | デバイス生存台帳（ingestが最終受信をupsert・watchdogが欠測判定・apiが読む） |
 | `notify.py`      | Notifier差し替え（Slack初期実装。Discord等を足すなら from_env に分岐追加） |
 
