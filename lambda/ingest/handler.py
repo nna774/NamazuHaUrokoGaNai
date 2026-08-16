@@ -14,9 +14,10 @@ import time
 
 import boto3
 
-from batch_uplink import auth, devices, notify, s3util
+from batch_uplink import auth, devices, notify
 
-from common import device_meta, device_temp, events, metrics, ota_watch, watchdog_mute, wire
+from common import (device_meta, device_temp, events, metrics, ota_watch, s3util,
+                     watchdog_mute, wire)
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")

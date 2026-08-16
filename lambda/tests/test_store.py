@@ -8,9 +8,7 @@
 import numpy as np
 import pytest
 
-from batch_uplink import s3util
-
-from common import store, wire
+from common import s3util, store, wire
 
 
 class FakeS3:

@@ -41,9 +41,12 @@
 ## 知っておくべき不変条件
 
 - **送信基盤は [batch-uplink](https://github.com/nna774/batch-uplink) に切り出してある**。
-  C++ の `Batch`/`Uploader`/`TimeSync`、Python の `auth`/`devices`/`notify`/`s3util` は
+  C++ の `Batch`/`Uploader`/`TimeSync`、Python の `auth`/`devices`/`notify` は
   このレポには**もう無い**。周波数モニタ [Electabuzz](https://github.com/nna774/Electabuzz)
-  と共有している。
+  と共有している。**`s3util` は共有していない**——名目上はbatch-uplinkに切り出していたが、
+  Electabuzzは保存方針(prefix・lifecycle)が違うため最初から独自の`s3keys.py`を持っており
+  実際には使われていなかった。v3.0.0で`lambda/common/s3util.py`へ引き上げ済み
+  （→ [docs/log/2026-08-17-pull-in-s3util.md](docs/log/2026-08-17-pull-in-s3util.md)）。
   - **必ずタグで pin しろ。`#master` や `@master` にするな。** 向こうのために入れた変更が
     こちらの次回ビルドで黙って混入し、「何も変えていないのに再ビルドで壊れる」という
     最悪の壊れ方をする。版は `firmware/platformio.ini` の `lib_deps` と
