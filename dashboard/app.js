@@ -1096,6 +1096,13 @@ function renderEventInfo(m) {
   rows.push(['状態', eventStateLabel(m)]);
   rows.push(['検知経路', `${m.device_prompt ? '速報✓ ' : ''}${m.cloud_confirmed ? '確定✓' : ''}`.trim() || '—']);
   rows.push(['イベントID', m.event_id || '']);
+  if (m.related_events && m.related_events.length) {
+    const links = m.related_events.map(id => {
+      const dev = String(id).split('-', 1)[0];
+      return `<a href="#${eventHash(id)}">${dev}号機 (${escapeHtml(id)})</a>`;
+    }).join(' / ');
+    rows.push(['関連イベント（同一地震・他機）', links]);
+  }
   if (m.note) rows.push(['メモ', noteHtml(m.note)]);
   tbody.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 }

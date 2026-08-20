@@ -177,6 +177,7 @@ def _event(q):
     try:
         obj = s3.get_object(Bucket=BUCKET, Key=s3util.event_meta_key(eid))
         meta = json.loads(obj["Body"].read())
+        meta.setdefault("related_events", [])
         # 一覧と同じ effective_intensity に揃える（meta.jsonの値より優先）。
         item = events.get_event(eid)
         if item:
@@ -191,6 +192,8 @@ def _event(q):
             meta["manual"] = bool(item.get("manual"))
             # メモは DynamoDB を権威とする（meta.json の値より後の編集を優先）。
             meta["note"] = item.get("note", meta.get("note"))
+            # 他デバイスの同一地震イベントへの相互リンク（flag_event.py relate で設定）。
+            meta["related_events"] = list(item.get("related_events", []))
     except s3.exceptions.NoSuchKey:
         # 速報のみのイベントは波形コピーが無い。DynamoDBの情報だけ返す。
         item = events.get_event(eid)
@@ -211,6 +214,7 @@ def _event(q):
             "artificial": bool(item.get("artificial")),
             "manual": bool(item.get("manual")),
             "note": item.get("note"),  # ユーザーの自由記述メモ（無ければ null）
+            "related_events": list(item.get("related_events", [])),
         }
         return _json(200, {"meta": meta, "waveform": _waveform_payload(np.empty((0, 3)), meta["onset_us"], 100.0)})
     # 波形（events/<id>/*.bin を連結）
