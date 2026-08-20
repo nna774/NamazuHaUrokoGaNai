@@ -75,3 +75,20 @@ device3は生RMSが9.2gal（device1/2の1.7-1.4galと桁違い）でノイズフ
 - 203km・M3.5という条件は、`probable detection`できた161km・M3.8よりも遠くて
   小さい。検出限界のすぐ外側〜境界線上にある事例として、`docs/noise.md`
   「検出できた／できなかった」に追記した。
+
+## 手動イベント化
+
+raw の保持期限(90日)で消える前に、`tools/promote_event.py`で3機とも永久保存した
+（onset=14:29:40 JST、保存区間-60s〜+120s。S波到達予想窓14:29:23-36の直後を採用）。
+
+- device1: `0001-59573459`（震度0・I=-0.4・peak=0.290gal）
+- device2: `0002-59573459`（震度0・I=-0.5・peak=0.218gal）
+- device3: `0003-59573459`（非校正のピエゾ機のため震度計算は非適用・peak(raw)=320.677）
+
+device3は`promote_event.py`が3軸決め打ちで`IndexError`になるバグを踏んだため、
+`is_calibrated`ガード（`lambda/detect/handler.py`）と同じ発想で3軸未満は震度計算を
+スキップするよう先に直した（別トピックのため
+[PR #115](https://github.com/nna774/NamazuHaUrokoGaNai/pull/115)に分離、
+[log/2026-08-20-promote-event-piezo-axes-fix.md](2026-08-20-promote-event-piezo-axes-fix.md)）。
+
+`manual: true`で記録され、ダッシュボード一覧の既定表示にも出る。
