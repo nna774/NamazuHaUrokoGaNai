@@ -83,6 +83,11 @@ python flag_event.py relate 0001-59462454 0002-59462111 0003-59462999  # 3件以
 python flag_event.py unrelate 0001-59462454 0002-59462111              # 指定した組だけ解除
 ```
 
+**運用方針（当面）: 実際の地震で1台だけが自動検知した場合、他機は `promote_event.py` で
+手動昇格させた上で `relate` で繋げる。** 全機の波形を検知時に自動でコピーする仕組みは
+今は作っていない（経緯は
+[docs/log/2026-08-20-relate-events-across-devices.md](../docs/log/2026-08-20-relate-events-across-devices.md)）。
+
 `promote_event.py` は、自動検知に満たない弱い揺れや振り返りたい時間帯を、raw の保持期限
 （90日）で消える前に手動で events/ へ昇格（永久保存）する。`manual` フラグが立ち、一覧の
 既定にも確定と同格で出る。保存区間から計測震度も計算して記録する。
