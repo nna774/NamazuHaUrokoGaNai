@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-22 | **`notify_prompt_min`(k)を3.0→1.0、`notify_confirm_min`(l)を1.5→0.5へ引き下げた。** コンクリブロック固定後の背景ノイズ実測(震度階級「0」未満に一度も届かない)を踏まえ、ユーザー要望に沿って閾値を下げた。コード側(default・ドキュメント)のみで、実際の反映には`terraform apply`が別途必要 | [log/2026-08-22-lower-notify-thresholds.md](log/2026-08-22-lower-notify-thresholds.md) |
 | 2026-08-22 | **`docs/progress.md`への並行追記が毎回コンフリクトしていたのを`.gitattributes`の`merge=union`で解消した。** トレードオフとして「新しいものが上」の厳密な日付順は保証されなくなった（気になったら手動でソートし直す運用に緩めた） | [log/2026-08-22-progress-md-union-merge.md](log/2026-08-22-progress-md-union-merge.md) |
 | 2026-08-22 | **固定後の背景ノイズが到達する計測震度を実データで測り、`notify_prompt_min`/`notify_confirm_min`を下げる余地を確認した(値の変更はまだ未適用)。** `.s3cache`に残っていた device1/2 固定後約36時間分から、120秒窓(確定報相当)・60秒窓(速報相当)のFFT計測震度を継続時間フィルタ無しで算出したところ、両機とも震度階級「0」(0.5未満)に一度も届かなかった(90%タイル・maxとも-0.4〜-0.8)。現行の`k=3.0`/`l=1.5`には遥かに届いていない。`notify_confirm_min≈0.7`・`notify_prompt_min≈1.5`あたりを目安として提案。ただし通知閾値を下げても`cloud_confirmed`自体が立たない(HOLD_SECONDS未達の)ケースは拾えないままである点は別問題として明記した | [log/2026-08-22-notify-threshold-noise-floor-investigation.md](log/2026-08-22-notify-threshold-noise-floor-investigation.md) |
 | 2026-08-21 | **速報のみ(cloud_confirmed=false)で終わったイベントを人力で既定表示へ昇格させる`flag_event.py confirm`/`unconfirm`を追加した。** 既存の`manual`フィールド（`events.list_page`が`cloud_confirmed`と同格に扱う）を、`promote_event.py`の新規作成時点だけでなく既存イベントにも事後で立てられるようにした | [log/2026-08-21-hold-seconds-review-after-concrete-mounting.md](log/2026-08-21-hold-seconds-review-after-concrete-mounting.md) |
