@@ -148,9 +148,9 @@ def fit_relative_azimuth(ref: DeviceCal, other: DeviceCal) -> tuple[float, float
 
 def load_calibrations(events_table, bucket: str, eids: list[str]) -> list[DeviceCal]:
     from common import store
-    import boto3
+    import s3cache
 
-    s3 = boto3.client("s3")
+    s3 = s3cache.cached_client()
     cals = []
     seen_devices: set[int] = set()
     for eid in eids:
