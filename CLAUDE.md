@@ -143,7 +143,7 @@ aws cloudfront create-invalidation \
 既存ファイルを書き換えて履歴を消すな。
 
 1. `docs/log/YYYY-MM-DD-<slug>.md` を新規作成する（1セッション・1トピックで1本）
-2. **[docs/progress.md](docs/progress.md) の表に1行追記する**（新しいものが上。1〜3文の要約 + ログへのリンク）
+2. **[docs/progress.md](docs/progress.md) の表に1行追記する**（1〜3文の要約 + ログへのリンク。並行セッションのコンフリクトを避けるため`.gitattributes`で`merge=union`を設定してある——厳密な日付順が崩れることがあるが気にしなくてよい）
 3. 設計判断が変わったなら、**該当する `docs/*.md`（または `CLAUDE.md`）本体も同じコミットで直す。**
    ログは経緯、本体は現在の結論。**両者が食い違ったら本体を正とする**
 
