@@ -276,34 +276,33 @@ python tenki_view.py <URL> --dry-run   # 実行せず組み立てたコマンド
 確定前の速報ページは緯度経度が「---」で取れないことがあり、その時は確定を待つか
 `detectlab.py` に手で `--eew` を渡す。HTML取得は標準ライブラリ（追加依存なし）。
 
-## 何度も条件を変えて解析するときのS3キャッシュ（`tools/s3cache.py`）
+## S3から読む時は常にs3cache（`tools/s3cache.py`）
 
-ノイズフロア比較・スパイク検出のように `common.store.load_window` 等で数時間〜1日ぶんの
-raw窓をS3から取ってきて、閾値や帯域を変えながら何度も試したくなる解析をするときは、
-raw batchをリポジトリ直下の `.s3cache/`（gitignore対象）にキャッシュしてから使うこと。
-S3取得自体は安い（30秒バッチ単位のGET数千回・数十MBで数円以下）が、同じバッチを何度も
-取り直すのは無駄で遅い。
-
-このためのキャッシュ付きS3クライアントは `tools/s3cache.py` に用意してある
-（都度スクラッチで書き直さない。以前は解析のたびに同じラッパーを書いていたが
-`detectlab.py`組み込みを機に1本化した）。
+**tools/配下でS3から読む（`list_objects_v2`/`get_object`）コードは、生の
+`boto3.client("s3")`を自作せず常に`tools/s3cache.py`を使うこと。** raw batch・event
+batchは書き込み後不変なので、1回しか使わないつもりの解析でもキャッシュして損は無い
+（都度スクラッチで同じラッパーを書き直していたのを、`detectlab.py`組み込みを機に
+1本化した）。
 
 ```python
 import s3cache
-s3 = s3cache.cached_client()  # store.load_window 等にそのまま渡せる
+s3 = s3cache.cached_client()  # store.load_window / load_event にそのまま渡せる
 ```
 
+- **書き込み(`put_object`/`copy_object`)には使えない**。`CachedS3`は読み取り2メソッド
+  (`list_objects_v2`/`get_object`)しか実装していない。`promote_event.py`のように
+  S3へ書くツールは、書き込み用に生の`boto3.client("s3")`をそのまま使うこと（読み取り
+  箇所だけs3cacheに差し替えるのは構わない）。
 - **object keyをそのままローカルパスにミラーする**（`.s3cache/raw/.../<device>-<startus>.bin`
   のように、S3のKeyをそのまま`.s3cache/`の下にぶら下げる）。`start_us`/`end_us` で丸ごと切った窓単位で
   キャッシュすると、窓をわずかにずらしただけで丸ごと引き直しになる。バッチ(30秒粒度)単位で
   キャッシュすれば、窓が重なっている限り差分だけ取得すれば済む。
 - キャッシュするのは `get_object` だけ（`list_objects_v2` は毎回本物のS3へ通す。新着を
-  見逃さないためコストもほぼ無い）。raw batchは書き込み後不変なので安全。
+  見逃さないためコストもほぼ無い）。
 - worktreeで作業していても `.s3cache/` は**メインチェックアウト側の絶対パス**を指す
   （`git rev-parse --git-common-dir` の親を使う。worktreeごとに毎回別ディレクトリだと
   キャッシュが効かない）。
-- `detectlab.py` は既定でこれを使う（`--no-cache`で生のboto3に戻せる）。新しいスクラッチ
-  解析を書くときも、S3クライアントを自作せずこれを import すること。
+- `detectlab.py` は既定でこれを使う（`--no-cache`で生のboto3に戻せる）。
 
 ## テスト
 

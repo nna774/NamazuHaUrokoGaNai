@@ -102,12 +102,16 @@ def main(argv=None) -> int:
     awsenv.ensure_region()  # 手順書は AWS_REGION、boto3 が見るのは AWS_DEFAULT_REGION
 
     import boto3
+    import s3cache
     from common import detect_core, events, s3util, store
     from jismo import jma_fft
     from jismo.rounding import intensity_scale
 
     bucket = resolve_bucket(args.bucket)
-    s3 = boto3.client("s3")
+    # 読み取り(list_raw_keys_in_range/load_window)はキャッシュ付き、書き込み
+    # (copy_object/put_object、CachedS3は未実装)は生のクライアントで分ける。
+    s3 = s3cache.cached_client()
+    s3_write = boto3.client("s3")
 
     onset_us = parse_jst(args.onset)
     start_us = int(onset_us - args.pre * 1e6)
@@ -152,7 +156,7 @@ def main(argv=None) -> int:
     if not args.yes and not _confirm("この内容で events/ へ昇格して保存するか?"):
         raise SystemExit("中止した")
 
-    copied = store.copy_raw_to_event(s3, bucket, eid, start_us, end_us, device_id)
+    copied = store.copy_raw_to_event(s3_write, bucket, eid, start_us, end_us, device_id)
     meta = {
         "event_id": eid, "device_id": device_id, "onset_us": onset_us,
         "max_intensity": res.intensity, "scale": intensity_scale(res.intensity),
@@ -160,9 +164,9 @@ def main(argv=None) -> int:
     }
     if args.note:
         meta["note"] = args.note
-    s3.put_object(Bucket=bucket, Key=s3util.event_meta_key(eid),
-                  Body=json.dumps(meta, ensure_ascii=False).encode(),
-                  ContentType="application/json")
+    s3_write.put_object(Bucket=bucket, Key=s3util.event_meta_key(eid),
+                        Body=json.dumps(meta, ensure_ascii=False).encode(),
+                        ContentType="application/json")
     events.record_manual_event(device_id, onset_us, res.intensity, peak_gal,
                                waveform_prefix=f"{s3util.EVENTS_PREFIX}/{eid}/",
                                note=args.note)
