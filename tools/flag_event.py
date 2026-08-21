@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""確定済みイベントに人工地震（テスト等）フラグを立てる/降ろす手元用CLI。
+"""確定済みイベントに人工地震（テスト等）フラグを立てる/降ろす・メモを付ける・
+複数デバイスのイベントを同一地震として相互リンクする手元用CLI。
 
 ダッシュボードの読み取りAPIは認証なし・参照専用なので、書き込み（フラグ操作）は
 手元マシンからAWS認証情報で DynamoDB を直接更新するこのツールで行う。
@@ -29,6 +30,12 @@
 
     # 現在フラグの立っているイベントを一覧
     python flag_event.py list
+
+    # 同じ地震について複数デバイスのイベントを相互リンクする（3件以上も可、和集合で束ねる）
+    python flag_event.py relate 0001-59462454 0002-59462111 0003-59462999
+
+    # リンクを外す（指定した組み合わせだけ解除。他の関連は残る）
+    python flag_event.py unrelate 0001-59462454 0002-59462111
 """
 
 from __future__ import annotations
@@ -169,6 +176,58 @@ def cmd_note(args):
     print(f"メモを設定: {args.event_id}  「{text}」")
 
 
+def _get_related(table, eid: str) -> list[str]:
+    item = table.get_item(Key={"event_id": eid}).get("Item")
+    if item is None:
+        sys.exit(f"イベントが見つからない: {eid}")
+    return list(item.get("related_events", []))
+
+
+def cmd_relate(args):
+    """複数のイベントを「同じ地震」として相互リンクする（対称・和集合）。
+
+    手動でイベント化する運用が主なので、自動で他機の波形を確保する仕組み
+    （検討したが保留）の代わりに、まず人力でリンクだけ張れるようにする。
+    """
+    table = _table(args.table)
+    ids = args.event_id
+    for eid in ids:
+        if not EVENT_ID_RE.fullmatch(eid):
+            sys.exit(f"event_id の書式が不正: {eid}")
+    if len(ids) < 2:
+        sys.exit("2件以上指定しろ")
+    for eid in ids:
+        others = {i for i in ids if i != eid}
+        current = set(_get_related(table, eid))
+        merged = sorted(current | others)
+        table.update_item(
+            Key={"event_id": eid},
+            UpdateExpression="SET related_events = :v",
+            ExpressionAttributeValues={":v": merged},
+        )
+    print(f"相互リンク: {len(ids)} 件 完了")
+
+
+def cmd_unrelate(args):
+    """指定した組み合わせだけリンクを解除する（他のイベントとのリンクは残る）。"""
+    table = _table(args.table)
+    ids = args.event_id
+    for eid in ids:
+        if not EVENT_ID_RE.fullmatch(eid):
+            sys.exit(f"event_id の書式が不正: {eid}")
+    if len(ids) < 2:
+        sys.exit("2件以上指定しろ")
+    idset = set(ids)
+    for eid in ids:
+        remaining = sorted(i for i in _get_related(table, eid) if i not in idset)
+        table.update_item(
+            Key={"event_id": eid},
+            UpdateExpression="SET related_events = :v",
+            ExpressionAttributeValues={":v": remaining},
+        )
+    print(f"リンク解除: {len(ids)} 件 完了")
+
+
 def cmd_list(args):
     table = _table(args.table)
     items = [it for it in _scan_all(table) if it.get("artificial")]
@@ -208,6 +267,12 @@ def main(argv=None):
     sn.add_argument("text", nargs="*", help="メモ本文（複数語はスペース連結）")
     sn.add_argument("--clear", action="store_true", help="メモを削除する")
 
+    for name, help_ in (("relate", "複数イベントを同じ地震として相互リンクする"),
+                        ("unrelate", "指定した組み合わせのリンクを解除する")):
+        sr = sub.add_parser(name, help=help_)
+        sr.add_argument("event_id", nargs="+",
+                        help="対象の event_id を2件以上（スペース区切り）")
+
     args = p.parse_args(argv)
     if not args.table:
         sys.exit("テーブル名が未指定。--table か環境変数 NAMZ_EVENTS_TABLE を設定しろ")
@@ -220,6 +285,10 @@ def main(argv=None):
         cmd_list(args)
     elif args.cmd == "note":
         cmd_note(args)
+    elif args.cmd == "relate":
+        cmd_relate(args)
+    elif args.cmd == "unrelate":
+        cmd_unrelate(args)
 
 
 if __name__ == "__main__":
