@@ -133,20 +133,31 @@ def main(argv=None) -> int:
 
     gal, win_start, fs = store.load_window(s3, bucket, end_us, (end_us - start_us) / 1e6,
                                            device_id)
-    # 端の扱いを detect Lambda と揃える。ここがずれると手動昇格と自動確定で
-    # 同じ波形から違う震度が出る。
-    comp = jma_fft.filtered_composite(gal[:, 0], gal[:, 1], gal[:, 2], fs)
-    comp = comp[detect_core.core_slice(comp.size, fs)]
-    res = jma_fft.intensity_from_composite(comp, fs)
-    peak_gal = float(np.max(comp)) if comp.size else 0.0
+    if gal.shape[1] >= 3:
+        # 端の扱いを detect Lambda と揃える。ここがずれると手動昇格と自動確定で
+        # 同じ波形から違う震度が出る。
+        comp = jma_fft.filtered_composite(gal[:, 0], gal[:, 1], gal[:, 2], fs)
+        comp = comp[detect_core.core_slice(comp.size, fs)]
+        res = jma_fft.intensity_from_composite(comp, fs)
+        intensity, a0 = res.intensity, res.a0
+        peak_gal = float(np.max(comp)) if comp.size else 0.0
+    else:
+        # 非校正の生値センサ(ピエゾ等)はgal前提の震度計算に掛けられない
+        # (lambda/detect/handler.pyのis_calibratedガードと同じ理由)。波形の永久保存だけ行う。
+        intensity, a0 = 0.0, 0.0
+        peak_gal = float(np.max(np.abs(gal))) if gal.size else 0.0
     eid = events.event_id(device_id, onset_us)
 
     ot = datetime.fromtimestamp(onset_us / 1e6, JST)
     print(f"# event_id={eid}  device={device_id}")
     print(f"# onset={ot:%Y-%m-%d %H:%M:%S JST}  保存区間 -{args.pre:g}s〜+{args.post:g}s"
           f"  rawバッチ {len(keys)} 個")
-    print(f"# 計測震度 I={res.intensity:.1f}（震度{intensity_scale(res.intensity)}）"
-          f"  peak={peak_gal:.3f}gal  a0={res.a0:.4f}gal")
+    if gal.shape[1] >= 3:
+        print(f"# 計測震度 I={intensity:.1f}（震度{intensity_scale(intensity)}）"
+              f"  peak={peak_gal:.3f}gal  a0={a0:.4f}gal")
+    else:
+        print(f"# 非校正センサ(axes={gal.shape[1]})のため計測震度は計算不可。"
+              f"peak(raw)={peak_gal:.3f}  波形のみ保存する")
     if args.note:
         print(f"# note: {args.note}")
 
@@ -159,15 +170,15 @@ def main(argv=None) -> int:
     copied = store.copy_raw_to_event(s3_write, bucket, eid, start_us, end_us, device_id)
     meta = {
         "event_id": eid, "device_id": device_id, "onset_us": onset_us,
-        "max_intensity": res.intensity, "scale": intensity_scale(res.intensity),
-        "peak_gal": peak_gal, "a0_gal": res.a0, "manual": True,
+        "max_intensity": intensity, "scale": intensity_scale(intensity),
+        "peak_gal": peak_gal, "a0_gal": a0, "manual": True,
     }
     if args.note:
         meta["note"] = args.note
     s3_write.put_object(Bucket=bucket, Key=s3util.event_meta_key(eid),
                         Body=json.dumps(meta, ensure_ascii=False).encode(),
                         ContentType="application/json")
-    events.record_manual_event(device_id, onset_us, res.intensity, peak_gal,
+    events.record_manual_event(device_id, onset_us, intensity, peak_gal,
                                waveform_prefix=f"{s3util.EVENTS_PREFIX}/{eid}/",
                                note=args.note)
     print(f"昇格完了: {eid}  波形{copied}バッチを events/ へ保存、DynamoDBに記録(manual)")
