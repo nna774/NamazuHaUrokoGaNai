@@ -87,14 +87,14 @@ variable "detect_stride_seconds" {
 
 variable "notify_prompt_min" {
   type        = number
-  default     = 3.0
-  description = "デバイス速報を通知する最小計測震度(k)。確定報の閾値(l)より高くする。"
+  default     = 1.0
+  description = "デバイス速報を通知する最小計測震度(k)。確定報の閾値(l)より高くする。2026-08-22、両機のコンクリブロック固定後の実データ(約36時間)で背景ノイズが震度階級「0」(0.5未満)にすら届かないと確認した上で3.0から引き下げた（docs/log/2026-08-22-notify-threshold-noise-floor-investigation.md）。"
 }
 
 variable "notify_confirm_min" {
   type        = number
-  default     = 1.5
-  description = "確定報を通知する最小計測震度(l)。k > l。"
+  default     = 0.5
+  description = "確定報を通知する最小計測震度(l)。k > l。2026-08-22、notify_prompt_minと同じ実データに基づき1.5から引き下げた（docs/log/2026-08-22-notify-threshold-noise-floor-investigation.md）。"
 }
 
 variable "offline_after_seconds" {
