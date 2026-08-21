@@ -94,23 +94,29 @@ def resolve_bucket(explicit: str | None) -> str:
         )
 
 
+def _s3_client(use_cache: bool):
+    """band/threshold/windowを変えながら同じ区間を何度も読み直す解析なので、既定で
+    `s3cache`(tools/README.md「S3キャッシュ」参照)を使う。`--no-cache`で生のboto3に戻せる。"""
+    import awsenv
+    awsenv.ensure_region()
+    if not use_cache:
+        import boto3
+        return boto3.client("s3")
+    import s3cache
+    return s3cache.cached_client()
+
+
 def load_s3_window(bucket: str, end_us: int, seconds: float,
-                   device_id: int) -> tuple[np.ndarray, int, float]:
+                   device_id: int, use_cache: bool = True) -> tuple[np.ndarray, int, float]:
     from common import store  # 遅延import。CSV経路ではboto3/AWSに触れない。
-    import awsenv
-    import boto3
 
-    awsenv.ensure_region()
-    return store.load_window(boto3.client("s3"), bucket, end_us, seconds, device_id)
+    return store.load_window(_s3_client(use_cache), bucket, end_us, seconds, device_id)
 
 
-def load_s3_event(bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
+def load_s3_event(bucket: str, eid: str, use_cache: bool = True) -> tuple[np.ndarray, int, float]:
     from common import store
-    import awsenv
-    import boto3
 
-    awsenv.ensure_region()
-    return store.load_event(boto3.client("s3"), bucket, eid)
+    return store.load_event(_s3_client(use_cache), bucket, eid)
 
 
 # ---- 信号処理 -----------------------------------------------------------
@@ -471,6 +477,9 @@ def main() -> int:
                         "（--at/--at-us 限定。STA/LTA・直線性という回転不変量だけを重ねるので"
                         "方位較正なしで比較できる）")
     p.add_argument("--bucket", help="rawバケット名（既定は NAMZ_RAW_BUCKET / terraform）")
+    p.add_argument("--no-cache", action="store_true",
+                   help="S3から毎回取り直す（既定は.s3cache/でget_objectをキャッシュ。"
+                        "raw batchは書き込み後不変なので通常は付けなくてよい）")
     p.add_argument("--out", help="図の保存先PNG（無指定なら画面表示）")
     p.add_argument("--dump-csv", dest="dump", help="取得した生窓をCSV保存（再利用用）")
     p.add_argument("--show", action="store_true", help="--out 指定時も画面表示する")
@@ -537,7 +546,8 @@ def main() -> int:
         data, start_us, fs = load_csv(args.csv)
         device_id = None  # CSVは任意データなので--deviceの既定値は意味を持たない
     elif args.event:
-        data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), args.event)
+        data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), args.event,
+                                          use_cache=not args.no_cache)
         device_id = int(args.event.split("-", 1)[0])  # event_id先頭4桁=device
     else:
         device_id = args.device[0]
@@ -550,7 +560,8 @@ def main() -> int:
             per_device = []
             bucket = resolve_bucket(args.bucket)
             for dev in args.device:
-                d_data, d_start, d_fs = load_s3_window(bucket, end_us, seconds, dev)
+                d_data, d_start, d_fs = load_s3_window(bucket, end_us, seconds, dev,
+                                                       use_cache=not args.no_cache)
                 if d_data.shape[0] == 0:
                     raise SystemExit(f"device {dev}: 波形が空。時刻・データ保持期間を確認しろ。")
                 d_band, d_ratio, d_onsets, d_rect, d_vec = analyze(
@@ -569,7 +580,7 @@ def main() -> int:
             return 0
 
         data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
-                                            device_id)
+                                            device_id, use_cache=not args.no_cache)
 
     n = data.shape[0]
     if n == 0:
