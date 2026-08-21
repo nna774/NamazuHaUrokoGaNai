@@ -88,6 +88,17 @@ python flag_event.py unrelate 0001-59462454 0002-59462111              # 指定�
 今は作っていない（経緯は
 [docs/log/2026-08-20-relate-events-across-devices.md](../docs/log/2026-08-20-relate-events-across-devices.md)）。
 
+速報(device_prompt)は複数機とも自動で拾えたのに、`cloud_confirmed`の継続時間条件
+（`HOLD_SECONDS`、`docs/design.md`「生活振動の除去」）に届かず一覧の既定から
+隠れることがある。事後解析（`detectlab.py`等）で本物の地震と判断できたら、
+`promote_event.py`を使わず既存イベントのまま`confirm`で`manual`フィールドを立てて
+既定表示へ昇格できる。
+
+```bash
+python flag_event.py confirm 0001-59577127 0002-59577127   # 一覧の既定表示に出す
+python flag_event.py unconfirm 0001-59577127               # 取り消す
+```
+
 `promote_event.py` は、自動検知に満たない弱い揺れや振り返りたい時間帯を、raw の保持期限
 （90日）で消える前に手動で events/ へ昇格（永久保存）する。`manual` フラグが立ち、一覧の
 既定にも確定と同格で出る。保存区間から計測震度も計算して記録する。

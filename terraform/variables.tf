@@ -69,8 +69,9 @@ variable "detect_threshold" {
 }
 
 variable "detect_hold_seconds" {
-  type    = number
-  default = 2.0
+  type        = number
+  default     = 0.3
+  description = "確定報の閾値超過に必要な最小継続秒数。生活振動除け(design.md「生活振動の除去」)。2026-08-21、両機のコンクリブロック固定後の実データ(約30時間、日中2日+夜間1晩)で閾値(0.603gal)超過が1件も無いと確認した上で2.0から引き下げた（docs/log/2026-08-21-hold-seconds-review-after-concrete-mounting.md）。生活振動が再び閾値を超えるようになったら見直すこと。"
 }
 
 variable "detect_window_seconds" {

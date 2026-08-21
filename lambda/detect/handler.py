@@ -26,7 +26,7 @@ BUCKET = os.environ["NAMZ_BUCKET"]
 
 WINDOW_SECONDS = float(os.environ.get("NAMZ_DETECT_WINDOW_S", "120"))
 THRESHOLD = float(os.environ.get("NAMZ_DETECT_THRESHOLD", "0.5"))
-HOLD_SECONDS = float(os.environ.get("NAMZ_DETECT_HOLD_S", "2.0"))
+HOLD_SECONDS = float(os.environ.get("NAMZ_DETECT_HOLD_S", "0.3"))
 # 窓の再評価をこの秒数の刻みまで間引く（0 = バッチ到着ごとに毎回評価する従来動作）。
 # バッチ長を短くすると「起動回数」と「1回に読むオブジェクト数」が両方増え、S3 GET が
 # 長さの二乗で効く。刻みを転送の都合から切り離すための設定。

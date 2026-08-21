@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """確定済みイベントに人工地震（テスト等）フラグを立てる/降ろす・メモを付ける・
-複数デバイスのイベントを同一地震として相互リンクする手元用CLI。
+複数デバイスのイベントを同一地震として相互リンクする・速報のみのイベントを
+人力で確定扱いに昇格させる、手元用CLI。
 
 ダッシュボードの読み取りAPIは認証なし・参照専用なので、書き込み（フラグ操作）は
 手元マシンからAWS認証情報で DynamoDB を直接更新するこのツールで行う。
@@ -8,6 +9,11 @@
 人工地震フラグを立てたイベントは、イベント一覧の既定では隠れ（「全件」表示にした
 ときだけ非該当と同じように薄く出る）、詳細ページで「人工地震（テスト等）」と表示される。
 震度などの値や確定/未確定の状態は変えない。
+
+`confirm`は逆に、cloud_confirmedに届かず一覧の既定で隠れている速報のみの
+イベントを、事後解析等で人力が「本物の地震」と判断した後に既定表示へ出す
+（`manual`フィールドを立てる。`promote_event.py`が新規イベント作成時に
+立てるのと同じ値で、既存のイベントを後から昇格させる版）。
 
 使い方（AWS認証情報とリージョンは通常のboto3の解決に従う）:
 
@@ -36,6 +42,13 @@
 
     # リンクを外す（指定した組み合わせだけ解除。他の関連は残る）
     python flag_event.py unrelate 0001-59462454 0002-59462111
+
+    # 速報のみ(cloud_confirmed=false)で終わったイベントを、人力で「本物の地震」と
+    # 判断した後に一覧の既定表示へ昇格させる（`manual`フィールドを立てる。
+    # promote_event.pyが新規イベント作成時に立てるのと同じ値で、既存イベントを
+    # 後から昇格させる用）
+    python flag_event.py confirm 0001-59462454
+    python flag_event.py unconfirm 0001-59462454
 """
 
 from __future__ import annotations
@@ -77,10 +90,11 @@ def _scan_all(table) -> list[dict]:
     return out
 
 
-def _set(table, eid: str, value: bool) -> None:
+def _set_field(table, eid: str, field: str, value: bool) -> None:
     table.update_item(
         Key={"event_id": eid},
-        UpdateExpression="SET artificial = :v",
+        UpdateExpression="SET #f = :v",
+        ExpressionAttributeNames={"#f": field},
         ExpressionAttributeValues={":v": bool(value)},
     )
 
@@ -147,8 +161,23 @@ def cmd_mark(args, value: bool):
         if not _confirm("実行するか?"):
             sys.exit("中止した")
     for eid in ids:
-        _set(table, eid, value)
+        _set_field(table, eid, "artificial", value)
     print(f"{verb}: {len(ids)} 件 完了")
+
+
+def cmd_confirm(args, value: bool):
+    """速報のみ(cloud_confirmed=false)で終わったイベントを、事後解析などで人力で
+    「本物の地震」と判断した後に一覧の既定表示へ出す（`manual`フィールドを立てる。
+    `events.list_page`は`manual`を`cloud_confirmed`と同格に扱う）。
+    """
+    table = _table(args.table)
+    for eid in args.event_id:
+        if not EVENT_ID_RE.fullmatch(eid):
+            sys.exit(f"event_id の書式が不正: {eid}")
+    verb = "確定扱いにする(manual=true)" if value else "確定扱いを外す(manual=false)"
+    for eid in args.event_id:
+        _set_field(table, eid, "manual", value)
+    print(f"{verb}: {len(args.event_id)} 件 完了")
 
 
 def cmd_note(args):
@@ -273,6 +302,12 @@ def main(argv=None):
         sr.add_argument("event_id", nargs="+",
                         help="対象の event_id を2件以上（スペース区切り）")
 
+    for name, help_ in (("confirm", "速報のみのイベントを人力で確定扱いにする(manual=true)"),
+                        ("unconfirm", "confirmで立てたmanualフラグを降ろす")):
+        sc = sub.add_parser(name, help=help_)
+        sc.add_argument("event_id", nargs="+",
+                        help="対象の event_id（スペース区切りで複数指定可）")
+
     args = p.parse_args(argv)
     if not args.table:
         sys.exit("テーブル名が未指定。--table か環境変数 NAMZ_EVENTS_TABLE を設定しろ")
@@ -289,6 +324,10 @@ def main(argv=None):
         cmd_relate(args)
     elif args.cmd == "unrelate":
         cmd_unrelate(args)
+    elif args.cmd == "confirm":
+        cmd_confirm(args, True)
+    elif args.cmd == "unconfirm":
+        cmd_confirm(args, False)
 
 
 if __name__ == "__main__":
