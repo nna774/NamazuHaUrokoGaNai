@@ -116,6 +116,15 @@ python promote_event.py --onset "2026-07-28 16:29:00" --dry-run   # 書き込ま
 計測震度）を確認してから実行するのが安全。書き込み系なので api(参照専用)ではなく手元から
 S3/DynamoDB を直接操作する（`flag_event.py` と同じ思想）。
 
+**`--post`は余裕を持って長めに取ること。** 揺れが収まったように見える時刻の後も、
+振幅としては目立たない後続波（コーダ）がしばらく続くことがある（2026-08-23のM5.9で
+`detectlab.py`の直線性一致度パネル（`--corr-win`）を使って確認したところ、STA/LTAが
+下がった後もdevice間のコヒーレンスは2分近く残っていた。振幅ベースの見た目だけで
+「収まった」と判断すると後半を切り捨てやすい）。迷ったら`--post 300`〜`600`程度まで
+広げておく方が安全——raw保持期間内なら後から`--pre`/`--post`を広げて撮り直せるが、
+保持期限を過ぎると二度と取れない。detect Lambda側の自動確定も同じ理由で
+`POST_SECONDS`を600秒にしている（`docs/log/2026-08-23-event-post-window-extension.md`）。
+
 ## 複数機の傾き・相対方位較正（`calibrate_orientation.py`）
 
 [device_overlay.md](../docs/device_overlay.md) §3.b の実装。据え付け直後に複数機を
