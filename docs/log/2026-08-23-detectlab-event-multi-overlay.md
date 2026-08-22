@@ -22,24 +22,33 @@ onset時刻をDynamoDBで手引きしてJSTに変換するひと手間が要っ�
 - `--at`側の重ね描きループと`--event`側の重ね描きループで「解析→レポート→dump→
   `plot_overlay`向けタプル化」の処理が完全に同じだったため、`overlay_source()`
   ヘルパーに切り出して共有した。
+- **`--event`に裸のバケット番号（event_idの`-`より後ろ、例`59577127`）を渡せる
+  ようにした。** `expand_event_ids()`が`--device`と組んで`0001-59577127`のような
+  完全なevent_idへ展開する。同一地震なら関連イベントは大抵同じ30秒バケットに
+  乗る（`events.event_id`のバケット幅）ので、`--event 59577127 --device 1 2`
+  だけで済むことが多い。`-`を含む値（既に完全なID）はそのまま通すので、バケットが
+  ズレている機体だけ完全なIDを個別に書いて混在させられる。
 
 ## 動作確認
 
-`0001-59577127`/`0002-59577127`で3パターン確認した:
+`0001-59577127`/`0002-59577127`で4パターン確認した:
 
 ```bash
 # 保存済み範囲のみ（軽い）
 python detectlab.py --event 0001-59577127 0002-59577127 --out overlay.png
 # raw/を都度取り直し(--minutes/--lead-min分)
 python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 --out overlay.png
+# 裸のバケット番号+--deviceで完全IDを自動展開
+python detectlab.py --event 59577127 --device 1 2 --out overlay.png
 ```
 
 いずれも`--at`+`--device 1 2`で手動onset指定した場合と同じ形の図（STA/LTA・直線性・
-一致度の3段）が出ることを確認した。既存の`pytest tools/tests`（14件）・
-`pytest lambda/tests tools/tests`（204件）は無変更で通過。
+一致度の3段）が出ることを確認した。`expand_event_ids()`のユニットテスト3件を追加。
+`pytest tools/tests`（17件）・`pytest lambda/tests tools/tests`（207件）が通過。
 
-## 残課題
+## 経緯（`#128`について）
 
-`tools/README.md`の「プレースホルダー」節（`#128`）は、onset時刻を手で引いて
-`--at`に渡す暫定手順だった。今回`--event`が複数受け付けられるようになったので
-不要になった——`#128`のマージ判断・整理はユーザーに委ねる。
+`tools/README.md`に一度「プレースホルダー」節（`#128`）を追記したが、それは
+onset時刻を手で引いて`--at`に渡す暫定手順だった。本対応で`--event`が複数・
+裸のバケット番号を受け付けられるようになり不要になったため、`#128`はクローズし
+プレースホルダーの記載は本PRへ引き継いだ。

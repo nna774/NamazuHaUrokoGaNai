@@ -30,6 +30,8 @@
         --eew "36.7,140.6,10,2026-08-08 03:41:32" --out /tmp/overlay.png
     # イベントID2つで重ね描き（保存済みevents/範囲をそのまま使う。onset時刻の手計算は不要）
     python detectlab.py --event 0001-59577127 0002-59577127 --out /tmp/overlay.png
+    # 裸のバケット番号(event_idの"-"より後ろ)+--deviceでも同じ（同一地震なら大抵同じバケット）
+    python detectlab.py --event 59577127 --device 1 2 --out /tmp/overlay.png
     # 保存範囲より外まで見たい時は --from-raw でraw/を--minutes/--lead-minぶん都度取り直す
     python detectlab.py --event 0001-59577127 0002-59577127 --from-raw \
         --minutes 10 --out /tmp/overlay.png
@@ -519,6 +521,24 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0):
 
 # ---- CLI ----------------------------------------------------------------
 
+def expand_event_ids(events: list[str], device_ids: list[int]) -> list[str]:
+    """`--event`にdevice prefix無しの裸のバケット番号(例: "59577127")が混ざっていたら、
+    `--device`と組んで完全なevent_id("0001-59577127")へ展開する。
+
+    同一地震なら大抵同じ30秒バケットに乗る（`events.event_id`のバケット幅）ので、
+    `--event 59577127 --device 1 2` で関連イベント2件のIDをまとめて組み立てられる
+    （event_idを一つ一つ手で調べて並べる手間を省く）。"-"を含む値はfull IDとして
+    そのまま通す。
+    """
+    out = []
+    for e in events:
+        if "-" in e:
+            out.append(e)
+        else:
+            out.extend(f"{dev:04d}-{e}" for dev in device_ids)
+    return out
+
+
 def at_to_us(s: str) -> int:
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
@@ -581,9 +601,11 @@ def main() -> int:
     p.add_argument("--show", action="store_true", help="--out 指定時も画面表示する")
     args = p.parse_args()
 
-    if len(args.device) > 1 and not (args.at or args.at_us):
-        raise SystemExit("複数デバイスの重ね描きは --at / --at-us でのみ対応する"
-                         "（--event/--csv は単一データ源）")
+    if args.event:
+        args.event = expand_event_ids(args.event, args.device)
+    if len(args.device) > 1 and not (args.at or args.at_us or args.event):
+        raise SystemExit("複数デバイスの重ね描きは --at / --at-us / --event でのみ対応する"
+                         "（--csv は単一データ源）")
     if args.from_raw and not args.event:
         raise SystemExit("--from-raw は --event と一緒に指定しろ（--at系は元々raw/を都度読む）")
 

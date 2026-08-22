@@ -243,16 +243,18 @@ python detectlab.py --at "2026-08-08 03:41:32" --device 1 2 \
 先頭4桁から決まるので`--device`は不要、onset時刻の手計算も要らない）。既定では
 `events/<id>/` の保存済み範囲をそのまま使う（軽い・保持期限を過ぎていても見られる）。
 
-**何も考えず出せるプレースホルダー**: `<event_id>` を関連イベント分(2つ以上)
-埋めて叩くだけ。
+**何も考えず出せるプレースホルダー**: `<バケット番号>`（event_idの`-`より後ろ、
+例 `59577127`）だけ埋めて`--device`に見たい機体を並べれば、`0001-59577127`
+のような完全なevent_idを自動で組み立てる（同一地震ならほぼ同じ30秒バケットに
+乗るため。バケットが違う機体が混ざる時だけ完全なevent_idを個別に書く）。
 
 ```bash
-python detectlab.py --event <event_id_1> <event_id_2> --out overlay.png
+python detectlab.py --event <バケット番号> --device 1 2 --out overlay.png
 ```
 
 ```bash
 # 実例
-python detectlab.py --event 0001-59577127 0002-59577127 --out overlay.png
+python detectlab.py --event 59577127 --device 1 2 --out overlay.png
 ```
 
 保存済み範囲より外まで見たい時は `--from-raw` を付ける。各event_idの`onset_us`を
@@ -284,8 +286,8 @@ python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 
 
 | オプション | 既定 | 意味 |
 |-----------|------|------|
-| `--at` / `--at-us` / `--event` / `--csv` | （必須・排他） | データ源。時刻中心窓 / epoch µs / イベントID(複数可) / CSV |
-| `--device ID [ID ...]` | `1` | デバイスID（`--at` 系）。2つ以上で重ね描きモード |
+| `--at` / `--at-us` / `--event` / `--csv` | （必須・排他） | データ源。時刻中心窓 / epoch µs / イベントID(複数可・裸のバケット番号可) / CSV |
+| `--device ID [ID ...]` | `1` | デバイスID（`--at`系で必須）。`--event`では裸のバケット番号の展開に使う。2つ以上で重ね描きモード |
 | `--from-raw` | 無効 | `--event`指定時、`events/`の保存済み範囲ではなく`raw/`を`--minutes`/`--lead-min`ぶん都度取り直す |
 | `--minutes N` | `3` | `--at` 系の窓長[分]。中心の前後 N/2 分 |
 | `--band LO HI` | `1 10` | バンドパス帯域[Hz]。遠地・弱震は `0.3 1.5` 等に下げる |
