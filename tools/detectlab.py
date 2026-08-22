@@ -14,8 +14,10 @@
 データ源はS3の生バッチ(フルレート)。api の /event・/recent は MAX_POINTS 超で
 エンベロープに間引かれてスペクトル解析に使えないので、raw/ を直読みする。
 
-    # 20:53 を中心に前後3分をS3から取って解析
+    # 20:53 から後ろ3分(既定)・前3分(--lead-min既定)をS3から取って解析
     python detectlab.py --at "2026-07-24 20:53" --minutes 3 --out /tmp/2053.png
+    # コーダ/後続波まで追いたい時は後ろだけ伸ばす（前を無駄に伸ばしても益がない）
+    python detectlab.py --at "2026-07-24 20:53" --minutes 8 --out /tmp/2053.png
     # イベントID指定
     python detectlab.py --event 0001-59462454
     # 手元のキャプチャ/合成CSVで
@@ -145,6 +147,46 @@ def sta_lta(cf: np.ndarray, fs: float, sta_s: float, lta_s: float) -> np.ndarray
     ratio = trailing_mean(nsta) / np.maximum(trailing_mean(nlta), 1e-12)
     ratio[: min(nlta, n)] = 0.0  # LTA窓が埋まるまでは無効
     return ratio
+
+
+def rolling_correlation(a: np.ndarray, b: np.ndarray, fs: float, win_s: float) -> np.ndarray:
+    """同じ時間軸に揃えた2系列の移動相関係数(末尾窓、Pearson)。
+
+    sta_lta と同じ累積和トリックで窓内の sum/sumsq/sumprod を出し、そこから
+    相関係数を計算する（ループでの逐次計算より軽い）。窓が埋まるまではnan。
+    """
+    n = len(a)
+    w = max(2, int(round(win_s * fs)))
+    csum = np.concatenate([[0.0], np.cumsum(np.ones(n))])
+    idx = np.arange(n)
+    lo = np.maximum(0, idx + 1 - w)
+    cnt = csum[idx + 1] - csum[lo]
+
+    def trailing_sum(x: np.ndarray) -> np.ndarray:
+        c = np.concatenate([[0.0], np.cumsum(x)])
+        return c[idx + 1] - c[lo]
+
+    sa, sb = trailing_sum(a), trailing_sum(b)
+    saa, sbb, sab = trailing_sum(a * a), trailing_sum(b * b), trailing_sum(a * b)
+    num = cnt * sab - sa * sb
+    den = np.sqrt(np.maximum(cnt * saa - sa ** 2, 0.0) * np.maximum(cnt * sbb - sb ** 2, 0.0))
+    corr = np.divide(num, den, out=np.full(n, np.nan), where=den > 1e-12)
+    corr[: min(w, n)] = np.nan
+    return corr
+
+
+def align_pair(t_a: np.ndarray, y_a: np.ndarray, t_b: np.ndarray, y_b: np.ndarray,
+              fs: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """2機ぶんの(時刻[s], 値)系列を、重なっている区間だけ共通のfs時間軸に補間する。
+
+    起点(start_us)は機体ごとに数十ms単位でズレる（バッチ境界が同期していない）ので、
+    素の配列同士を突き合わせるとサンプルが噛み合わない。線形補間で揃える。
+    """
+    t0, t1 = max(t_a[0], t_b[0]), min(t_a[-1], t_b[-1])
+    if t1 <= t0:
+        return np.array([]), np.array([]), np.array([])
+    t = np.arange(t0, t1, 1.0 / fs)
+    return t, np.interp(t, t_a, y_a), np.interp(t, t_b, y_b)
 
 
 def detect_onsets(ratio: np.ndarray, fs: float, start_us: int, thr: float) -> list[int]:
@@ -354,12 +396,15 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
         plt.show()
 
 
-def plot_overlay(per_device, thr, arrivals, ref_us, out, show):
+def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0):
     """複数デバイスのSTA/LTA・直線性を同一時間軸に重ねて描く。
 
     生波形やスペクトログラムは軸の向きが機体ごとに違い重ねる意味が無いので出さない
     （docs/device_overlay.md §2）。STA/LTA・直線性は回転不変量なので方位較正なしで
     そのまま比較できる（同§3-c の考え方）。
+
+    ちょうど2機の重ね描きなら、直線性の移動相関（一致度）パネルを追加する。3機以上は
+    どの組み合わせを見せるべきか自明でないため付けない。
     """
     import matplotlib
 
@@ -376,7 +421,9 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show):
             break
     plt.rcParams["axes.unicode_minus"] = False
 
-    fig, axs = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+    show_corr = len(per_device) == 2
+    nrows = 3 if show_corr else 2
+    fig, axs = plt.subplots(nrows, 1, figsize=(12, 6 if nrows == 2 else 8), sharex=True)
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     for i, (device_id, start_us, fs, ratio, rect, onsets) in enumerate(per_device):
@@ -388,6 +435,23 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show):
             ot = (o - ref_us) / 1e6
             for a in axs:
                 a.axvline(ot, color=color, lw=0.8, alpha=0.6, ls="--")
+
+    if show_corr:
+        (dev_a, start_a, fs_a, _, rect_a, _), (dev_b, start_b, fs_b, _, rect_b, _) = per_device
+        t_a = (start_a - ref_us) / 1e6 + np.arange(len(rect_a)) / fs_a
+        t_b = (start_b - ref_us) / 1e6 + np.arange(len(rect_b)) / fs_b
+        t_c, ra, rb = align_pair(t_a, rect_a, t_b, rect_b, min(fs_a, fs_b))
+        if len(t_c):
+            corr = rolling_correlation(ra, rb, min(fs_a, fs_b), corr_win)
+            axs[2].plot(t_c, corr, lw=0.8, color="k")
+            axs[2].fill_between(t_c, 0, corr, where=corr >= 0.6, color="C2", alpha=0.25,
+                               interpolate=True)
+        axs[2].axhline(0.6, ls=":", color="k", lw=0.8)
+        axs[2].axhline(0, ls="-", color="gray", lw=0.5)
+        axs[2].set_ylim(-1, 1)
+        axs[2].set_ylabel("直線性の相関")
+        axs[2].set_title(f"直線性の一致度（device {dev_a}/{dev_b} 間、窓{corr_win:g}秒の移動Pearson相関。"
+                         "地震なら両機とも同時に立つので1に近づく）", fontsize=9, loc="left")
 
     def sec_to_clock(x):
         return [datetime.fromtimestamp(ref_us / 1e6 + v, JST) for v in x]
@@ -415,7 +479,7 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show):
     ref_dt = datetime.fromtimestamp(ref_us / 1e6, JST)
     ref_note = "発生時刻" if arrivals else "先頭デバイス窓頭"
     xlabel = f"t [s]  （{ref_note} {ref_dt:%Y-%m-%d %H:%M:%S} JST からの経過）"
-    axs[1].set_xlabel(xlabel)
+    axs[-1].set_xlabel(xlabel)
 
     for label, e_us, l_us, color in arrivals:
         e = (e_us - ref_us) / 1e6
@@ -457,7 +521,14 @@ def main() -> int:
     src.add_argument("--at", help="窓の中心時刻(JST) 例 '2026-07-24 20:53'")
     src.add_argument("--at-us", type=int, help="窓の中心時刻(epoch µs)")
     src.add_argument("--csv", help="t_us,x_gal,y_gal,z_gal のCSV（- でstdin）")
-    p.add_argument("--minutes", type=float, default=3.0, help="窓長[分]（--at系。既定3）")
+    p.add_argument("--minutes", type=float, default=3.0,
+                   help="--at より後ろを何分見るか（--at系。既定3）。前側は既定で"
+                        "ほぼ見ない（--lead-min参照）。地震のコーダ/後続波を追うには"
+                        "これを伸ばす")
+    p.add_argument("--lead-min", dest="lead_min", type=float, default=3.0,
+                   help="--at より前を何分見るか（既定3）。背景ノイズの目視確認・"
+                        "--eew指定時の背景RMS推定（発生-150秒〜-30秒を使う）に要るぶんで、"
+                        "むやみに伸ばしても地震の答え合わせには益がない")
     p.add_argument("--band", type=float, nargs=2, default=[1.0, 10.0],
                    metavar=("LO", "HI"), help="バンドパス帯域[Hz]（既定 1 10）")
     p.add_argument("--sta", type=float, default=1.0, help="STA窓[秒]（既定1）")
@@ -465,6 +536,8 @@ def main() -> int:
     p.add_argument("--thr", type=float, default=4.0, help="STA/LTA検出閾値（既定4）")
     p.add_argument("--rect-win", dest="rect_win", type=float, default=3.0,
                    help="直線性の移動窓[秒]（既定3）")
+    p.add_argument("--corr-win", dest="corr_win", type=float, default=2.0,
+                   help="2機重ね描き時、直線性の一致度パネルに使う移動相関の窓[秒]（既定2）")
     p.add_argument("--axes", choices=["xyz", "xy"], default="xyz",
                    help="STA/LTA・スペクトログラム・直線性に使う軸。xy=水平のみ"
                         "（z軸の低周波ノイズが大きい時、遠地弱震で有利）")
@@ -552,8 +625,16 @@ def main() -> int:
     else:
         device_id = args.device[0]
         center = at_to_us(args.at) if args.at else args.at_us
-        seconds = args.minutes * 60.0
-        end_us = int(center + seconds / 2 * 1e6)
+        after_s = args.minutes * 60.0
+        lead_s = args.lead_min * 60.0
+        seconds = after_s + lead_s
+        end_us = int(center + after_s * 1e6)
+        planned_start_us = center - int(lead_s * 1e6)
+        if origin_us is not None and planned_start_us > origin_us - 150_000_000:
+            print(f"# 警告: --lead-min={args.lead_min:g}分では--eewの背景RMS推定"
+                  "（発生-150秒〜-30秒）に届かない。背景がイベント自体で汚染され"
+                  "SNRが不正確になる。--lead-minを増やすか--atを発生時刻寄りにしろ",
+                  file=sys.stderr)
 
         if len(args.device) > 1:
             # 重ね描き: デバイスごとに個別読み込み・個別解析（混ぜると継ぎ目が揺れに見える）。
@@ -576,7 +657,7 @@ def main() -> int:
                 per_device.append((dev, d_start, d_fs, d_ratio, d_rect, d_onsets))
             ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
             plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
-                        show=args.show or not args.out)
+                        show=args.show or not args.out, corr_win=args.corr_win)
             return 0
 
         data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
