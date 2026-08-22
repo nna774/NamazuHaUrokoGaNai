@@ -356,6 +356,11 @@ s3 = s3cache.cached_client()  # store.load_window / load_event にそのまま�
   キャッシュすれば、窓が重なっている限り差分だけ取得すれば済む。
 - キャッシュするのは `get_object` だけ（`list_objects_v2` は毎回本物のS3へ通す。新着を
   見逃さないためコストもほぼ無い）。
+- **raw/とevents/はキー末尾`<batch_start_us:020d>.bin`が一致すれば中身も同一バイト列**
+  （`events/`は検知時に`copy_object`で`raw/`をそのままコピーしたもの）。片方が未キャッシュ
+  でももう片方が既にキャッシュ済みならそちらを流用してS3を叩かない。rawを読んだ後に
+  そのイベントだけ見たい／eventを読んだ後に前後のrawが見たい、を行き来してもレイテンシが
+  乗らない。
 - worktreeで作業していても `.s3cache/` は**メインチェックアウト側の絶対パス**を指す
   （`git rev-parse --git-common-dir` の親を使う。worktreeごとに毎回別ディレクトリだと
   キャッシュが効かない）。
