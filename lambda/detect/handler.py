@@ -34,9 +34,14 @@ STRIDE_SECONDS = detect_core.clamp_stride(
     float(os.environ.get("NAMZ_DETECT_STRIDE_S", "0")), WINDOW_SECONDS)
 # 確定報を Slack 通知する最小計測震度(l)。速報の閾値(k)より低くする想定。
 NOTIFY_CONFIRM_MIN = float(os.environ.get("NAMZ_NOTIFY_CONFIRM_MIN", "1.5"))
-# イベント波形として保存する範囲（onset を基準に前後）
+# イベント波形として保存する範囲（onset を基準に前後）。揺れが続く限り _confirm が
+# stride ごとに再発火し、そのたびにこの幅で追加コピーされるので実質的には伸びるが、
+# 1回あたりの窓自体も安全マージンとして大きめに取っておく（3.11のように振幅が閾値を
+# 上回ったまま長く続くケースの取りこぼしを避けるため。2026-08-23、M5.9の事後解析で
+# コーダが+190秒近くまで残ると分かったのを受けて90→600に引き上げた。
+# docs/log/2026-08-23-event-post-window-extension.md）。
 PRE_SECONDS = 30
-POST_SECONDS = 90
+POST_SECONDS = 600
 
 
 def handler(event, context):
