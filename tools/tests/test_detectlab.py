@@ -185,3 +185,20 @@ def test_align_pair_empty_when_no_overlap():
     t_b = np.arange(10, 11, 1 / fs)
     t_c, ya, yb = detectlab.align_pair(t_a, np.zeros_like(t_a), t_b, np.zeros_like(t_b), fs)
     assert len(t_c) == 0
+
+
+def test_expand_event_ids_builds_full_ids_from_bare_suffix():
+    # "59577127"のような裸のバケット番号は --device と組んで完全なIDへ展開される
+    assert detectlab.expand_event_ids(["59577127"], [1, 2]) == \
+        ["0001-59577127", "0002-59577127"]
+
+
+def test_expand_event_ids_passes_full_ids_through():
+    # "-"を含む値(すでに完全なevent_id)はそのまま通す
+    ids = ["0001-59577127", "0002-59577127"]
+    assert detectlab.expand_event_ids(ids, [1]) == ids
+
+
+def test_expand_event_ids_mixes_bare_and_full():
+    out = detectlab.expand_event_ids(["0003-59573459", "59577127"], [1, 2])
+    assert out == ["0003-59573459", "0001-59577127", "0002-59577127"]
