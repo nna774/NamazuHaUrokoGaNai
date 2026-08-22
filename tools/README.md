@@ -256,6 +256,29 @@ python detectlab.py --at "2026-08-08 03:41:32" --device 1 2 \
 
 `--dump-csv` は指定すると各デバイスに `.dev<id>` を挟んだファイル名で個別保存する。
 
+### プレースホルダー: イベントIDから何も考えず重ね描き図を出す
+
+震源照合（`--eew`）は要らず「STA/LTA・直線性・一致度の3段だけサクッと見たい」時のテンプレ。
+`<event_id>` を埋めて2回叩くだけ（onset時刻の変換は手計算しない）。
+
+```bash
+EID=0001-XXXXXXXX   # 手元にある方のevent_idを入れる
+AT=$(curl -s "https://api.namazu.dark-kuins.net/event?id=$EID" | python3 -c '
+import json, sys, datetime
+JST = datetime.timezone(datetime.timedelta(hours=9))
+d = json.load(sys.stdin)["meta"]
+print(datetime.datetime.fromtimestamp(d["onset_us"] / 1e6, JST).strftime("%Y-%m-%d %H:%M:%S"))
+')
+echo "onset(JST) = $AT"
+
+# device番号は event_id 先頭4桁、重ねる相手は related_events を見て決める
+python detectlab.py --at "$AT" --device 1 2 \
+    --lead-min 2 --minutes 10 --corr-win 2 --out overlay.png
+```
+
+`--minutes 10` は後続波（コーダ）まで見るための余裕（狭めたければ既定の3のままでよい）。
+震源との答え合わせもしたければ`--eew`を追加する（前掲の例を参照）。
+
 ### 主なオプション
 
 | オプション | 既定 | 意味 |
