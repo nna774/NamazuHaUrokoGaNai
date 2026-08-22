@@ -140,3 +140,48 @@ def test_parse_eew_roundtrip():
     assert origin == detectlab.at_to_us("2026-07-24 20:52:59")
     with pytest.raises(SystemExit):
         detectlab.parse_eew("37.7,141.7,60")  # 発生時刻が欠けている
+
+
+def test_rolling_correlation_high_when_signals_share_source():
+    # 同じ元信号+独立ノイズの2系列は高相関、独立ノイズ同士は低相関に留まる。
+    n = 3000
+    t = np.arange(n) / FS
+    rng = np.random.default_rng(2)
+    common = np.sin(2 * np.pi * 0.5 * t)
+    a = common + 0.05 * rng.standard_normal(n)
+    b = common + 0.05 * rng.standard_normal(n)
+    noise_a = rng.standard_normal(n)
+    noise_b = rng.standard_normal(n)
+    corr_shared = detectlab.rolling_correlation(a, b, FS, win_s=2.0)
+    corr_indep = detectlab.rolling_correlation(noise_a, noise_b, FS, win_s=2.0)
+    assert np.nanmean(corr_shared) > 0.9
+    assert abs(np.nanmean(corr_indep)) < 0.3
+
+
+def test_rolling_correlation_leading_nan_until_window_fills():
+    a = np.arange(100.0)
+    corr = detectlab.rolling_correlation(a, a, FS, win_s=0.5)  # win=50 samples
+    assert np.all(np.isnan(corr[:50]))
+    assert np.isfinite(corr[50:]).all()
+
+
+def test_align_pair_interpolates_onto_overlap_only():
+    # b は a よりわずかに遅れて始まり早く終わる → 重なりはその内側だけ。
+    fs = 10.0
+    t_a = np.arange(0, 5, 1 / fs)
+    y_a = np.sin(t_a)
+    t_b = np.arange(1, 4, 1 / fs) + 0.03  # サンプル境界がズレている
+    y_b = np.sin(t_b)
+    t_c, ya, yb = detectlab.align_pair(t_a, y_a, t_b, y_b, fs)
+    assert t_c[0] >= t_b[0] and t_c[-1] <= t_b[-1]
+    assert t_c[0] >= t_a[0] and t_c[-1] <= t_a[-1]
+    # 補間後は同じsin波形同士なのでほぼ一致するはず
+    assert np.allclose(ya, yb, atol=0.01)
+
+
+def test_align_pair_empty_when_no_overlap():
+    fs = 10.0
+    t_a = np.arange(0, 1, 1 / fs)
+    t_b = np.arange(10, 11, 1 / fs)
+    t_c, ya, yb = detectlab.align_pair(t_a, np.zeros_like(t_a), t_b, np.zeros_like(t_b), fs)
+    assert len(t_c) == 0
