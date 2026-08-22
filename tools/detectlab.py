@@ -28,6 +28,11 @@
     # 2機重ね描き（方位較正なしで比較できる回転不変量＝STA/LTA・直線性のみ）
     python detectlab.py --at "2026-08-08 03:41:32" --device 1 2 \
         --eew "36.7,140.6,10,2026-08-08 03:41:32" --out /tmp/overlay.png
+    # イベントID2つで重ね描き（保存済みevents/範囲をそのまま使う。onset時刻の手計算は不要）
+    python detectlab.py --event 0001-59577127 0002-59577127 --out /tmp/overlay.png
+    # 保存範囲より外まで見たい時は --from-raw でraw/を--minutes/--lead-minぶん都度取り直す
+    python detectlab.py --event 0001-59577127 0002-59577127 --from-raw \
+        --minutes 10 --out /tmp/overlay.png
 """
 
 from __future__ import annotations
@@ -119,6 +124,18 @@ def load_s3_event(bucket: str, eid: str, use_cache: bool = True) -> tuple[np.nda
     from common import store
 
     return store.load_event(_s3_client(use_cache), bucket, eid)
+
+
+def load_event_onset_us(bucket: str, eid: str, use_cache: bool = True) -> int:
+    """events/<id>/meta.json から onset_us を読む（--from-raw で raw/ を都度取り直す時の基準）。"""
+    import json
+
+    from common import s3util
+
+    s3 = _s3_client(use_cache)
+    obj = s3.get_object(Bucket=bucket, Key=s3util.event_meta_key(eid))
+    meta = json.loads(obj["Body"].read())
+    return int(meta["onset_us"])
 
 
 # ---- 信号処理 -----------------------------------------------------------
@@ -517,7 +534,9 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     src = p.add_mutually_exclusive_group(required=True)
-    src.add_argument("--event", help="イベントID（events/<id>/ を連結）")
+    src.add_argument("--event", nargs="+",
+                     help="イベントID（events/<id>/ を連結）。1つなら単独、2つ以上なら"
+                          "重ね描き解析モード（device idは各event_idの先頭4桁から決まる）")
     src.add_argument("--at", help="窓の中心時刻(JST) 例 '2026-07-24 20:53'")
     src.add_argument("--at-us", type=int, help="窓の中心時刻(epoch µs)")
     src.add_argument("--csv", help="t_us,x_gal,y_gal,z_gal のCSV（- でstdin）")
@@ -549,6 +568,10 @@ def main() -> int:
                         "見えるので個別に読む。2つ以上指定すると重ね描き解析モード"
                         "（--at/--at-us 限定。STA/LTA・直線性という回転不変量だけを重ねるので"
                         "方位較正なしで比較できる）")
+    p.add_argument("--from-raw", dest="from_raw", action="store_true",
+                   help="--event指定時、保存済みのevents/範囲ではなくraw/から"
+                        "--minutes/--lead-minぶん都度取り直す（保存範囲を超えて見たい時。"
+                        "onset時刻は各event_idのmeta.jsonから自動で引く）")
     p.add_argument("--bucket", help="rawバケット名（既定は NAMZ_RAW_BUCKET / terraform）")
     p.add_argument("--no-cache", action="store_true",
                    help="S3から毎回取り直す（既定は.s3cache/でget_objectをキャッシュ。"
@@ -561,6 +584,8 @@ def main() -> int:
     if len(args.device) > 1 and not (args.at or args.at_us):
         raise SystemExit("複数デバイスの重ね描きは --at / --at-us でのみ対応する"
                          "（--event/--csv は単一データ源）")
+    if args.from_raw and not args.event:
+        raise SystemExit("--from-raw は --event と一緒に指定しろ（--at系は元々raw/を都度読む）")
 
     # --eew の到達予測窓は全デバイス共通（同一地点に複数機を置く前提。EEWパースも1回でよい）。
     arrivals: list[tuple[str, int, int, str]] = []
@@ -615,13 +640,49 @@ def main() -> int:
             else:
                 print(f"    {label} {ea:%H:%M:%S}-{la:%H:%M:%S}  （窓が解析範囲外）")
 
+    def overlay_source(label: str, dev: int, data, start_us, fs) -> tuple:
+        """重ね描き用の1機ぶん: 解析・レポート・dump・plot_overlay向けタプル化をまとめる
+        （--atの複数--device / --eventの複数指定、どちらの重ね描きからも呼ぶ）。"""
+        if data.shape[0] == 0:
+            raise SystemExit(f"{label}: 波形が空。時刻・データ保持期間を確認しろ。")
+        band, ratio, onsets, rect, vec = analyze(
+            data, fs, start_us, args.band, args.axes, args.sta, args.lta, args.thr, args.rect_win)
+        report(label, fs, start_us, band, ratio, onsets, rect, vec, data)
+        if args.dump:
+            stem, dot, ext = args.dump.rpartition(".")
+            dump_csv(f"{stem}.dev{dev}.{ext}" if dot else f"{args.dump}.dev{dev}",
+                     data, start_us, fs)
+        return dev, start_us, fs, ratio, rect, onsets
+
     if args.csv:
         data, start_us, fs = load_csv(args.csv)
         device_id = None  # CSVは任意データなので--deviceの既定値は意味を持たない
-    elif args.event:
-        data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), args.event,
+    elif len(args.event) == 1:
+        eid = args.event[0]
+        data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), eid,
                                           use_cache=not args.no_cache)
-        device_id = int(args.event.split("-", 1)[0])  # event_id先頭4桁=device
+        device_id = int(eid.split("-", 1)[0])  # event_id先頭4桁=device
+    elif args.event:
+        # 複数event_idの重ね描き。既定はevents/の保存済み範囲、--from-rawでraw/を
+        # --minutes/--lead-minぶん都度取り直す（保存範囲を超えて見たい時）。
+        bucket = resolve_bucket(args.bucket)
+        per_device = []
+        for eid in args.event:
+            dev = int(eid.split("-", 1)[0])
+            if args.from_raw:
+                onset_us = load_event_onset_us(bucket, eid, use_cache=not args.no_cache)
+                after_s = args.minutes * 60.0
+                lead_s = args.lead_min * 60.0
+                end_us = int(onset_us + after_s * 1e6)
+                d_data, d_start, d_fs = load_s3_window(bucket, end_us, after_s + lead_s, dev,
+                                                       use_cache=not args.no_cache)
+            else:
+                d_data, d_start, d_fs = load_s3_event(bucket, eid, use_cache=not args.no_cache)
+            per_device.append(overlay_source(f"event={eid}", dev, d_data, d_start, d_fs))
+        ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
+        plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
+                    show=args.show or not args.out, corr_win=args.corr_win)
+        return 0
     else:
         device_id = args.device[0]
         center = at_to_us(args.at) if args.at else args.at_us
@@ -643,18 +704,7 @@ def main() -> int:
             for dev in args.device:
                 d_data, d_start, d_fs = load_s3_window(bucket, end_us, seconds, dev,
                                                        use_cache=not args.no_cache)
-                if d_data.shape[0] == 0:
-                    raise SystemExit(f"device {dev}: 波形が空。時刻・データ保持期間を確認しろ。")
-                d_band, d_ratio, d_onsets, d_rect, d_vec = analyze(
-                    d_data, d_fs, d_start, args.band, args.axes,
-                    args.sta, args.lta, args.thr, args.rect_win)
-                report(f"device={dev}", d_fs, d_start, d_band, d_ratio, d_onsets,
-                       d_rect, d_vec, d_data)
-                if args.dump:
-                    stem, dot, ext = args.dump.rpartition(".")
-                    dump_csv(f"{stem}.dev{dev}.{ext}" if dot else f"{args.dump}.dev{dev}",
-                             d_data, d_start, d_fs)
-                per_device.append((dev, d_start, d_fs, d_ratio, d_rect, d_onsets))
+                per_device.append(overlay_source(f"device={dev}", dev, d_data, d_start, d_fs))
             ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
             plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
                         show=args.show or not args.out, corr_win=args.corr_win)

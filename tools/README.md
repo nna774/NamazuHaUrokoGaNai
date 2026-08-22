@@ -229,7 +229,7 @@ python detectlab.py --at "2026-07-24 20:53" --minutes 10 --band 0.3 1.5 --thr 3 
 判定は `SNR≥1.5 かつ 直線性≥0.6` で「地震らしい」、`SNR<1.3` で「微妙」。観測点座標は
 `--station "lat,lon"` / 環境変数 `NAMZ_STATION_LATLON` / 既定（湯沢町）の順。
 
-### 複数機を重ね描き（`--device` に複数指定）
+### 複数機を重ね描き（`--device` に複数指定 / `--event` に複数指定）
 
 `--device 1 2` のように複数指定すると、デバイスごとに個別読み込み・個別解析した上で
 STA/LTA比・直線性の2パネルだけを同一時間軸に重ねて描く（`--at`/`--at-us` 限定）。
@@ -237,6 +237,30 @@ STA/LTA比・直線性の2パネルだけを同一時間軸に重ねて描く（
 ```bash
 python detectlab.py --at "2026-08-08 03:41:32" --device 1 2 \
     --eew "36.7,140.6,10,2026-08-08 03:41:32" --out overlay.png
+```
+
+**`--event` にも複数のevent_idを渡せば同じ重ね描きになる**（device idは各event_idの
+先頭4桁から決まるので`--device`は不要、onset時刻の手計算も要らない）。既定では
+`events/<id>/` の保存済み範囲をそのまま使う（軽い・保持期限を過ぎていても見られる）。
+
+**何も考えず出せるプレースホルダー**: `<event_id>` を関連イベント分(2つ以上)
+埋めて叩くだけ。
+
+```bash
+python detectlab.py --event <event_id_1> <event_id_2> --out overlay.png
+```
+
+```bash
+# 実例
+python detectlab.py --event 0001-59577127 0002-59577127 --out overlay.png
+```
+
+保存済み範囲より外まで見たい時は `--from-raw` を付ける。各event_idの`onset_us`を
+`meta.json`から引き、`raw/`を`--minutes`/`--lead-min`ぶん都度取り直す
+（rawの保持期間内でのみ有効。`--event`単体でも使える）。
+
+```bash
+python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 --out overlay.png
 ```
 
 生波形・スペクトログラムは軸の向きが機体ごとに違うため出さない（[device_overlay.md](../docs/device_overlay.md) §2、
@@ -260,8 +284,9 @@ python detectlab.py --at "2026-08-08 03:41:32" --device 1 2 \
 
 | オプション | 既定 | 意味 |
 |-----------|------|------|
-| `--at` / `--at-us` / `--event` / `--csv` | （必須・排他） | データ源。時刻中心窓 / epoch µs / イベントID / CSV |
+| `--at` / `--at-us` / `--event` / `--csv` | （必須・排他） | データ源。時刻中心窓 / epoch µs / イベントID(複数可) / CSV |
 | `--device ID [ID ...]` | `1` | デバイスID（`--at` 系）。2つ以上で重ね描きモード |
+| `--from-raw` | 無効 | `--event`指定時、`events/`の保存済み範囲ではなく`raw/`を`--minutes`/`--lead-min`ぶん都度取り直す |
 | `--minutes N` | `3` | `--at` 系の窓長[分]。中心の前後 N/2 分 |
 | `--band LO HI` | `1 10` | バンドパス帯域[Hz]。遠地・弱震は `0.3 1.5` 等に下げる |
 | `--sta` / `--lta` | `1` / `30` | STA/LTA の短期/長期窓[秒] |
