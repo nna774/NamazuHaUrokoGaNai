@@ -175,8 +175,36 @@ def _copy_event_waveforms(eid: str, onset_us: int, device_id: int) -> int:
     return copied
 
 
+def _merge_meta(prev: dict | None, onset_us: int, max_intensity: float,
+                peak_gal: float, a0: float | None) -> tuple[int, float, float, float | None]:
+    """既存 meta.json があれば、弱い再発火が強い記録を消さないよう最大値へマージする。
+
+    onset_us はセッションの真の起点なので最小値、震度・加速度は最大値を残す
+    （events.py の `_record` と同じ「最大/最小を保持」方針を S3 側にも合わせる）。
+    """
+    if prev is None:
+        return onset_us, max_intensity, peak_gal, a0
+    onset_us = min(onset_us, int(prev.get("onset_us", onset_us)))
+    max_intensity = max(max_intensity, float(prev.get("max_intensity", 0)))
+    peak_gal = max(peak_gal, float(prev.get("peak_gal", 0)))
+    prev_a0 = prev.get("a0_gal")
+    if prev_a0 is not None:
+        a0 = max(a0, float(prev_a0)) if a0 is not None else float(prev_a0)
+    return onset_us, max_intensity, peak_gal, a0
+
+
+def _get_prev_meta(eid: str) -> dict | None:
+    try:
+        obj = s3.get_object(Bucket=BUCKET, Key=s3util.event_meta_key(eid))
+    except s3.exceptions.NoSuchKey:
+        return None
+    return json.loads(obj["Body"].read())
+
+
 def _put_meta(eid: str, device_id: int, onset_us: int,
               max_intensity: float, peak_gal: float, a0: float | None = None):
+    onset_us, max_intensity, peak_gal, a0 = _merge_meta(
+        _get_prev_meta(eid), onset_us, max_intensity, peak_gal, a0)
     meta = {
         "event_id": eid,
         "device_id": device_id,
