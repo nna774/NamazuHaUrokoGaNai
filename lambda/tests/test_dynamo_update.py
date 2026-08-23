@@ -66,7 +66,29 @@ def test_merges_multiple_set_fragments(table):
     assert call["ExpressionAttributeValues"] == {":a": 1, ":b": 2}
 
 
+def test_single_add_fragment(table):
+    b = UpdateItemBuilder()
+    b.add("ADD batches_total :one", {":one": 1})
+    b.execute(table, 2)
+    call = table.calls[0]
+    assert call["UpdateExpression"] == "ADD batches_total :one"
+    assert call["ExpressionAttributeValues"] == {":one": 1}
+
+
+def test_merges_set_add_and_remove_into_one_call(table):
+    b = UpdateItemBuilder()
+    b.add("SET sensor_type = :s", {":s": 1})
+    b.add("ADD batches_total :one", {":one": 1})
+    b.add("REMOVE watchdog_muted", {})
+    b.execute(table, 2)
+    assert len(table.calls) == 1
+    call = table.calls[0]
+    assert call["UpdateExpression"] == \
+        "SET sensor_type = :s ADD batches_total :one REMOVE watchdog_muted"
+    assert call["ExpressionAttributeValues"] == {":s": 1, ":one": 1}
+
+
 def test_rejects_unsupported_fragment():
     b = UpdateItemBuilder()
     with pytest.raises(ValueError):
-        b.add("ADD counter :one", {":one": 1})
+        b.add("DELETE tags :t", {":t": {"x"}})
