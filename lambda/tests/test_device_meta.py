@@ -12,19 +12,22 @@ _SET_FIELD = re.compile(r"(\w+) = (:\w+)")
 
 
 class FakeTable:
-    """update_item だけの最小スタブ。"SET a = :x, b = :y, ..." 形式のSET式だけ拾えれば十分。"""
+    """update_item だけの最小スタブ。"SET a = :x, b = :y, ... [REMOVE c, d]" 形式だけ拾えれば十分。"""
 
     def __init__(self):
         self.items: dict[int, dict] = {}
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues):  # noqa: N803
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None):  # noqa: N803
         device_id = Key["device_id"]
         item = self.items.setdefault(device_id, {"device_id": device_id})
         assert UpdateExpression.startswith("SET "), f"unsupported UpdateExpression: {UpdateExpression}"
-        fields = _SET_FIELD.findall(UpdateExpression)
+        set_part, _, remove_part = UpdateExpression.partition(" REMOVE ")
+        fields = _SET_FIELD.findall(set_part)
         assert fields, f"unsupported UpdateExpression: {UpdateExpression}"
         for field, placeholder in fields:
             item[field] = ExpressionAttributeValues[placeholder]
+        for field in remove_part.split(","):
+            item.pop(field.strip(), None)
 
 
 @pytest.fixture
@@ -43,6 +46,23 @@ def test_record_sensor_type_overwrites_on_resend(table):
     device_meta.record_sensor_type(2, 1)
     device_meta.record_sensor_type(2, 1)  # 同じ値の再送でも壊れない
     assert table.items[2]["sensor_type"] == 1
+
+
+def test_record_sensor_type_and_clear_mute_writes_sensor_type(table):
+    device_meta.record_sensor_type_and_clear_mute(2, 1)
+    assert table.items[2]["sensor_type"] == 1
+
+
+def test_record_sensor_type_and_clear_mute_clears_mute_flag(table):
+    table.items[2] = {"device_id": 2, "watchdog_muted": True}
+    device_meta.record_sensor_type_and_clear_mute(2, 1)
+    assert "watchdog_muted" not in table.items[2]
+
+
+def test_record_sensor_type_and_clear_mute_ok_when_not_muted(table):
+    # REMOVEは対象属性が無くても失敗しない（mute中でなくても無条件で呼んでよい）
+    device_meta.record_sensor_type_and_clear_mute(2, 1)
+    assert "watchdog_muted" not in table.items[2]
 
 
 def test_record_boot_epoch_writes_value(table):
