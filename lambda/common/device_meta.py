@@ -25,29 +25,23 @@ def _table():
     return _table_cache
 
 
-def record_sensor_type(device_id: int, sensor_type: int) -> None:
-    """このバッチのヘッダから読んだセンサ種別を記録する（毎バッチ呼んでよい）。"""
-    _table().update_item(
-        Key={"device_id": device_id},
-        UpdateExpression="SET sensor_type = :s",
-        ExpressionAttributeValues={":s": sensor_type},
-    )
+def sensor_type_fragment(sensor_type: int) -> tuple[str, dict]:
+    """record_sensor_type()と同じ書き込み内容を、実行せず断片として返す。
 
-
-def record_sensor_type_and_clear_mute(device_id: int, sensor_type: int) -> None:
-    """record_sensor_type()とwatchdog_mute.clear_mute()を1回のupdate_itemに統合する。
-
-    ingestの毎バッチ経路専用（docs/log/2026-08-23-s3-dynamodb-cost-cross-account-investigation.md）。
-    どちらも同一device_idの同一項目への書き込みなので、別々に呼ぶとDynamoDBの
-    WCUが呼び出し回数分よけいにかかる。REMOVEは対象属性が無くても失敗しないので、
-    mute中でなくても無条件で混ぜてよい（watchdog_mute.clear_mute()と同じ前提）。
-    手元CLI(tools/mute_device.py)の単体unmuteはこの関数を使わず
-    watchdog_mute.clear_mute()を直接呼ぶ（sensor_typeを知らないため）。
+    ingestの毎バッチ経路では他の関心事(watchdog_mute.clear_mute_fragment()等)と
+    まとめて1回のupdate_itemに合流させたいので、`dynamo_update.UpdateItemBuilder`
+    に渡す用途で公開する（docs/log/2026-08-23-ingest-devices-table-update-item-merge.md）。
     """
+    return "SET sensor_type = :s", {":s": sensor_type}
+
+
+def record_sensor_type(device_id: int, sensor_type: int) -> None:
+    """このバッチのヘッダから読んだセンサ種別を記録する（単体呼び出し用）。"""
+    expr, values = sensor_type_fragment(sensor_type)
     _table().update_item(
         Key={"device_id": device_id},
-        UpdateExpression="SET sensor_type = :s REMOVE watchdog_muted",
-        ExpressionAttributeValues={":s": sensor_type},
+        UpdateExpression=expr,
+        ExpressionAttributeValues=values,
     )
 
 

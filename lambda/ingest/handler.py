@@ -16,12 +16,13 @@ import boto3
 
 from batch_uplink import auth, devices, notify
 
-from common import (device_meta, device_temp, events, metrics, ota_watch, s3util,
-                     wire)
+from common import (device_meta, device_temp, dynamo_update, events, metrics, ota_watch,
+                     s3util, watchdog_mute, wire)
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
 BUCKET = os.environ["NAMZ_BUCKET"]
+_devices_table = boto3.resource("dynamodb").Table(os.environ["NAMZ_DEVICES_TABLE"])
 
 # デバイス速報を Slack 通知する最小計測震度(k)。確定報の閾値(l)より高くする想定。
 NOTIFY_PROMPT_MIN = float(os.environ.get("NAMZ_NOTIFY_PROMPT_MIN", "3.0"))
@@ -83,10 +84,16 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
     # センサ種別（ヘッダに毎回乗っているので追加コスト無し）も同じ項目への
     # 書き込みなので、1回のupdate_itemにまとめてDynamoDBのWCUを節約する
     # （docs/log/2026-08-23-s3-dynamodb-cost-cross-account-investigation.md）。
+    # 各モジュールは実行しない断片だけを返し、ここで集約する
+    # （docs/log/2026-08-23-devices-update-builder.md、関心事が増えても
+    # 組み合わせ専用関数を書かずに済む）。
     try:
-        device_meta.record_sensor_type_and_clear_mute(b.meta.device_id, b.meta.sensor_type)
+        builder = dynamo_update.UpdateItemBuilder()
+        builder.add(*watchdog_mute.clear_mute_fragment())
+        builder.add(*device_meta.sensor_type_fragment(b.meta.sensor_type))
+        builder.execute(_devices_table, b.meta.device_id)
     except Exception as e:  # noqa: BLE001
-        print(f"device_meta.record_sensor_type_and_clear_mute failed: {e!r}")
+        print(f"devices update (mute/sensor_type) failed: {e!r}")
 
     # 温度トレイラーがあれば記録（既に wire.parse 済みなので追加のS3アクセス無し）。
     # ダッシュボードの読み取り側が毎回 raw/ を漁らずに済むよう、書き込み側で1回だけ
