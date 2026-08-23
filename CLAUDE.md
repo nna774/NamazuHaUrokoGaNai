@@ -77,7 +77,8 @@
   - **`api`の`/event`はCloudFrontで長期キャッシュしている**（確定済みは1年相当、速報のみは
     無効化。`terraform/custom_domain.tf`の`aws_cloudfront_cache_policy.api_event`、
     `lambda/api/handler.py`の`EVENT_CONFIRMED_CACHE_S`。Electabuzz PR#29と同じ「閲覧人数が
-    S3 GET回数に比例する」問題への対策）。`flag_event.py`/`promote_event.py`で
+    S3 GET回数に比例する」構造への対策——2026-08-23時点でS3コスト増の実際の主因だったかは
+    未検証）。`flag_event.py`/`promote_event.py`で
     note・確定状態・related_events等を書き換えたら、自然失効を待たず
     `aws cloudfront create-invalidation --paths '/event*'` を打つこと（[tools/README.md](tools/README.md)参照）。
 - **欠測監視**（データが来ないこと自体の検知。DynamoDB `namazu-devices`、

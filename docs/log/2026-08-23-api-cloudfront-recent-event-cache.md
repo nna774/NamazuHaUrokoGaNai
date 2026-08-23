@@ -3,10 +3,14 @@
 ## 何を決めたか
 
 `~/Downloads/costs.csv`(AWS Cost Explorerから手で絞り込んだS3 API別コスト)を見たところ、
-GetObject($3.16、全体$6.24の半分)が支配的に増えていた。これは`api` Lambda(Function URL、
-認証なし公開)が`/recent`・`/event`のたびにS3へ`get_object`する構造上、閲覧回数がそのまま
-S3課金に比例する——[Electabuzz PR#29](https://github.com/nna774/Electabuzz/pull/29)で
-対処したのと同じ問題だった。
+GetObject($3.16、全体$6.24の半分)が支配的に増えていた。**この増加の原因は特定していない。**
+分かっているのは、`api` Lambda(Function URL、認証なし公開)が`/recent`・`/event`のたびに
+S3へ`get_object`する構造になっており、閲覧回数に比例して増えうる——
+[Electabuzz PR#29](https://github.com/nna774/Electabuzz/pull/29)で対処したのと同型の
+構造的な穴が存在する、というところまで。実際の増加が本当にこの閲覧経路によるものかは
+裏取りできていない(同時期に他の作業も走っていたため)。今回の対応はこの構造上の比例関係
+そのものを切り離すもので、効果の実測(コストが実際に下がるか)はapply後の確認事項として
+残る。
 
 対応として、既存の`aws_cloudfront_distribution.api`(`terraform/custom_domain.tf`)に
 `/recent`・`/event`専用の`ordered_cache_behavior`を追加した(それ以外のパスは既存の
@@ -47,4 +51,5 @@ Distribution IDを`terraform output api_distribution_id`として新規に出力
 
 `terraform apply`すれば、閲覧人数がGetObject課金に効かなくなる(1分間に何人`/recent`を
 見ていようとオリジンへのアクセスは一定)。過去イベントの再閲覧(SNS等でリンクが拡散する
-ケース)もほぼタダになる。適用はまだ行っていない。
+ケース)もほぼタダになる。適用はまだ行っていない。適用後、実際にGetObjectコストが下がるかを
+Cost Explorerで確認すれば、今回の構造が本当に増加の主因だったかどうかの裏取りにもなる。
