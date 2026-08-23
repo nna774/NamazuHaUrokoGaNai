@@ -1170,6 +1170,9 @@ async function showEvent(id) {
   lastEventWaveform = null;
   eventRawWf = null;  // 別イベントのrawを誤って使わないようキャッシュを破棄
   eventRawSeq++;      // 取得中の応答も無効化
+  // drawEventWaveform()はlastEventWaveformがnullだと何もせず前の描画を残すので、
+  // fetch完了を待たずここで明示的にクリアする（前のイベントの波形が読み込み中も残る不具合対策）。
+  drawWaveform(document.getElementById('event-canvas'), null, 0, visibleAxes('event'));
   try {
     const data = await apiGet('/event?id=' + encodeURIComponent(id));
     const m = data.meta || {};
