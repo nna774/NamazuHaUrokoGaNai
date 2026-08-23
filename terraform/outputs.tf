@@ -54,3 +54,8 @@ output "dashboard_distribution_id" {
   description = "ダッシュボードのCloudFront Distribution ID。デプロイ後の create-invalidation に使う。"
   value       = aws_cloudfront_distribution.dashboard.id
 }
+
+output "api_distribution_id" {
+  description = "apiのCloudFront Distribution ID。/eventは長期キャッシュしているので、flag_event.py等でイベントを書き換えた後の create-invalidation に使う。"
+  value       = local.custom_domain_enabled ? aws_cloudfront_distribution.api[0].id : null
+}

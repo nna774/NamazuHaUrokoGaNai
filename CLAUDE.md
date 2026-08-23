@@ -74,6 +74,12 @@
   - `checked` … detectが評価済み（未確定なら一覧の既定で隠れる=非該当）
   - `artificial` … 人工地震(テスト等)フラグ。立てると一覧の既定で隠れ、`all=1` でのみ薄く出る
   - 一覧の既定フィルタは「(確定 or 未評価) かつ 非artificial」。表示震度は `effective_intensity`。
+  - **`api`の`/event`はCloudFrontで長期キャッシュしている**（確定済みは1年相当、速報のみは
+    無効化。`terraform/custom_domain.tf`の`aws_cloudfront_cache_policy.api_event`、
+    `lambda/api/handler.py`の`EVENT_CONFIRMED_CACHE_S`。Electabuzz PR#29と同じ「閲覧人数が
+    S3 GET回数に比例する」問題への対策）。`flag_event.py`/`promote_event.py`で
+    note・確定状態・related_events等を書き換えたら、自然失効を待たず
+    `aws cloudfront create-invalidation --paths '/event*'` を打つこと（[tools/README.md](tools/README.md)参照）。
 - **欠測監視**（データが来ないこと自体の検知。DynamoDB `namazu-devices`、
   [lambda/common/devices.py](lambda/common/devices.py)）:
   - 生存の主信号は `last_ingest_at_us`（ingestが**受信した壁時計時刻**）。firmwareは
