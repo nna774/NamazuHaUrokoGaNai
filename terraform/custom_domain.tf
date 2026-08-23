@@ -37,8 +37,72 @@ resource "aws_acm_certificate_validation" "custom" {
   certificate_arn = aws_acm_certificate.custom[0].arn
 }
 
+# /recent: 認証なし公開のため閲覧人数がそのままS3 GET回数に比例していた
+# (Electabuzz PR#29 https://github.com/nna774/Electabuzz/pull/29 と同じ構造の問題)。
+# 新データはバッチ送信間隔(最速のdevice2で15秒、firmware/src/config.hのkBatchSeconds)より
+# 速くは来ないので、固定15秒TTLでキャッシュしても鮮度は落ちない。minutes/start/deviceの
+# 組ごとに別キーなので、同じ窓を何人見ていてもオリジン(Lambda→S3)へのアクセスは一定になる。
+resource "aws_cloudfront_cache_policy" "api_recent" {
+  count       = local.custom_domain_enabled ? 1 : 0
+  name        = "namazu-api-recent"
+  min_ttl     = 0
+  default_ttl = 15
+  max_ttl     = 15
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "whitelist"
+      query_strings {
+        items = ["minutes", "start", "device"]
+      }
+    }
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+  }
+}
+
+# /event: クラウド確定済み(meta.jsonあり)の波形は書き込み後不変なので実質半永久(1年)まで
+# キャッシュできる。一方、速報のみ(meta.json未生成)の間にキャッシュしてしまうと、直後に
+# クラウド確定してもTTL分は「波形なし」を返し続けてしまう——地震直後に見に来た人ほど
+# これを踏みやすい。そのためTTLは固定値ではなくLambda側がCache-Controlヘッダで出し分ける
+# (速報のみ=max-age=0で実質無効化、確定後=EVENT_CONFIRMED_CACHE_S=1年。lambda/api/handler.py参照)。
+# note/checked等の手動編集(flag_event.py)をすぐ反映させたい時は自然失効を待たず
+# `aws cloudfront create-invalidation --paths '/event*'` を打つ。
+# ここのdefault_ttl=0は「オリジンがヘッダを返さなかった場合」の保険で、通常は使われない。
+resource "aws_cloudfront_cache_policy" "api_event" {
+  count       = local.custom_domain_enabled ? 1 : 0
+  name        = "namazu-api-event"
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 31536000 # 365日。EVENT_CONFIRMED_CACHE_S(lambda/api/handler.py)と揃える
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "whitelist"
+      query_strings {
+        items = ["id", "from", "to"]
+      }
+    }
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+  }
+}
+
 # API(Lambda Function URL)はカスタムドメインを直接張れないので CloudFront で前段する。
 # ライブデータの陳腐化を避けるため既定はキャッシュ無効(CachingDisabled)。
+# /recent・/event だけは上記の専用cache policyで個別にキャッシュを効かせる。
 resource "aws_cloudfront_distribution" "api" {
   count   = local.custom_domain_enabled ? 1 : 0
   enabled = true
@@ -65,6 +129,27 @@ resource "aws_cloudfront_distribution" "api" {
     cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
     # Managed-AllViewerExceptHostHeader: Host以外を素通し。
     # Function URL は自分のホスト名を要求するので Host は転送しない。CORS用にOriginは通す。
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+  }
+
+  # path_pattern はワイルドカード無しなのでパス完全一致(/eventは/eventsに巻き込まれない)。
+  ordered_cache_behavior {
+    path_pattern             = "/recent"
+    target_origin_id         = "api"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+    cached_methods           = ["GET", "HEAD"]
+    cache_policy_id          = aws_cloudfront_cache_policy.api_recent[0].id
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+  }
+
+  ordered_cache_behavior {
+    path_pattern             = "/event"
+    target_origin_id         = "api"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+    cached_methods           = ["GET", "HEAD"]
+    cache_policy_id          = aws_cloudfront_cache_policy.api_event[0].id
     origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
   }
 

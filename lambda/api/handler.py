@@ -45,13 +45,22 @@ MAX_RECENT_MINUTES = 30.0
 # S3スキャンほど窓を絞る必要はないが、上限はUIの選択肢(24時間)に合わせて置いておく。
 MAX_TEMP_HOURS = 24.0
 MAX_TEMP_POINTS = 300
+# クラウド確定済み(meta.json あり)イベントのCloudFrontキャッシュ秒数。
+# 波形は書き込み後不変なので実質半永久(1年)にしてよい。note/checked等の手動編集
+# (flag_event.py)を反映させたい時は、待つのではなく手元で
+# `aws cloudfront create-invalidation --paths '/event*'` を打つのが前提
+# （このTTLの長さでは自然失効を待つ運用は成立しない）。
+# 速報のみ(meta.json未生成)はクラウド確定への遷移を取りこぼさないようキャッシュしない
+# （CloudFront側のcache policyがCache-Controlヘッダを尊重する前提。terraform/custom_domain.tf参照）。
+EVENT_CONFIRMED_CACHE_S = 365 * 24 * 3600
 # CORSヘッダは Function URL の cors 設定に任せる（ここで access-control-* を
 # 返すと Function URL のぶんと二重になり、ブラウザが弾く）。ここは content-type のみ。
 HEADERS = {"content-type": "application/json"}
 
 
-def _json(code: int, obj) -> dict:
-    return {"statusCode": code, "headers": HEADERS, "body": json.dumps(obj, default=_default)}
+def _json(code: int, obj, cache_control: str | None = None) -> dict:
+    headers = HEADERS if cache_control is None else {**HEADERS, "cache-control": cache_control}
+    return {"statusCode": code, "headers": headers, "body": json.dumps(obj, default=_default)}
 
 
 def _default(o):
@@ -216,7 +225,9 @@ def _event(q):
             "note": item.get("note"),  # ユーザーの自由記述メモ（無ければ null）
             "related_events": list(item.get("related_events", [])),
         }
-        return _json(200, {"meta": meta, "waveform": _waveform_payload(np.empty((0, 3)), meta["onset_us"], 100.0)})
+        # 速報のみはクラウド確定への遷移をキャッシュで取りこぼさないよう明示的に無キャッシュ。
+        return _json(200, {"meta": meta, "waveform": _waveform_payload(np.empty((0, 3)), meta["onset_us"], 100.0)},
+                     cache_control="max-age=0")
     # 波形（events/<id>/*.bin を連結）
     parts, win_start, fs = [], None, 100.0
     resp = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"{s3util.EVENTS_PREFIX}/{eid}/")
@@ -233,7 +244,7 @@ def _event(q):
     # ダッシュボードのズームがエンベロープ(間引き)から100Hz生波形に切り替えられる。
     gal, win_start = _slice_gal(gal, win_start, fs, q.get("from"), q.get("to"))
     payload = _waveform_payload(gal, win_start, fs)
-    return _json(200, {"meta": meta, "waveform": payload})
+    return _json(200, {"meta": meta, "waveform": payload}, cache_control=f"public, max-age={EVENT_CONFIRMED_CACHE_S}")
 
 
 def _slice_gal(gal: np.ndarray, win_start: int, fs: float, frm, to):

@@ -64,6 +64,19 @@ python flag_event.py list                        # 立っているものを一�
 フラグを立てたイベントはダッシュボードの一覧では隠れ（「全件」表示でのみ薄く出る）、
 詳細で「人工地震（テスト等）」と表示される。震度や確定状態は変えない。
 
+**`flag_event.py`/`promote_event.py`共通の注意: `/event` APIはCloudFrontで書き込み後不変を
+前提に長期キャッシュしている**（確定イベントは1年相当、`terraform/custom_domain.tf`の
+`aws_cloudfront_cache_policy.api_event`。詳細は
+[docs/log/2026-08-23-api-cloudfront-recent-event-cache.md](../docs/log/2026-08-23-api-cloudfront-recent-event-cache.md)）。
+note・確定状態・related_events等を書き換えてダッシュボードにすぐ反映させたいときは、
+自然失効を待たず手元で invalidation を打つこと。
+
+```bash
+aws cloudfront create-invalidation \
+  --distribution-id "$(cd ../terraform && terraform output -raw api_distribution_id)" \
+  --paths '/event*'
+```
+
 ## イベントのメモ・手動昇格（`flag_event.py note` / `promote_event.py`）
 
 どのイベントにも自由記述メモ（`note`）を付けられる。
