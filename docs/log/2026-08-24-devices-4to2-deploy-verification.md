@@ -44,6 +44,30 @@ CloudWatchから効果を確認した記録。
 今回も予測通りの段差がデプロイの数分後には出た。デプロイのロールアウトが1分程度かかる
 （新旧コードが混在する過渡期がCloudWatch上にも見える）点は今回新たに観測できた知見。
 
+## DynamoDBの中身とLambdaログの健全性確認
+
+WCUの数字だけでなく、実際に書かれているデータとエラーの有無も見た。
+
+`namazu-devices`を`scan`して4件（device 1・2・3・稼働機、および試験用device
+`4294967295`）を確認:
+
+- 稼働中のdevice 1・2・3は`sensor_type`・`fw_version`・`batches_total`・
+  `last_batch_start_us`・`last_ingest_at_us`が正常値。`watchdog_muted`属性は
+  **存在しない**——mute中でない機体にはREMOVE節が効いて属性ごと消えている
+  （`if_not_exists`を使わず無条件REMOVEにしている設計通り）
+- `last_batch_start_us`と`last_ingest_at_us`の差は各機体16〜31秒で、30秒バッチ
+  間隔と整合。単調性判断をConditionExpressionからPython側の比較に変えた影響で
+  巻き戻り・停止は起きていない
+- `batches_total`は3台とも大きい値（35415/120808/117618）でデプロイを跨いで
+  途切れずカウントアップしている（ADD節の値が壊れていない）
+- 試験用device`4294967295`（mute中、直近バッチなし）は`watchdog_muted: true`の
+  まま——バッチが来ていないのでREMOVE節が実行されておらず、想定通り
+- 型（N/S/BOOL/L）もすべて期待通りで、Decimal周りの取り扱いで壊れている様子はない
+
+`/aws/lambda/namazu-ingest`のログをデプロイ後の時間帯で確認したところ、
+`print(f"... failed: {e!r}")`系のエラーメッセージは1件も出ておらず、
+START/END/REPORTのみで正常終了（Duration 148〜623ms、異常な遅延なし）。
+
 ## 何が可能になったこと
 
 `namazu-devices`への書き込みは当初の5回/バッチ（#134前）から2回/バッチまで削減され、
