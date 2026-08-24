@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import pytest
 
@@ -202,3 +204,19 @@ def test_expand_event_ids_passes_full_ids_through():
 def test_expand_event_ids_mixes_bare_and_full():
     out = detectlab.expand_event_ids(["0003-59573459", "59577127"], [1, 2])
     assert out == ["0003-59573459", "0001-59577127", "0002-59577127"]
+
+
+def test_main_at_single_device_without_event(monkeypatch, tmp_path):
+    # --event無し(--at系)でargs.eventがNoneのまま`len(args.event)`に渡ると落ちる回帰
+    # （b97892bで`elif args.event:`が`elif len(args.event) == 1:`に変わった際に混入）。
+    data = synth_noise(FS, SECS, rms_gal=0.2, seed=1)
+    monkeypatch.setattr(detectlab, "resolve_bucket", lambda explicit: "dummy-bucket")
+    monkeypatch.setattr(detectlab, "load_s3_window",
+                         lambda bucket, end_us, seconds, dev, use_cache=True: (data, 0, FS))
+    out = tmp_path / "out.png"
+    monkeypatch.setattr(sys, "argv", [
+        "detectlab.py", "--at", "2026-07-24 20:53", "--device", "1",
+        "--minutes", "1", "--lead-min", "1", "--out", str(out),
+    ])
+    assert detectlab.main() == 0
+    assert out.exists()
