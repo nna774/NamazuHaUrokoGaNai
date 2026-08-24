@@ -66,34 +66,34 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
     # 測定開始時刻ベースのキーなので二重送信は同一キー上書き（冪等）
     s3.put_object(Bucket=BUCKET, Key=key, Body=raw,
                   ContentType="application/octet-stream")
-    # 生存台帳を更新（watchdog の欠測判定・/devices 表示の元）。ここは主経路ではないので、
-    # 失敗してもバッチ保存自体は成功扱いにする（デバイスに無駄な再送をさせない）。
+    # 生存台帳の現在値を先に1回だけ読む。record_batch_fragments()のlast_batch_start_us
+    # 単調性判断と、後段の再起動/OTA/起動検知の判定の両方でこの1回のGetItemを使い回す
+    # （docs/log/2026-08-23-devices-batch-uplink-consolidation.md）。ここは主経路では
+    # ないので、失敗してもバッチ保存自体は成功扱いにする（デバイスに無駄な再送をさせない）。
+    item = None
+    try:
+        item = devices.get_device(b.meta.device_id)
+    except Exception as e:  # noqa: BLE001
+        print(f"devices.get_device failed: {e!r}")
+
     # X-Namz-Fw-Version（batch-uplink v1.6.0のextraRequestHeaders経由、firmwareが
     # 毎バッチ乗せる）は「今このデバイスが動かしている版数」。サーバ側からOTAの
     # 進行状況・停滞原因を見えるようにする（docs/ota.md §2 未決事項1への対応）。
-    try:
-        devices.record_batch(b.meta.device_id, b.meta.batch_start_us,
-                             int(time.time() * 1e6), last_batch_key=key,
-                             fw_version=headers.get("x-namz-fw-version", ""))
-    except Exception as e:  # noqa: BLE001
-        print(f"devices.record_batch failed: {e!r}")
-
-    # mute中(watchdog監視対象外、tools/mute_device.py参照)でも実際に送信が来た
-    # 以上は監視を復帰させる。試験用に繋いだ機体がそのまま黙って再送スパムに
-    # ならないよう、試験開始（＝最初のバッチ受信）で自動的にunmuteする。
-    # センサ種別（ヘッダに毎回乗っているので追加コスト無し）も同じ項目への
-    # 書き込みなので、1回のupdate_itemにまとめてDynamoDBのWCUを節約する
-    # （docs/log/2026-08-23-s3-dynamodb-cost-cross-account-investigation.md）。
-    # 各モジュールは実行しない断片だけを返し、ここで集約する
-    # （docs/log/2026-08-23-devices-update-builder.md、関心事が増えても
-    # 組み合わせ専用関数を書かずに済む）。
+    # record_batch_fragments()（batch-uplink v3.2.0〜）・mute解除・センサ種別は
+    # 同一項目への書き込みなので、各モジュールが実行しない断片だけを返し、ここで
+    # 集約して1回のupdate_itemにまとめる（関心事が増えても組み合わせ専用関数を
+    # 書かずに済む）。
     try:
         builder = dynamo_update.UpdateItemBuilder()
+        for expr, values in devices.record_batch_fragments(
+                item, b.meta.batch_start_us, int(time.time() * 1e6),
+                last_batch_key=key, fw_version=headers.get("x-namz-fw-version", "")):
+            builder.add(expr, values)
         builder.add(*watchdog_mute.clear_mute_fragment())
         builder.add(*device_meta.sensor_type_fragment(b.meta.sensor_type))
         builder.execute(_devices_table, b.meta.device_id)
     except Exception as e:  # noqa: BLE001
-        print(f"devices update (mute/sensor_type) failed: {e!r}")
+        print(f"devices update failed: {e!r}")
 
     # 温度トレイラーがあれば記録（既に wire.parse 済みなので追加のS3アクセス無し）。
     # ダッシュボードの読み取り側が毎回 raw/ を漁らずに済むよう、書き込み側で1回だけ
@@ -129,12 +129,12 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
         except Exception as e:  # noqa: BLE001
             print(f"metrics.record_backlog failed: {e!r}")
 
-    # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。ここも主経路では
-    # ないので、失敗してもバッチ保存自体は成功扱いにする。
+    # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。上で取得したitemを使い回す
+    # （このバッチ書き込みはpending_restart_requested_at_us/pending_ota_versionに触れない
+    # ので、書き込みの前後で値は変わらない）。ここも主経路ではないので、失敗しても
+    # バッチ保存自体は成功扱いにする。
     extra_headers: dict[str, str] = {}
-    item = None
     try:
-        item = devices.get_device(b.meta.device_id)
         if item:
             # リモート再起動要求（tools/request_restart.py が立てる）は一度伝えたら
             # 消す一回性の要求なので、ヘッダを付けた直後にクリアする。

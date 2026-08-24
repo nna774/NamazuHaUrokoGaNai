@@ -21,17 +21,21 @@ Fragment = tuple[str, dict]
 
 
 class UpdateItemBuilder:
-    """SET/REMOVE式の断片を集約し、1回のupdate_itemに束ねる。"""
+    """SET/ADD/REMOVE式の断片を集約し、1回のupdate_itemに束ねる。"""
 
     def __init__(self) -> None:
         self._set: list[str] = []
+        self._add: list[str] = []
         self._remove: list[str] = []
         self._values: dict = {}
 
     def add(self, expr: str, values: dict) -> None:
-        """`("SET a = :x", {":x": 1})` や `("REMOVE b", {})` 形式の断片を1つ追加する。"""
+        """`("SET a = :x", {":x": 1})` ・ `("ADD b :y", {":y": 1})` ・
+        `("REMOVE c", {})` 形式の断片を1つ追加する。"""
         if expr.startswith("SET "):
             self._set.append(expr[len("SET "):])
+        elif expr.startswith("ADD "):
+            self._add.append(expr[len("ADD "):])
         elif expr.startswith("REMOVE "):
             self._remove.append(expr[len("REMOVE "):])
         else:
@@ -43,6 +47,8 @@ class UpdateItemBuilder:
         clauses = []
         if self._set:
             clauses.append("SET " + ", ".join(self._set))
+        if self._add:
+            clauses.append("ADD " + ", ".join(self._add))
         if self._remove:
             clauses.append("REMOVE " + ", ".join(self._remove))
         if not clauses:
