@@ -93,10 +93,12 @@ z軸の低周波ノイズを避けて水平2軸だけを見ることで、遠地
 
 ### worktreeから実行する時の注意
 
-worktreeには`.venv`が無く`terraform output`も通らないことがある。共有チェックアウト側
-（`/Users/nana/codes/NamazuHaUrokoGaNai/terraform`）で`terraform output -raw data_bucket`を
-引いて`--bucket`（または環境変数`NAMZ_RAW_BUCKET`）に明示指定し、
-`../../../.venv/bin/python3`のようにフルパスでPythonを呼ぶ。
+worktreeには`.venv`が無く`terraform output`も通らないことがある。rawバケット名は
+`namazu-data-486414336274`（AWSアカウントIDを含むため変わらない。疑わしければ共有
+チェックアウト側の`/Users/nana/codes/NamazuHaUrokoGaNai/terraform`で
+`terraform output -raw data_bucket`を引いて照合する）を`--bucket`（または環境変数
+`NAMZ_RAW_BUCKET`/`NAMZ_BUCKET`）に直接指定し、`../../../.venv/bin/python3`のように
+フルパスでPythonを呼ぶ。
 
 ## 3. ログを書く
 
@@ -116,7 +118,7 @@ worktreeには`.venv`が無く`terraform output`も通らないことがある�
 `tools/promote_event.py`で永久保存する。
 
 ```bash
-export NAMZ_BUCKET=<terraform output -raw data_bucket の値>
+export NAMZ_BUCKET=namazu-data-486414336274   # rawバケット名。変わらないので固定値でよい
 export NAMZ_EVENTS_TABLE=namazu-events
 export AWS_REGION=ap-northeast-1
 python tools/promote_event.py --onset "<発生時刻 or 検知した立ち上がり時刻>" \
