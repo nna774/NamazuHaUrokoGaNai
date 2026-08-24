@@ -73,7 +73,9 @@ resource "aws_cloudfront_cache_policy" "api_recent" {
 # これを踏みやすい。そのためTTLは固定値ではなくLambda側がCache-Controlヘッダで出し分ける
 # (速報のみ=max-age=0で実質無効化、確定後=EVENT_CONFIRMED_CACHE_S=1年。lambda/api/handler.py参照)。
 # note/checked等の手動編集(flag_event.py)をすぐ反映させたい時は自然失効を待たず
-# `aws cloudfront create-invalidation --paths '/event*'` を打つ。
+# `aws cloudfront create-invalidation --paths '/event?id=<eid>'` を打つ（query_stringsを
+# キャッシュキーに含むのでevent_id単位で絞れる。`/event*`は他の確定イベントまで
+# 巻き添えにするので使わない。詳細はtools/README.md参照）。
 # ここのdefault_ttl=0は「オリジンがヘッダを返さなかった場合」の保険で、通常は使われない。
 resource "aws_cloudfront_cache_policy" "api_event" {
   count       = local.custom_domain_enabled ? 1 : 0
