@@ -679,7 +679,7 @@ def main() -> int:
     if args.csv:
         data, start_us, fs = load_csv(args.csv)
         device_id = None  # CSVは任意データなので--deviceの既定値は意味を持たない
-    elif len(args.event) == 1:
+    elif args.event and len(args.event) == 1:
         eid = args.event[0]
         data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), eid,
                                           use_cache=not args.no_cache)
