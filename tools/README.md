@@ -66,10 +66,18 @@ python flag_event.py list                        # 立っているものを一�
 
 **`flag_event.py`/`promote_event.py`共通の注意: `/event` APIはCloudFrontで書き込み後不変を
 前提に長期キャッシュしている**（確定イベントは1年相当、`terraform/custom_domain.tf`の
-`aws_cloudfront_cache_policy.api_event`。詳細は
+`aws_cloudfront_cache_policy.api_event`。キャッシュキーは`id`クエリを含むためevent_idごとに
+別エントリ。詳細は
 [docs/log/2026-08-23-api-cloudfront-recent-event-cache.md](../docs/log/2026-08-23-api-cloudfront-recent-event-cache.md)）。
-note・確定状態・related_events等を書き換えてダッシュボードにすぐ反映させたいときは、
-自然失効を待たず手元で invalidation を打つこと。
+
+**無効化が要るのは、既に一度でも取得された(=キャッシュされ得た)既存event_idの内容を
+`flag_event.py`のnote/confirm/unconfirm/relate等で書き換えて、ダッシュボードにすぐ
+反映させたい時だけ。** `promote_event.py`が新規に発行するevent_idは、書き込み前は
+まだ誰にも取得され得ないので、初回フェッチ（手元での確認curl等）は無効化なしで最新の
+内容を返す——新規イベント作成の直後に反射的に打つ必要はない
+（実例: [docs/log/2026-08-24-cloudfront-invalidation-scope.md](../docs/log/2026-08-24-cloudfront-invalidation-scope.md)）。
+迷ったら安全側に倒して打っても実害はない（無料枠内・数分で反映）が、判断に迷わないよう
+上の基準で線引きする。
 
 ```bash
 aws cloudfront create-invalidation \

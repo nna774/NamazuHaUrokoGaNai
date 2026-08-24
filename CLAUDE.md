@@ -78,9 +78,13 @@
     無効化。`terraform/custom_domain.tf`の`aws_cloudfront_cache_policy.api_event`、
     `lambda/api/handler.py`の`EVENT_CONFIRMED_CACHE_S`。Electabuzz PR#29と同じ「閲覧人数が
     S3 GET回数に比例する」構造への対策——2026-08-23時点でS3コスト増の実際の主因だったかは
-    未検証）。`flag_event.py`/`promote_event.py`で
-    note・確定状態・related_events等を書き換えたら、自然失効を待たず
-    `aws cloudfront create-invalidation --paths '/event*'` を打つこと（[tools/README.md](tools/README.md)参照）。
+    未検証）。キャッシュキーは`id`クエリを含むためevent_idごとに別エントリ。
+    **無効化が要るのは、既に一度でも取得された(=キャッシュされ得た)既存event_idの内容を
+    `flag_event.py`のnote/confirm/unconfirm/relate等で書き換えた時だけ**——自然失効を待たず
+    `aws cloudfront create-invalidation --paths '/event*'` を打つこと。`promote_event.py`が
+    新規に発行するevent_idは書き込み前は誰にも取得され得ないため、初回フェッチは無効化なしで
+    最新の内容を返す（新規作成の直後に反射的に打つ必要はない。詳細・実例は
+    [tools/README.md](tools/README.md)参照）。
 - **欠測監視**（データが来ないこと自体の検知。DynamoDB `namazu-devices`、
   [lambda/common/devices.py](lambda/common/devices.py)）:
   - 生存の主信号は `last_ingest_at_us`（ingestが**受信した壁時計時刻**）。firmwareは
