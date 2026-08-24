@@ -67,7 +67,7 @@ python flag_event.py list                        # 立っているものを一�
 **`flag_event.py`/`promote_event.py`共通の注意: `/event` APIはCloudFrontで書き込み後不変を
 前提に長期キャッシュしている**（確定イベントは1年相当、`terraform/custom_domain.tf`の
 `aws_cloudfront_cache_policy.api_event`。キャッシュキーは`id`クエリを含むためevent_idごとに
-別エントリ。詳細は
+別エントリ（`from`/`to`もwhitelistされているが`_event()`ハンドラは未使用）。詳細は
 [docs/log/2026-08-23-api-cloudfront-recent-event-cache.md](../docs/log/2026-08-23-api-cloudfront-recent-event-cache.md)）。
 
 **無効化が要るのは、既に一度でも取得された(=キャッシュされ得た)既存event_idの内容を
@@ -76,13 +76,18 @@ python flag_event.py list                        # 立っているものを一�
 まだ誰にも取得され得ないので、初回フェッチ（手元での確認curl等）は無効化なしで最新の
 内容を返す——新規イベント作成の直後に反射的に打つ必要はない
 （実例: [docs/log/2026-08-24-cloudfront-invalidation-scope.md](../docs/log/2026-08-24-cloudfront-invalidation-scope.md)）。
-迷ったら安全側に倒して打っても実害はない（無料枠内・数分で反映）が、判断に迷わないよう
-上の基準で線引きする。
+
+**打つ時は`--paths`に実際に書き換えたevent_idを`/event?id=<eid>`の形で列挙する。**
+`/event*`のようなワイルドカードは使わない——キャッシュキーがevent_idごとに分かれている
+ので、絞らずに全消しすると触っていない確定済みイベント(実質1年キャッシュ)まで巻き添えで
+飛ばし、次に誰かがそれを開いた瞬間Lambda→S3を叩かせてしまう。長期キャッシュを入れた目的
+（Electabuzz PR#29と同じ「閲覧人数比例のS3 GET」対策）を自分で壊すことになるので、迷った
+ら安全側で全部打つのではなく、対象を絞ることを優先する。
 
 ```bash
 aws cloudfront create-invalidation \
   --distribution-id "$(cd ../terraform && terraform output -raw api_distribution_id)" \
-  --paths '/event*'
+  --paths '/event?id=0001-59462454' '/event?id=0002-59462111'
 ```
 
 ## イベントのメモ・手動昇格（`flag_event.py note` / `promote_event.py`）
