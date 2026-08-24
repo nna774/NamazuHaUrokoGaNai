@@ -42,10 +42,19 @@ def mute(device_id: int) -> None:
     )
 
 
+def clear_mute_fragment() -> tuple[str, dict]:
+    """clear_mute()と同じ書き込み内容を、実行せず断片として返す。
+
+    ingestの毎バッチ経路では他の関心事(device_meta.sensor_type_fragment()等)と
+    まとめて1回のupdate_itemに合流させたいので、`dynamo_update.UpdateItemBuilder`
+    に渡す用途で公開する（docs/log/2026-08-23-ingest-devices-table-update-item-merge.md）。
+    """
+    return "REMOVE watchdog_muted", {}
+
+
 def clear_mute(device_id: int) -> None:
-    """監視対象に戻す。ingestがバッチを受信するたび無条件で呼んでよい
-    （mute中でなければ何もしない、REMOVEは対象属性が無くても失敗しない）。"""
-    _table().update_item(
-        Key={"device_id": device_id},
-        UpdateExpression="REMOVE watchdog_muted",
-    )
+    """監視対象に戻す（単体呼び出し用）。ingest以外の呼び出し元
+    （手元CLI等、他の関心事と合流させる必要が無い場合）はこちらを直接使う。
+    mute中でなくても無条件で呼んでよい（REMOVEは対象属性が無くても失敗しない）。"""
+    expr, _ = clear_mute_fragment()
+    _table().update_item(Key={"device_id": device_id}, UpdateExpression=expr)
