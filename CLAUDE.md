@@ -15,6 +15,7 @@
 | 設計判断の理由（サンプリング/震度アルゴリズム/信頼性/S3レイアウト） | [docs/design.md](docs/design.md) |
 | いま何がどこまで動いているか・実機の検証結果・ハード配線 | [docs/STATUS.md](docs/STATUS.md) |
 | 実機のノイズ特性・検出限界・センサ選定の知見 | [docs/noise.md](docs/noise.md) |
+| 「〇〇地震、捉えてた？」と聞かれた時にやる事後解析の標準手順 | [docs/post_hoc_detection.md](docs/post_hoc_detection.md) |
 | 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
 | ADXL355機（device 2）の導入経緯・実装済み内容 | [docs/adxl355.md](docs/adxl355.md) |
 | ジオフォン(速度センサ)導入作戦（検討中・未着手） | [docs/geophone.md](docs/geophone.md) |
