@@ -38,7 +38,53 @@ curl -s "https://api.namazu.dark-kuins.net/events?all=1&size=20" | python3 -m js
 
 見つかった場合は、その`onset_us`・`max_intensity`・`peak_gal`・`cloud_confirmed`を記録し、
 手順2（detectlab裏取り）は任意（自動検知の答え合わせをしたい時だけ）、手順5（手動イベント化）
-は不要（すでにイベントがある）。
+は不要（すでにイベントがある）。**ただし、保存済み範囲の先にコーダが残っていないかは
+必ず確認する**（下記）。
+
+### イベントがあっても、保存済み範囲の先にコーダが残っていないか確認する
+
+自動検知(`cloud_confirmed`)・手動昇格(`manual`)いずれでも、イベントの**保存済み範囲**
+（`waveform_prefix`配下。`cloud_confirmed`ならdetectの`POST_SECONDS`、`manual`なら
+`promote_event.py`実行時の`--post`までしか波形が残っていない）**の外に、振幅では
+目立たないコーダが続いている可能性がある**。2026-08-23の茨城県南部M5.9では、STA/LTAが
+閾値を割った後もdevice間の直線性相関が2分近く高いまま残っていた
+（[ログ](log/2026-08-23-ibaraki-nanbu-m5.9-post-hoc-detection.md)、区間別の定量化例は
+[2026-08-24浦河沖M6.0のログ](log/2026-08-24-urakawa-oki-m6.0-post-hoc-detection.md)参照）。
+振幅RMSだけの確認ではこの種のコーダは見えない
+（[2026-08-23のバックフィル作業](log/2026-08-23-event-window-backfill.md)で踏んだ限界）。
+
+確認手順:
+
+```bash
+# 保存範囲の終端(onset_us + --post、または detect の POST_SECONDS=600秒後)付近を
+# 中心に、rawから直接さらに数分先まで見る
+python tools/detectlab.py --at "<保存範囲の終端付近>" \
+  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 5 --device 1 2 \
+  --corr-win 2 --out docs/log/img/<slug>-tail-check.png
+```
+
+3段目の直線性一致度パネルで、終端に近づくにつれて相関がbackground水準（frac>0.6が
+15-25%程度、`2026-08-24`のログの区間別表を参照）まで下がっているかを見る。まだ高いまま
+（0.6超が頻発）ならコーダはまだ続いている。
+
+**続いていれば保存範囲を延長する:**
+
+- **`manual`イベント**: `tools/promote_event.py`を**同じ`--onset`のまま`--post`だけ
+  伸ばして再実行**する。event_idはonsetの30秒バケットから決まるので同じevent_idを
+  指し直し、raw再コピー・`meta.json`再計算・DynamoDBの`manual`レコード更新が冪等に
+  上書きされる（何度でも安全に打ち直せる）。
+- **`cloud_confirmed`（完全自動）イベント**: `promote_event.py`をそのまま使うと
+  `manual`フラグを立てたり、再計算した震度でDynamoDBの確定値を上書きしてしまう
+  （detectの計算結果と一致するはずだが、意図せず書き換える必要は無い）。
+  [2026-08-23の既存イベントバックフィル](log/2026-08-23-event-window-backfill.md)の
+  やり方（`store.copy_raw_to_event`でraw batchを追加コピーし、`meta.json`だけ拡張後の
+  全区間で`jma_fft`を再計算して上書き。DynamoDBの`confirmed_intensity`等は触らない）
+  に倣う。
+
+延長した/しなかった判断とその根拠は、手順3のログに残す。**どちらの場合も既存event_idの
+内容を書き換えているので、手順4末尾のCloudFront invalidationが要る側**（新規発行では
+なく既存の書き換え）——`aws cloudfront create-invalidation --paths '/event?id=<eid>'`を
+延長した各event_idぶん打つ。
 
 ## 2. detectlabで解析する
 
