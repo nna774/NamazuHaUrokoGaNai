@@ -184,7 +184,19 @@ python tools/flag_event.py relate 0001-<bucket> 0002-<bucket>
 
 **CloudFront invalidationは新規event_id発行だけなら不要。** `/event`のキャッシュキーは
 `id`クエリを含みevent_idごとに別エントリなので、書き込み前に誰にも取得され得ない新規IDの
-初回フェッチは無効化なしで最新の内容を返す
-（[#141](https://github.com/nna774/NamazuHaUrokoGaNai/pull/141)）。
-無効化が要るのは、既存event_idのnote・confirmed状態・related_eventsを**後から**書き換えた
-時だけ（`tools/README.md`参照）。
+初回フェッチは無効化なしで最新の内容を返す。無効化が要るのは、既存event_idのnote・
+confirmed状態・related_eventsを**後から**書き換えた時だけ——手順1のコーダ延長
+（`relate`後にさらに`note`を足す等）で既存event_idに触った場合はここに該当する。
+
+打つ時は`--paths`に実際に書き換えたevent_idを`/event?id=<eid>`の形で列挙する。
+**`/event*`のようなワイルドカードは使わない**——キャッシュキーがevent_idごとに
+分かれているので、絞らずに全消しすると触っていない確定済みイベント(実質1年キャッシュ)
+まで巻き添えで飛ばし、長期キャッシュを入れた目的（閲覧人数比例のS3 GET対策）を
+自分で壊すことになる（[#141](https://github.com/nna774/NamazuHaUrokoGaNai/pull/141)、
+`tools/README.md`参照）。
+
+```bash
+aws cloudfront create-invalidation \
+  --distribution-id "$(cd ../../../terraform && terraform output -raw api_distribution_id)" \
+  --paths '/event?id=0001-<bucket>' '/event?id=0002-<bucket>'
+```
