@@ -189,6 +189,53 @@ def test_align_pair_empty_when_no_overlap():
     assert len(t_c) == 0
 
 
+def test_pair_rolling_correlation_matches_manual_calc():
+    # per_deviceタプル(device_id, start_us, fs, ratio, rect, onsets)からの計算が、
+    # align_pair+rolling_correlationを手で呼んだ場合と一致することを確認する。
+    fs = 10.0
+    n = 200
+    rng = np.random.default_rng(3)
+    common = np.sin(2 * np.pi * 0.3 * np.arange(n) / fs)
+    rect_a = common + 0.02 * rng.standard_normal(n)
+    rect_b = common + 0.02 * rng.standard_normal(n)
+    per_device = [
+        (1, 0, fs, None, rect_a, []),
+        (2, 0, fs, None, rect_b, []),
+    ]
+    t_c, corr = detectlab.pair_rolling_correlation(per_device, ref_us=0, corr_win=2.0)
+    t = np.arange(n) / fs
+    expected_t, ea, eb = detectlab.align_pair(t, rect_a, t, rect_b, fs)
+    expected_corr = detectlab.rolling_correlation(ea, eb, fs, 2.0)
+    assert np.allclose(t_c, expected_t)
+    np.testing.assert_allclose(corr, expected_corr, equal_nan=True)
+
+
+def test_print_corr_bin_report_flags_elevated_window(capsys):
+    fs = 10.0
+    n = 400
+    t = np.arange(n) / fs
+    corr = np.full(n, -0.1)
+    corr[(t >= 20) & (t < 40)] = 0.9  # 立ち上がり区間
+    detectlab.print_corr_bin_report(t, corr, bin_s=20.0, thr=0.6, origin_us=None)
+    out = capsys.readouterr().out
+    assert "t=[    20,    40)s" in out
+    assert "frac(corr>=0.6)=1.00" in out
+
+
+def test_print_corr_bin_report_prints_background_when_origin_given(capsys):
+    t = np.linspace(-160, -20, 100)
+    corr = np.full_like(t, 0.8)
+    detectlab.print_corr_bin_report(t, corr, bin_s=20.0, thr=0.6, origin_us=0)
+    out = capsys.readouterr().out
+    assert "背景(t=-150〜-30s)" in out
+
+
+def test_print_corr_bin_report_handles_empty_input(capsys):
+    detectlab.print_corr_bin_report(np.array([]), np.array([]), bin_s=20.0, thr=0.6, origin_us=None)
+    out = capsys.readouterr().out
+    assert "データなし" in out
+
+
 def test_expand_event_ids_builds_full_ids_from_bare_suffix():
     # "59577127"のような裸のバケット番号は --device と組んで完全なIDへ展開される
     assert detectlab.expand_event_ids(["59577127"], [1, 2]) == \

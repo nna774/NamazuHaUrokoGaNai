@@ -60,12 +60,13 @@ curl -s "https://api.namazu.dark-kuins.net/events?all=1&size=20" | python3 -m js
 # 中心に、rawから直接さらに数分先まで見る
 python tools/detectlab.py --at "<保存範囲の終端付近>" \
   --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 5 --device 1 2 \
-  --corr-win 2 --out docs/log/img/<slug>-tail-check.png
+  --corr-win 2 --corr-bin 20 --out docs/log/img/<slug>-tail-check.png
 ```
 
-3段目の直線性一致度パネルで、終端に近づくにつれて相関がbackground水準（frac>0.6が
-15-25%程度、`2026-08-24`のログの区間別表を参照）まで下がっているかを見る。まだ高いまま
-（0.6超が頻発）ならコーダはまだ続いている。
+3段目の直線性一致度パネルは目視の全体像用に、`--corr-bin 20`のテキスト出力は
+「どのbinまで背景水準より明確に高いか」の数値判断用に使う（背景水準は`--eew`指定時に
+自動で併記される、目安はfrac 15-25%程度）。終端に近づくにつれてbin別のfrac/mean_corrが
+背景の値まで下がっているかを見る。まだ高いまま（0.6超が頻発）ならコーダはまだ続いている。
 
 **続いていれば保存範囲を延長する:**
 

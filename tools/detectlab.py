@@ -30,6 +30,9 @@
         --eew "36.7,140.6,10,2026-08-08 03:41:32" --out /tmp/overlay.png
     # イベントID2つで重ね描き（保存済みevents/範囲をそのまま使う。onset時刻の手計算は不要）
     python detectlab.py --event 0001-59577127 0002-59577127 --out /tmp/overlay.png
+    # 直線性の一致度をbinごとにテキスト集計（コーダが背景水準に戻ったかを目視でなく数値で確認）
+    python detectlab.py --at "2026-08-27 04:21:00" --minutes 8 --device 1 2 \
+        --eew "38.1,143.9,10,2026-08-27 04:21:00" --corr-bin 20
     # 裸のバケット番号(event_idの"-"より後ろ)+--deviceでも同じ（同一地震なら大抵同じバケット）
     python detectlab.py --event 59577127 --device 1 2 --out /tmp/overlay.png
     # 保存範囲より外まで見たい時は --from-raw でraw/を--minutes/--lead-minぶん都度取り直す
@@ -206,6 +209,54 @@ def align_pair(t_a: np.ndarray, y_a: np.ndarray, t_b: np.ndarray, y_b: np.ndarra
         return np.array([]), np.array([]), np.array([])
     t = np.arange(t0, t1, 1.0 / fs)
     return t, np.interp(t, t_a, y_a), np.interp(t, t_b, y_b)
+
+
+def pair_rolling_correlation(per_device, ref_us: int, corr_win: float
+                             ) -> tuple[np.ndarray, np.ndarray]:
+    """ちょうど2機ぶんの直線性系列から移動Pearson相関(t[s]・corr)を計算する。
+
+    plot_overlayの一致度パネルと同じ計算（重ね描き専用、要2機）。プロットせず
+    テキストレポートだけ欲しい時(--corr-bin)にも使うため、matplotlib非依存で切り出した。
+    """
+    (_, start_a, fs_a, _, rect_a, _), (_, start_b, fs_b, _, rect_b, _) = per_device
+    t_a = (start_a - ref_us) / 1e6 + np.arange(len(rect_a)) / fs_a
+    t_b = (start_b - ref_us) / 1e6 + np.arange(len(rect_b)) / fs_b
+    t_c, ra, rb = align_pair(t_a, rect_a, t_b, rect_b, min(fs_a, fs_b))
+    if len(t_c) == 0:
+        return t_c, np.array([])
+    return t_c, rolling_correlation(ra, rb, min(fs_a, fs_b), corr_win)
+
+
+def print_corr_bin_report(t_c: np.ndarray, corr: np.ndarray, bin_s: float,
+                          thr: float, origin_us: int | None) -> None:
+    """直線性の一致度をbin_s秒のbinで集計してテキスト出力する。
+
+    相関パネルを目視で「t=200sあたりまで高いまま残っているか」と読むのは主観に
+    頼るため、`docs/post_hoc_detection.md`手順1の「コーダが保存範囲外に残って
+    いないかの確認」を数値でやるためのもの。2026-08-24浦河沖M6.0・2026-08-27
+    三陸沖M6.1の事後解析で同種の集計を都度その場のスクリプトで書いていたのを、
+    detectlab.py本体に引き上げた。
+    """
+    if len(t_c) == 0:
+        print("# 相関binレポート: データなし（2機の重なり区間が無い）")
+        return
+    lo = math.floor(t_c.min() / bin_s) * bin_s
+    hi = math.ceil(t_c.max() / bin_s) * bin_s
+    edges = np.arange(lo, hi + bin_s, bin_s)
+    print(f"# 直線性の一致度をt={bin_s:g}秒binで集計（閾値{thr:g}、corr_winは--corr-win参照）")
+    for i in range(len(edges) - 1):
+        m = (t_c >= edges[i]) & (t_c < edges[i + 1])
+        if not m.any():
+            continue
+        frac = float(np.mean(corr[m] >= thr))
+        mean_c = float(np.mean(corr[m]))
+        print(f"  t=[{edges[i]:6.0f},{edges[i + 1]:6.0f})s  "
+              f"frac(corr>={thr:g})={frac:.2f}  mean_corr={mean_c:+.2f}")
+    if origin_us is not None:
+        bg_m = (t_c >= -150) & (t_c < -30)
+        if bg_m.any():
+            print(f"  背景(t=-150〜-30s)  frac(corr>={thr:g})={np.mean(corr[bg_m] >= thr):.2f}  "
+                  f"mean_corr={np.mean(corr[bg_m]):+.2f}")
 
 
 def detect_onsets(ratio: np.ndarray, fs: float, start_us: int, thr: float) -> list[int]:
@@ -456,12 +507,9 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0):
                 a.axvline(ot, color=color, lw=0.8, alpha=0.6, ls="--")
 
     if show_corr:
-        (dev_a, start_a, fs_a, _, rect_a, _), (dev_b, start_b, fs_b, _, rect_b, _) = per_device
-        t_a = (start_a - ref_us) / 1e6 + np.arange(len(rect_a)) / fs_a
-        t_b = (start_b - ref_us) / 1e6 + np.arange(len(rect_b)) / fs_b
-        t_c, ra, rb = align_pair(t_a, rect_a, t_b, rect_b, min(fs_a, fs_b))
+        dev_a, dev_b = per_device[0][0], per_device[1][0]
+        t_c, corr = pair_rolling_correlation(per_device, ref_us, corr_win)
         if len(t_c):
-            corr = rolling_correlation(ra, rb, min(fs_a, fs_b), corr_win)
             axs[2].plot(t_c, corr, lw=0.8, color="k")
             axs[2].fill_between(t_c, 0, corr, where=corr >= 0.6, color="C2", alpha=0.25,
                                interpolate=True)
@@ -577,6 +625,12 @@ def main() -> int:
                    help="直線性の移動窓[秒]（既定3）")
     p.add_argument("--corr-win", dest="corr_win", type=float, default=2.0,
                    help="2機重ね描き時、直線性の一致度パネルに使う移動相関の窓[秒]（既定2）")
+    p.add_argument("--corr-bin", dest="corr_bin", type=float,
+                   help="2機重ね描き時、直線性の一致度をこの秒数のbinでテキスト集計して出す"
+                        "（既定は集計しない）。コーダが保存範囲外までbackground水準に戻らず"
+                        "残っていないかを、相関パネルの目視ではなく数値で確認する用"
+                        "（docs/post_hoc_detection.md手順1参照）。--eew指定時はbackground"
+                        "(発生-150秒〜-30秒)の値も併記する")
     p.add_argument("--axes", choices=["xyz", "xy"], default="xyz",
                    help="STA/LTA・スペクトログラム・直線性に使う軸。xy=水平のみ"
                         "（z軸の低周波ノイズが大きい時、遠地弱震で有利）")
@@ -702,6 +756,9 @@ def main() -> int:
                 d_data, d_start, d_fs = load_s3_event(bucket, eid, use_cache=not args.no_cache)
             per_device.append(overlay_source(f"event={eid}", dev, d_data, d_start, d_fs))
         ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
+        if args.corr_bin and len(per_device) == 2:
+            t_c, corr = pair_rolling_correlation(per_device, ref_us, args.corr_win)
+            print_corr_bin_report(t_c, corr, args.corr_bin, 0.6, origin_us)
         plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
                     show=args.show or not args.out, corr_win=args.corr_win)
         return 0
@@ -728,6 +785,9 @@ def main() -> int:
                                                        use_cache=not args.no_cache)
                 per_device.append(overlay_source(f"device={dev}", dev, d_data, d_start, d_fs))
             ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
+            if args.corr_bin and len(per_device) == 2:
+                t_c, corr = pair_rolling_correlation(per_device, ref_us, args.corr_win)
+                print_corr_bin_report(t_c, corr, args.corr_bin, 0.6, origin_us)
             plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
                         show=args.show or not args.out, corr_win=args.corr_win)
             return 0
