@@ -187,7 +187,7 @@ python tools/flag_event.py relate 0001-<bucket> 0002-<bucket>
 「新規か既存か」ではなく「その時点までに誰かが`/event?id=<eid>`を叩けた（＝キャッシュされ得た）
 か」。具体的には:
 
-- **今回のように`promote_event.py`で新規発行した直後に`relate`/`note`で続けて書き換える一連の
+- **`promote_event.py`で新規発行した直後に`relate`/`note`で続けて書き換える一連の
   操作は不要。** event_idは昇格するまで存在せず、ダッシュボードのどこにもリンクされていない
   ため、昇格からrelateまでの間に誰かが取得できる余地が実質無い。relateが「書き換え」である
   ことは事実だが、その前の状態を誰もキャッシュしていないので、初回フェッチはrelate後の
