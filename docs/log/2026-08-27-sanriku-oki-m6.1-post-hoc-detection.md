@@ -82,5 +82,10 @@ python tools/detectlab.py --at "2026-08-27 04:21:00" --minutes 8 --lead-min 3 --
   合わせると、**probable detection**（浦河沖M6.0と同水準の確信度）と判断する。
   震央距離466km・M6.1という規模・距離感なら、標準帯域でギリギリ閾値未達というのは
   設計上想定内（八丈島東方沖M5.5・茨城県南部M5.9の教訓と整合）。
-- 手動昇格(`promote_event.py`)・`flag_event.py note`/`relate`の要否はユーザーに確認してから
-  実施する（DynamoDB/S3への書き込みのため）。
+- ユーザー確認の上、`promote_event.py`で両機とも手動昇格した（`--onset "2026-08-27 04:23:16"`
+  ＝低帯域で両機一致したonset時刻、`--pre 180 --post 600`）。
+  `0001-59592406`（device1、I=-0.1/震度0、peak=0.362gal）・
+  `0002-59592406`（device2、I=-0.2/震度0、peak=0.338gal）。`flag_event.py relate`で相互リンク済み。
+  CloudFront invalidationも打ったが、作成直後で誰にも参照されていないevent_idだったため
+  実質不要だった（無害ではあるが次回以降は「直後にrelateする一連の操作」ではURL未公開・
+  未参照であることを踏まえ省略してよい）。
