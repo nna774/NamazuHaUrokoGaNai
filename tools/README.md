@@ -306,6 +306,14 @@ python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 
 [docs/log/2026-08-23-ibaraki-nanbu-m5.9-post-hoc-detection.md](../docs/log/2026-08-23-ibaraki-nanbu-m5.9-post-hoc-detection.md)）。
 3機以上の重ね描きでは「どの組を見せるか」が自明でないため、このパネルは付かない。
 
+**`--corr-bin SEC` で、この一致度を秒単位のbinでテキスト集計できる。** 相関パネルを
+目視で「t=200sあたりまで高いまま残っているか」と読むのは主観に頼るため、bin別の
+`frac(corr≥0.6)`・`mean_corr` を数値で出す（`--eew`指定時は背景(発生-150秒〜-30秒)の
+値も併記するので、どのbinまで背景水準より明確に高いかを比較できる）。2026-08-24浦河沖
+M6.0・2026-08-27三陸沖M6.1の事後解析で同種の集計を都度その場のスクリプトで書いていたのを
+本体に引き上げたもの（実例:
+[docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md](../docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md)）。
+
 `--dump-csv` は指定すると各デバイスに `.dev<id>` を挟んだファイル名で個別保存する。
 
 ### 主なオプション
@@ -322,6 +330,7 @@ python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 
 | `--axes` | `xyz` | 解析に使う軸。`xy`=水平のみ（z軸の低周波ノイズが大きい時、遠地弱震で有利） |
 | `--rect-win` | `3` | 直線性の移動窓[秒] |
 | `--corr-win` | `2` | 2機重ね描き時の直線性一致度パネルに使う移動相関の窓[秒] |
+| `--corr-bin SEC` | なし | 直線性の一致度をこの秒数のbinでテキスト集計（`--eew`指定時は背景の値も併記） |
 | `--eew "lat,lon,depth,時刻"` | なし | 震源との照合。P/S到達窓＋SNR/直線性 |
 | `--station "lat,lon"` | 湯沢町 | 観測点座標（`--eew` 用） |
 | `--dump-csv PATH` | なし | 取得した生窓を `t_us,x,y,z` CSVで保存 |
