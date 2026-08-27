@@ -88,11 +88,26 @@ def main() -> int:
                 v = float(parts[1])
             except ValueError:
                 continue
+            # ボード側が再起動するとmicros()が0近くへ巻き戻る。古い(再起動前の)
+            # 大きなタイムスタンプと混在すると差分の中央値からのfs推定が壊れ、
+            # 描画がおかしくなったまま復帰しない——バッファを丸ごと初期化して
+            # 再起動後のデータだけで新しく組み立て直す。
+            if t_buf and t_us < t_buf[-1]:
+                print("[live_scope] タイムスタンプの巻き戻りを検出、"
+                      "ボード再起動とみなしてバッファをリセットする", file=sys.stderr)
+                t_buf.clear()
+                v_buf.clear()
             t_buf.append(t_us)
             v_buf.append(v)
 
     def update(_frame):
-        poll_serial()
+        try:
+            poll_serial()
+        except serial.SerialException as e:
+            # USB瞬断等で一時的に読めなくなっても、アニメーション自体は止めない
+            # （FuncAnimationは例外を握り潰さずコールバック自体を止めてしまうため、
+            # ここで拾って次のフレームでリトライさせる）。
+            print(f"[live_scope] シリアル読み出しエラー(継続): {e}", file=sys.stderr)
         if len(t_buf) < 4:
             return wave_line, fft_line
 
