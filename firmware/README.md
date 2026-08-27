@@ -95,6 +95,19 @@ python ../tools/capture_serial.py --sensor iis3dhhc \
 python ../tools/backtest.py cap.csv
 ```
 
+### 質量-バネ系ピックアップ候補センサの机上確認（[docs/other-sensors.md](../docs/other-sensors.md) §3.1/3.2）
+
+本線とは無関係の使い捨てブリングアップ。WiFi/送信/NVSは一切使わず、Serialへ生値を
+CSVで吐くだけ（`hall_main.cpp`/`mlx90393_main.cpp`/`pmw3901_main.cpp`/`pmw3360_main.cpp`）。
+配線・注意点は各ファイルの先頭コメント参照。
+
+```bash
+pio run -e hall-bringup -t upload && pio device monitor      # SS49E(アナログホール)
+pio run -e mlx90393-bringup -t upload && pio device monitor  # MLX90393(3軸I2C磁気)
+pio run -e pmw3901-bringup -t upload && pio device monitor   # PMW3901(オプティカルフロー、8cm〜)
+pio run -e pmw3360-bringup -t upload && pio device monitor   # PMW3360DM(マウス用、数mm接写)
+```
+
 ### OTA更新（USBを繋がず無線で焼く）
 
 詳細は [docs/ota.md](../docs/ota.md)。HTTPSプル型（デバイスが自分で取得しにいく）。
