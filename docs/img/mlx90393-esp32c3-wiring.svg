@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 640" font-family="sans-serif">
+  <rect x="0" y="0" width="900" height="640" fill="white"/>
+
+  <text x="450" y="28" text-anchor="middle" font-size="18" font-weight="bold" fill="black">
+    MLX90393 ⇄ ESP32-C3 SuperMini(HW-466AB) 配線図
+  </text>
+  <text x="450" y="48" text-anchor="middle" font-size="12" fill="#555">
+    SS49Eと同じ実機。実物ピン配置は2026-08-27に写真で確認済み(docs/img/ss49e-esp32c3-wiring.svgと同じ基板)
+  </text>
+
+  <!-- board -->
+  <rect x="200" y="150" width="500" height="140" rx="6" fill="#222" stroke="black" stroke-width="2"/>
+  <text x="450" y="215" text-anchor="middle" font-size="16" fill="white">ESP32-C3</text>
+  <text x="450" y="235" text-anchor="middle" font-size="16" fill="white">SuperMini</text>
+  <text x="450" y="255" text-anchor="middle" font-size="11" fill="#aaa">(HW-466AB)</text>
+
+  <!-- USB-C connector -->
+  <rect x="165" y="195" width="35" height="50" fill="#999" stroke="black" stroke-width="2"/>
+  <text x="182" y="270" text-anchor="middle" font-size="11" fill="black">USB-C</text>
+
+  <!-- top row pins: 5,6,7,8,9,10,20,21 ; x=240,300,360,420,480,540,600,660 -->
+  <g stroke="black" stroke-width="2">
+    <line x1="240" y1="150" x2="240" y2="138"/>
+    <line x1="300" y1="150" x2="300" y2="138"/>
+    <line x1="360" y1="150" x2="360" y2="138"/>
+    <line x1="420" y1="150" x2="420" y2="138"/>
+    <line x1="480" y1="150" x2="480" y2="138"/>
+    <line x1="540" y1="150" x2="540" y2="138"/>
+    <line x1="600" y1="150" x2="600" y2="138"/>
+    <line x1="660" y1="150" x2="660" y2="138"/>
+  </g>
+
+  <!-- GPIO5 highlight (SDA, i0, x240) -->
+  <rect x="226" y="120" width="28" height="24" fill="#eaf2fb" stroke="#2980b9" stroke-width="2"/>
+  <!-- GPIO6 highlight (SCL, i1, x300) -->
+  <rect x="286" y="120" width="28" height="24" fill="#f5eefb" stroke="#8e44ad" stroke-width="2"/>
+  <!-- GPIO9 warning highlight (top row, index4, x=480) -->
+  <rect x="466" y="120" width="28" height="24" fill="none" stroke="#c0392b" stroke-width="2" stroke-dasharray="4,3"/>
+
+  <!-- top labels -->
+  <g font-size="14" text-anchor="middle" fill="black">
+    <text x="240" y="132" fill="#2980b9" font-weight="bold">5</text>
+    <text x="300" y="132" fill="#8e44ad" font-weight="bold">6</text>
+    <text x="360" y="132">7</text>
+    <text x="420" y="132">8</text>
+    <text x="480" y="132" fill="#c0392b" font-weight="bold">9</text>
+    <text x="540" y="132">10</text>
+    <text x="600" y="132">20</text>
+    <text x="660" y="132">21</text>
+  </g>
+  <text x="240" y="105" text-anchor="middle" font-size="11" fill="#2980b9">SDA</text>
+  <text x="300" y="105" text-anchor="middle" font-size="11" fill="#8e44ad">SCL</text>
+  <text x="480" y="90" text-anchor="middle" font-size="11" fill="#c0392b">✕ BOOTボタン専有・触るな</text>
+  <text x="600" y="105" text-anchor="middle" font-size="10" fill="#777">(RX)</text>
+  <text x="660" y="105" text-anchor="middle" font-size="10" fill="#777">(TX)</text>
+
+  <!-- bottom row pins: 5V,GND,3.3,4,3,2,1,0 ; x=240,300,360,420,480,540,600,660 -->
+  <g stroke="black" stroke-width="2">
+    <line x1="240" y1="290" x2="240" y2="302"/>
+    <line x1="300" y1="290" x2="300" y2="302"/>
+    <line x1="360" y1="290" x2="360" y2="302"/>
+    <line x1="420" y1="290" x2="420" y2="302"/>
+    <line x1="480" y1="290" x2="480" y2="302"/>
+    <line x1="540" y1="290" x2="540" y2="302"/>
+    <line x1="600" y1="290" x2="600" y2="302"/>
+    <line x1="660" y1="290" x2="660" y2="302"/>
+  </g>
+
+  <!-- GND highlight (i1, x300) -->
+  <rect x="286" y="300" width="28" height="24" fill="#eafaf1" stroke="#1e8449" stroke-width="2"/>
+  <!-- 3.3V highlight (i2, x360) -->
+  <rect x="346" y="300" width="28" height="24" fill="#eafaf1" stroke="#1e8449" stroke-width="2"/>
+  <!-- GPIO2 warning (i5, x540) -->
+  <rect x="526" y="300" width="28" height="24" fill="none" stroke="#c0392b" stroke-width="2" stroke-dasharray="4,3"/>
+
+  <!-- bottom labels -->
+  <g font-size="14" text-anchor="middle" fill="black">
+    <text x="240" y="345">5V</text>
+    <text x="300" y="345" fill="#1e8449" font-weight="bold">GND</text>
+    <text x="360" y="345" fill="#1e8449" font-weight="bold">3.3V</text>
+    <text x="420" y="345">4</text>
+    <text x="480" y="345">3</text>
+    <text x="540" y="345" fill="#c0392b" font-weight="bold">2</text>
+    <text x="600" y="345">1</text>
+    <text x="660" y="345">0</text>
+  </g>
+  <text x="540" y="365" text-anchor="middle" font-size="11" fill="#c0392b">✕ ストラップピン・触るな</text>
+
+  <!-- MLX90393 module -->
+  <rect x="330" y="470" width="240" height="80" rx="6" fill="none" stroke="black" stroke-width="2"/>
+  <text x="450" y="500" text-anchor="middle" font-size="15" fill="black">MLX90393</text>
+  <text x="450" y="518" text-anchor="middle" font-size="12" fill="#555">(3軸I2C磁気センサ、Qwiic系ブレークアウト等)</text>
+  <text x="450" y="536" text-anchor="middle" font-size="10" fill="#777">VCC/GND/SDA/SCLの並びは実物モジュールの印字で確認すること</text>
+
+  <!-- module pins: VCC(green) GND(black) SDA(blue) SCL(purple) -->
+  <circle cx="390" cy="470" r="6" fill="#1e8449"/>
+  <circle cx="430" cy="470" r="6" fill="black"/>
+  <circle cx="470" cy="470" r="6" fill="#2980b9"/>
+  <circle cx="510" cy="470" r="6" fill="#8e44ad"/>
+  <text x="390" y="458" text-anchor="middle" font-size="11" fill="#1e8449">VCC</text>
+  <text x="430" y="458" text-anchor="middle" font-size="11" fill="black">GND</text>
+  <text x="470" y="458" text-anchor="middle" font-size="11" fill="#2980b9">SDA</text>
+  <text x="510" y="458" text-anchor="middle" font-size="11" fill="#8e44ad">SCL</text>
+
+  <!-- VCC -> 3.3V(x360,y324) -->
+  <path d="M 390 470 C 375 420, 360 380, 360 324" fill="none" stroke="#1e8449" stroke-width="3"/>
+  <!-- GND -> GND(x300,y324) -->
+  <path d="M 430 470 C 380 430, 320 380, 300 324" fill="none" stroke="black" stroke-width="3"/>
+  <!-- SDA -> GPIO5(x240,y138), routed around the right side (avoids USB-C connector on the left) -->
+  <path d="M 470 470 C 650 480, 730 400, 730 220 C 730 100, 500 90, 240 100 L 240 138"
+        fill="none" stroke="#2980b9" stroke-width="3"/>
+  <!-- SCL -> GPIO6(x300,y138), routed around the right side, parallel to SDA -->
+  <path d="M 510 470 C 670 495, 755 400, 755 220 C 755 95, 520 82, 300 100 L 300 138"
+        fill="none" stroke="#8e44ad" stroke-width="3"/>
+
+  <!-- legend -->
+  <g font-size="12" fill="black">
+    <rect x="50" y="580" width="14" height="14" fill="#eafaf1" stroke="#1e8449" stroke-width="2"/>
+    <text x="70" y="591">電源(GND/3.3V)</text>
+    <rect x="210" y="580" width="14" height="14" fill="#eaf2fb" stroke="#2980b9" stroke-width="2"/>
+    <text x="230" y="591">SDA→GPIO5</text>
+    <rect x="350" y="580" width="14" height="14" fill="#f5eefb" stroke="#8e44ad" stroke-width="2"/>
+    <text x="370" y="591">SCL→GPIO6</text>
+    <rect x="490" y="580" width="14" height="14" fill="none" stroke="#c0392b" stroke-width="2" stroke-dasharray="4,3"/>
+    <text x="510" y="591">触ってはいけないピン(GPIO2=ストラップ, GPIO9=BOOT)</text>
+  </g>
+  <text x="450" y="612" text-anchor="middle" font-size="11" fill="#555">
+    SDA/SCLはボード反対側の辺(GPIO5/6)にあるため、配線はUSB-Cコネクタを避けて右側から回している(あくまで模式図、実配線は最短距離でよい)。
+  </text>
+  <text x="450" y="626" text-anchor="middle" font-size="11" fill="#555">
+    A0=A1=GND(既定I2Cアドレス)想定。基板にアドレスジャンパがあれば実物の印字で確認すること。
+  </text>
+</svg>

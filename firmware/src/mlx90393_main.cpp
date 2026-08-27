@@ -12,8 +12,11 @@
 // 配線（SparkFun Qwiicブレークアウトならアドレスジャンパ A0=A1=GND=デフォルト0,0の
 // ままでよい）:
 //   無印ESP32 DevKit: SDA -> GPIO21, SCL -> GPIO22 (ESP32既定のWireピン)
-//   ESP32-C3 SuperMini: SDA -> GPIO5, SCL -> GPIO6（docs/piezo.md §4のピン配置表の
-//     うち、GPIO2/GPIO9(ストラップ・BOOT)を避けた空きピン）
+//   ESP32-C3 SuperMini: SDA -> GPIO5, SCL -> GPIO6（GPIO2/GPIO9(ストラップ・BOOT)を
+//     避けた空きピン、チップ仕様なので基板差の影響を受けない）。
+//     図解: docs/img/mlx90393-esp32c3-wiring.svg（SS49Eと同じ実機、2026-08-27に
+//     写真で確認済みの実物ピン配置。SDA/SCLは基板の反対側の辺にあるため配線が
+//     長くなる点に注意）
 #include <Arduino.h>
 #include <MLX90393.h>
 #include <Wire.h>
