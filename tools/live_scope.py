@@ -10,12 +10,17 @@
 
 ウィンドウを閉じると終了する。サンプルレートはタイムスタンプの中央値から
 自動推定するので、ファーム側の`kSampleIntervalUs`を変えても指定し直す必要はない。
+
+`--log-file <path>`を付けると、受信したCSVを生のまま(despike等の表示側の
+加工前の状態で)そのファイルに追記保存する。「背景の風揺れ」と「手で
+加えた揺れ」をあとで正確に比較したい時などに使う。
 """
 
 from __future__ import annotations
 
 import argparse
 import collections
+import datetime
 import sys
 import threading
 
@@ -51,6 +56,9 @@ def parse_args() -> argparse.Namespace:
                    help="波形パネルに表示する直近の秒数(既定2.0秒)")
     p.add_argument("--fft-seconds", type=float, default=4.0,
                    help="FFTに使う直近の秒数、長いほど周波数分解能が上がる(既定4.0秒)")
+    p.add_argument("--log-file", type=str, default=None,
+                   help="受信したCSVを生のまま追記保存するファイルパス(指定時のみ)。"
+                        "風等の背景振動と手で加えた揺れをあとで正確に比較する用途")
     return p.parse_args()
 
 
@@ -67,6 +75,15 @@ def main() -> int:
     # 別スレッドで常時読み続けることで、描画が詰まってもシリアル受信自体は
     # 止まらないようにする。
     ser = serial.Serial(args.port, args.baud, timeout=0.2)
+
+    # 指定時のみ、受信したCSVを生のまま追記保存する(表示側のdespike等は通さない)。
+    # 複数回に分けて記録することがあるため追記モード、セッションの境目が
+    # あとで分かるよう開始時刻をコメント行として書いておく。
+    log_file = None
+    if args.log_file:
+        log_file = open(args.log_file, "a", buffering=1)
+        log_file.write(f"# live_scope.py session start {datetime.datetime.now().isoformat()}\n")
+        print(f"[live_scope] {args.log_file} に生データを追記保存する", file=sys.stderr)
 
     # window-seconds・fft-secondsのうち長い方が収まる固定長リングバッファ。
     # fft-secondsだけを基準にすると、window-secondsをそれより長く指定しても
@@ -104,7 +121,11 @@ def main() -> int:
         while b"\n" in line_buf:
             raw_line, line_buf = line_buf.split(b"\n", 1)
             text = raw_line.decode("ascii", "ignore").strip()
-            if not text or text.startswith("#"):
+            if not text:
+                continue
+            if log_file is not None:
+                log_file.write(text + "\n")
+            if text.startswith("#"):
                 continue
             parts = text.split(",")
             if len(parts) < 2:
@@ -187,6 +208,8 @@ def main() -> int:
     stop_event.set()
     reader_thread.join(timeout=1.0)
     ser.close()
+    if log_file is not None:
+        log_file.close()
     return 0
 
 
