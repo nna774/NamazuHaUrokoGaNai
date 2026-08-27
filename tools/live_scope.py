@@ -31,6 +31,17 @@ except ImportError:
     serial = None
 
 
+def despike_median3(x: np.ndarray) -> np.ndarray:
+    """3点中央値フィルタ。ESP32のanalogReadに乗る単発ノイズ(前後に対し
+    20〜40カウントほど一瞬だけ振れて次のサンプルで戻る)を、本物の(複数
+    サンプルにまたがる)揺れを削らずに均す(2026-08-28、実機で確認)。"""
+    if len(x) < 3:
+        return x
+    out = x.copy()
+    out[1:-1] = np.median(np.stack([x[:-2], x[1:-1], x[2:]]), axis=0)
+    return out
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--port", required=True)
@@ -116,7 +127,7 @@ def main() -> int:
             return wave_line, fft_line
 
         t = np.array(t_buf, dtype=np.float64)
-        v = np.array(v_buf, dtype=np.float64)
+        v = despike_median3(np.array(v_buf, dtype=np.float64))
         dt_us = np.median(np.diff(t))
         if dt_us <= 0:
             return wave_line, fft_line
