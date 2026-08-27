@@ -67,8 +67,12 @@ def main() -> int:
 
     fft_line, = ax_fft.plot([], [], lw=1)
     ax_fft.set_xlabel("frequency [Hz]")
-    ax_fft.set_ylabel("|FFT|")
+    ax_fft.set_ylabel("|FFT| (log)")
     ax_fft.set_title("FFT (fs推定中...)")
+    # 低周波の大きな揺れ(振り子の手動加振等)が線形スケールだと支配的になり、
+    # 桁の違う弱い高周波成分(アーム共振のリンギング等)が潰れて見えなくなる
+    # ためlogスケールにする(2026-08-28、実機グラフで確認)。
+    ax_fft.set_yscale("log")
     ax_fft.grid(alpha=0.3)
     fig.tight_layout()
 
@@ -139,7 +143,11 @@ def main() -> int:
         if len(freqs) > 1:
             ax_fft.set_xlim(0, freqs[-1])
         if spec.size > 1:
-            ax_fft.set_ylim(0, spec[1:].max() * 1.2 + 1e-9)
+            top = spec[1:].max()
+            if top > 0:
+                # logスケールは0/負を扱えないため、下限はピークから4桁下に置く
+                # (弱い高周波成分と、床のノイズレベルの両方が収まる程度の幅)。
+                ax_fft.set_ylim(max(top * 1e-4, 1e-9), top * 1.2)
         ax_fft.set_title(f"FFT (fs≈{fs:.0f}Hz, N={fft_n})")
 
         return wave_line, fft_line
