@@ -104,7 +104,10 @@ SuperMini実機(`hall-bringup-c3`)に焼き、磁石を近づけると無入力�
 (実測raw範囲2167〜2538、データシートの感度換算で概算230ガウス相当)。配線・
 ピン同定の経緯は[docs/log/2026-08-27-sensor-pickup-bringup-firmware.md](log/2026-08-27-sensor-pickup-bringup-firmware.md)、
 配線図は[docs/img/ss49e-esp32c3-wiring.svg](img/ss49e-esp32c3-wiring.svg)参照。
-MLX90393はビルド確認のみで実機確認はまだ。詳細は[firmware/README.md](../firmware/README.md)の
+**MLX90393も実機で合格。** CS→3.3Vを追加した5本配線(`mlx90393-bringup-c3`)で、
+静置時に地球磁場の典型値(合成約51μT)をそのまま実測でき、磁石を振ると3軸とも
+大きく応答した。配線図は[docs/img/mlx90393-esp32c3-wiring.svg](img/mlx90393-esp32c3-wiring.svg)参照。
+詳細は[firmware/README.md](../firmware/README.md)の
 「質量-バネ系ピックアップ候補センサの机上確認」参照。
 
 **オプティカルフローセンサ候補**（3.1のオプティカルフロー方式向け）:
