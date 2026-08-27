@@ -30,7 +30,9 @@ constexpr int kHallPin = 34;
 #endif
 constexpr float kAdcMaxCount = 4095.0f;
 constexpr float kAdcRefVolts = 3.3f;
-constexpr uint32_t kSampleIntervalUs = 10000;  // 100Hz。phase0の確認には十分速い
+// 2kHz。アーム共振の確認(想定30〜50Hz帯を5〜10倍オーバーサンプリングして
+// リンギング波形を読み取る用途)向けに、磁石接近確認用の100Hzから引き上げた。
+constexpr uint32_t kSampleIntervalUs = 500;
 }  // namespace
 
 void setup() {
