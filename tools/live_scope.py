@@ -103,6 +103,12 @@ def main() -> int:
     ax_wave.set_ylabel("raw")
     ax_wave.set_title("波形(直近 %.1f 秒)" % args.window_seconds)
     ax_wave.grid(alpha=0.3)
+    # 「今揺らし始めた」瞬間を`--log-file`のt_usと同じ基準(ボードの経過時間)で
+    # 読めるようにする表示。ログの1列目(us)と同じ値なので、ここで見た秒数を
+    # メモしておけばあとでログをそのまま検索できる(2026-08-28、ユーザー要望)。
+    time_text = ax_wave.text(0.99, 0.95, "", transform=ax_wave.transAxes,
+                              ha="right", va="top", fontsize=14,
+                              bbox=dict(boxstyle="round", fc="white", alpha=0.7))
 
     fft_line, = ax_fft.plot([], [], lw=1)
     ax_fft.set_xlabel("frequency [Hz]")
@@ -164,13 +170,14 @@ def main() -> int:
     def update(_frame):
         with buf_lock:
             if len(t_buf) < 4:
-                return wave_line, fft_line
+                return wave_line, fft_line, time_text
             t = np.array(t_buf, dtype=np.float64)
             v_raw = np.array(v_buf, dtype=np.float64)
         v = despike_median3(v_raw)
+        time_text.set_text(f"t={t[-1] / 1e6:.1f}s")
         dt_us = np.median(np.diff(t))
         if dt_us <= 0:
-            return wave_line, fft_line
+            return wave_line, fft_line, time_text
         fs = 1e6 / dt_us
 
         # 波形パネル: 直近window_seconds秒だけ
@@ -201,7 +208,7 @@ def main() -> int:
                 ax_fft.set_ylim(max(top * 1e-4, 1e-9), top * 1.2)
         ax_fft.set_title(f"FFT (fs≈{fs:.0f}Hz, N={fft_n})")
 
-        return wave_line, fft_line
+        return wave_line, fft_line, time_text
 
     ani = animation.FuncAnimation(fig, update, interval=50, blit=False, cache_frame_data=False)
     plt.show()
