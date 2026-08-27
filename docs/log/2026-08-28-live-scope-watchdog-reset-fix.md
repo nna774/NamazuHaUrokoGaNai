@@ -134,6 +134,18 @@ App Nap等でスロットルされると、シリアル読み出しの頻度も�
 続け、`t_buf`/`v_buf`の長さは常に一致・エラーも発生しなかった。
 `live_scope.py`自体のGUIを介した見た目確認はまだ。
 
+## 追記: `--window-seconds`をfft-secondsより長くするとリングバッファが足りず頭打ちになる不具合を修正
+
+ユーザーが波形パネルをもっと長く見たいと`--window-seconds 20`を指定したところ、
+x軸が-8秒相当までしか出ない現象を発見。原因はリングバッファのサイズ
+(`maxlen`)が`args.fft_seconds`(既定4.0秒)だけを基準に`fft_seconds * 4000`
+(実レート2000Hzに対し2倍の余裕を見込んだ想定)で決まっており、
+`window_seconds`を考慮していなかったこと。既定のfft_seconds=4.0秒だと
+実質バッファは約8秒分(4.0*4000samples÷実測2000Hz)しか保持できず、
+window_secondsをそれより長く指定しても表示できるデータがそもそも
+足りていなかった。`maxlen = max(window_seconds, fft_seconds) * 4000`に
+修正し、大きい方の秒数が収まるようにした。
+
 ## 関連ファイル
 
 - `firmware/src/hall_main.cpp` — 送信をノンブロッキング化(空きが無ければ捨てる)。**実機(`/dev/cu.usbmodem101`)へ書き込み・stallテストで動作確認済み**

@@ -68,10 +68,12 @@ def main() -> int:
     # 止まらないようにする。
     ser = serial.Serial(args.port, args.baud, timeout=0.2)
 
-    # fft-secondsぶんのサンプルを保持する固定長リングバッファ。
+    # window-seconds・fft-secondsのうち長い方が収まる固定長リングバッファ。
+    # fft-secondsだけを基準にすると、window-secondsをそれより長く指定しても
+    # バッファ自体が足りず表示が短いまま頭打ちになる(2026-08-28、実機で確認)。
     # サンプルレートが未確定な起動直後は仮に4kHzを見込んだ長さを確保しておく
     # （実レートが分かり次第、中身は自然に追従する）。
-    maxlen = int(args.fft_seconds * 4000)
+    maxlen = int(max(args.window_seconds, args.fft_seconds) * 4000)
     t_buf: collections.deque[int] = collections.deque(maxlen=maxlen)
     v_buf: collections.deque[float] = collections.deque(maxlen=maxlen)
     line_buf = b""
