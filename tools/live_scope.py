@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import collections
 import sys
+import threading
 
 import matplotlib
 matplotlib.use("MacOSX")
@@ -59,7 +60,13 @@ def main() -> int:
         print("pyserial 未インストール: pip install pyserial", file=sys.stderr)
         return 1
 
-    ser = serial.Serial(args.port, args.baud, timeout=0)
+    # timeoutを付けて専用スレッドでブロッキング読み出しする(下記reader_loop参照)。
+    # GUI(matplotlib)のタイマーはウィンドウがバックグラウンドに回ると
+    # macOSのApp Nap等でthrottleされ、読み出し頻度が落ちることがある
+    # （2026-08-28、ユーザー報告）。読み出しをGUIの描画タイマーから切り離し、
+    # 別スレッドで常時読み続けることで、描画が詰まってもシリアル受信自体は
+    # 止まらないようにする。
+    ser = serial.Serial(args.port, args.baud, timeout=0.2)
 
     # fft-secondsぶんのサンプルを保持する固定長リングバッファ。
     # サンプルレートが未確定な起動直後は仮に4kHzを見込んだ長さを確保しておく
@@ -68,6 +75,8 @@ def main() -> int:
     t_buf: collections.deque[int] = collections.deque(maxlen=maxlen)
     v_buf: collections.deque[float] = collections.deque(maxlen=maxlen)
     line_buf = b""
+    buf_lock = threading.Lock()
+    stop_event = threading.Event()
 
     fig, (ax_wave, ax_fft) = plt.subplots(2, 1, figsize=(10, 7))
     wave_line, = ax_wave.plot([], [], lw=1)
@@ -89,7 +98,7 @@ def main() -> int:
 
     def poll_serial() -> None:
         nonlocal line_buf
-        line_buf += ser.read(ser.in_waiting or 1)
+        line_buf += ser.read(4096)
         while b"\n" in line_buf:
             raw_line, line_buf = line_buf.split(b"\n", 1)
             text = raw_line.decode("ascii", "ignore").strip()
@@ -103,31 +112,39 @@ def main() -> int:
                 v = float(parts[1])
             except ValueError:
                 continue
-            # ボード側が再起動するとmicros()が0近くへ巻き戻る。古い(再起動前の)
-            # 大きなタイムスタンプと混在すると差分の中央値からのfs推定が壊れ、
-            # 描画がおかしくなったまま復帰しない——バッファを丸ごと初期化して
-            # 再起動後のデータだけで新しく組み立て直す。
-            if t_buf and t_us < t_buf[-1]:
-                print("[live_scope] タイムスタンプの巻き戻りを検出、"
-                      "ボード再起動とみなしてバッファをリセットする", file=sys.stderr)
-                t_buf.clear()
-                v_buf.clear()
-            t_buf.append(t_us)
-            v_buf.append(v)
+            with buf_lock:
+                # ボード側が再起動するとmicros()が0近くへ巻き戻る。古い(再起動前の)
+                # 大きなタイムスタンプと混在すると差分の中央値からのfs推定が壊れ、
+                # 描画がおかしくなったまま復帰しない——バッファを丸ごと初期化して
+                # 再起動後のデータだけで新しく組み立て直す。
+                if t_buf and t_us < t_buf[-1]:
+                    print("[live_scope] タイムスタンプの巻き戻りを検出、"
+                          "ボード再起動とみなしてバッファをリセットする", file=sys.stderr)
+                    t_buf.clear()
+                    v_buf.clear()
+                t_buf.append(t_us)
+                v_buf.append(v)
+
+    def reader_loop() -> None:
+        # GUIの描画タイマーとは独立に、常時シリアルを読み続ける専用スレッド。
+        while not stop_event.is_set():
+            try:
+                poll_serial()
+            except serial.SerialException as e:
+                # USB瞬断等で一時的に読めなくなってもスレッド自体は止めない。
+                print(f"[live_scope] シリアル読み出しエラー(継続): {e}", file=sys.stderr)
+                stop_event.wait(0.5)
+
+    reader_thread = threading.Thread(target=reader_loop, daemon=True)
+    reader_thread.start()
 
     def update(_frame):
-        try:
-            poll_serial()
-        except serial.SerialException as e:
-            # USB瞬断等で一時的に読めなくなっても、アニメーション自体は止めない
-            # （FuncAnimationは例外を握り潰さずコールバック自体を止めてしまうため、
-            # ここで拾って次のフレームでリトライさせる）。
-            print(f"[live_scope] シリアル読み出しエラー(継続): {e}", file=sys.stderr)
-        if len(t_buf) < 4:
-            return wave_line, fft_line
-
-        t = np.array(t_buf, dtype=np.float64)
-        v = despike_median3(np.array(v_buf, dtype=np.float64))
+        with buf_lock:
+            if len(t_buf) < 4:
+                return wave_line, fft_line
+            t = np.array(t_buf, dtype=np.float64)
+            v_raw = np.array(v_buf, dtype=np.float64)
+        v = despike_median3(v_raw)
         dt_us = np.median(np.diff(t))
         if dt_us <= 0:
             return wave_line, fft_line
@@ -165,6 +182,8 @@ def main() -> int:
 
     ani = animation.FuncAnimation(fig, update, interval=50, blit=False, cache_frame_data=False)
     plt.show()
+    stop_event.set()
+    reader_thread.join(timeout=1.0)
     ser.close()
     return 0
 
