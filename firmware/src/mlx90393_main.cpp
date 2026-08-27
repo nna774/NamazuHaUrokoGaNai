@@ -17,6 +17,10 @@
 //     図解: docs/img/mlx90393-esp32c3-wiring.svg（SS49Eと同じ実機、2026-08-27に
 //     写真で確認済みの実物ピン配置。SDA/SCLは基板の反対側の辺にあるため配線が
 //     長くなる点に注意）
+//
+// GY-MLX90393等のSPI/I2C両対応ブレークアウトを使う場合の注意: チップは電源投入時の
+// CS状態でI2C/SPIを自動判定するため、**CSを3.3Vへ固定してI2Cモードを強制すること**
+// （浮かせるとI2Cで安定動作しない恐れがある）。MISO/MOSI/SCLK/TRIG/INT/A0/A1は未使用。
 #include <Arduino.h>
 #include <MLX90393.h>
 #include <Wire.h>
