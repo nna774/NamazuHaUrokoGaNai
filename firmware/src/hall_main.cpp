@@ -7,8 +7,11 @@
 //
 // 配線:
 //   無印ESP32 DevKit: SS49E VCC -> 3.3V, GND -> GND, OUT -> GPIO34 (ADC1_CH6、入力専用ピン)
-//   ESP32-C3 SuperMini: OUT -> GPIO3 (ADC1、docs/piezo.md §4のピン配置表参照。
-//     GPIO2はストラップピン・GPIO9はBOOTボタン専有なので両方避けてある)
+//   ESP32-C3 SuperMini: OUT -> GPIO3 (ADC1、GPIO2はストラップピン・GPIO9はBOOTボタン
+//     専有なので両方避けてある——これはチップ仕様なので基板の印字順によらず共通)。
+//     図解: docs/img/ss49e-esp32c3-wiring.svg（2026-08-27に実機写真で確認した
+//     この個体の実物ピン配置。docs/piezo.md §4のピエゾ機とは印字の並び順が異なる
+//     別個体なので、GPIO3の物理位置はそちらの表とは一致しない点に注意）
 //   TTGO T-Display等TFT搭載機で無印ESP32環境を使うなら
 //   firmware/README.md「配線」の空きピン表に従って読み替えること。
 //
