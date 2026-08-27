@@ -49,5 +49,14 @@ void loop() {
 
   int raw = analogRead(kHallPin);
   float volts = raw / kAdcMaxCount * kAdcRefVolts;
-  Serial.printf("%lu,%d,%.4f\n", static_cast<unsigned long>(now), raw, volts);
+  // USB CDC送信バッファが埋まっていると Serial.printf() はバッファに空きが
+  // できるまでブロックし、その間loop()が止まってウォッチドッグに落とされる
+  // (2026-08-28、tools/live_scope.py側の読み出しが詰まった時に実機で発生)。
+  // 2kHzだと詰まりやすいので、書ける分だけ空いているか先に確認し、
+  // 空いていなければブロックせずこのサンプルを捨てる。
+  char line[40];
+  int len = snprintf(line, sizeof(line), "%lu,%d,%.4f\n", static_cast<unsigned long>(now), raw, volts);
+  if (len > 0 && Serial.availableForWrite() >= len) {
+    Serial.write(reinterpret_cast<const uint8_t*>(line), len);
+  }
 }
