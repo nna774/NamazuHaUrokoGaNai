@@ -247,6 +247,14 @@ def test_coda_window_starts_at_s_window_end_and_spans_coda_s():
     assert detectlab.CODA_S > 0
 
 
+def test_classify_snr_wrect_thresholds():
+    # 重ね描き時の窓別レポート表(パターンB)とreport()の標準出力が同じ分類を共有する。
+    assert detectlab.classify_snr_wrect(snr=2.0, wrect=0.7) == "地震らしい"
+    assert detectlab.classify_snr_wrect(snr=1.5, wrect=0.6) == "地震らしい"
+    assert detectlab.classify_snr_wrect(snr=1.0, wrect=0.9) == "微妙"
+    assert detectlab.classify_snr_wrect(snr=1.4, wrect=0.4) == "要検討"
+
+
 def test_expand_event_ids_builds_full_ids_from_bare_suffix():
     # "59577127"のような裸のバケット番号は --device と組んで完全なIDへ展開される
     assert detectlab.expand_event_ids(["59577127"], [1, 2]) == \
