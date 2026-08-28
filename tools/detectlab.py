@@ -351,6 +351,15 @@ def window_report(vec: np.ndarray, rect: np.ndarray, fs: float, start_us: int,
     return rms, snr, wrect
 
 
+def classify_snr_wrect(snr: float, wrect: float) -> str:
+    """SNR・エネルギー重み付き直線性から短い判定ラベルを返す（report()の表示・重ね描き表で共有）。"""
+    if snr >= 1.5 and wrect >= 0.6:
+        return "地震らしい"
+    if snr < 1.3:
+        return "微妙"
+    return "要検討"
+
+
 def analyze(data: np.ndarray, fs: float, start_us: int, band_range: tuple[float, float],
            axes: str, sta_s: float, lta_s: float, thr: float, rect_win: float):
     """バンドパス・STA/LTA・直線性をまとめて計算する（単一/重ね描き両モード共通）。
@@ -469,7 +478,8 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
         plt.show()
 
 
-def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, precomputed_corr=None):
+def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, precomputed_corr=None,
+                 window_reports=None):
     """複数デバイスのSTA/LTA・直線性を同一時間軸に重ねて描く。
 
     生波形やスペクトログラムは軸の向きが機体ごとに違い重ねる意味が無いので出さない
@@ -540,7 +550,8 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
     axs[0].set_ylabel("STA/LTA")
     axs[0].set_title(f"STA/LTA比 重ね描き（閾値 {thr:g} 超で検出。回転不変量なので方位較正なしで比較可）",
                      fontsize=9, loc="left")
-    axs[0].legend(loc="upper right", fontsize=8)
+    # 窓別レポート表を右上に貼る時は凡例と衝突するので左上へ逃がす。
+    axs[0].legend(loc="upper left" if (window_reports and arrivals) else "upper right", fontsize=8)
 
     axs[1].axhline(0.6, ls=":", color="k", lw=0.8)
     axs[1].set_ylim(0, 1)
@@ -559,6 +570,32 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
             a.axvspan(e, l, color=color, alpha=0.13)
         axs[0].annotate(label, ((e + l) / 2, axs[0].get_ylim()[1] * 0.85),
                         color=color, ha="center", fontsize=9)
+
+    if window_reports and arrivals:
+        # 和文フォントはプロポーショナルなので、文字列パディングでは列が揃わない。
+        # ax.table()の実グリッドに任せる（axes座標なのでsuptitleとも衝突しない）。
+        dev_ids = [d for d, *_ in per_device]
+        col_labels = ["窓"] + [f"device {d} (SNR/直線性)" for d in dev_ids]
+        cell_text = []
+        for label, *_r in arrivals:
+            row = [label]
+            for d in dev_ids:
+                entry = next((w for w in window_reports.get(d) or [] if w[0] == label), None)
+                if entry and entry[1] is not None:
+                    _, snr, wrect, verdict = entry
+                    row.append(f"{snr:.2f}/{wrect:.2f} {verdict}")
+                else:
+                    row.append("-")
+            cell_text.append(row)
+        # axes上端(y=1)より上、waveformとは重ならない figure 上部の帯に置く。
+        # マージンを詰めて、タイトルの右側にちょうど収まる幅にする。
+        tbl = axs[0].table(cellText=cell_text, colLabels=col_labels, cellLoc="center",
+                           bbox=[0.56, 1.20, 0.44, 0.28], zorder=5)
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(6.5)
+        for cell in tbl.get_celld().values():
+            cell.set_facecolor("white")
+            cell.PAD = 0.03
 
     devices_note = ",".join(str(d) for d, *_ in per_device)
     fig.suptitle(f"detectlab overlay  devices={devices_note}  "
@@ -704,23 +741,29 @@ def main() -> int:
             print(f"    onset候補なし（閾値 {args.thr:g} 未達）。"
                   "--thr を下げる/--band を変えると拾えることも。")
         if not args.eew:
-            return
+            return None
         bg = window_report(vec, rect, fs, start_us,
                            origin_us - 150_000_000, origin_us - 30_000_000, 1.0)
         bg_rms = bg[0] if bg else float(np.sqrt(np.median(vec ** 2)))
         print(f"    背景RMS={bg_rms:.4f}gal")
+        window_results = []
         for label, e_us, l_us, _ in arrivals:
             ea = datetime.fromtimestamp(e_us / 1e6, JST)
             la = datetime.fromtimestamp(l_us / 1e6, JST)
             r = window_report(vec, rect, fs, start_us, e_us, l_us, bg_rms)
             if r:
                 _, snr, wrect = r
-                verdict = "地震らしい" if (snr >= 1.5 and wrect >= 0.6) else \
-                          "微妙(ノイズと分離できず)" if snr < 1.3 else "要検討"
+                verdict = classify_snr_wrect(snr, wrect)
+                verdict_text = "微妙(ノイズと分離できず)" if verdict == "微妙" else verdict
                 print(f"    {label} {ea:%H:%M:%S}-{la:%H:%M:%S}  "
-                      f"SNR={snr:.2f}  直線性={wrect:.2f}  → {verdict}")
+                      f"SNR={snr:.2f}  直線性={wrect:.2f}  → {verdict_text}")
+                window_results.append((label, snr, wrect, verdict))
             else:
                 print(f"    {label} {ea:%H:%M:%S}-{la:%H:%M:%S}  （窓が解析範囲外）")
+                window_results.append((label, None, None, None))
+        return window_results
+
+    window_reports: dict[int, list] = {}  # dev -> report()の窓別結果（plot_overlayの表用）
 
     def overlay_source(label: str, dev: int, data, start_us, fs) -> tuple:
         """重ね描き用の1機ぶん: 解析・レポート・dump・plot_overlay向けタプル化をまとめる
@@ -729,7 +772,7 @@ def main() -> int:
             raise SystemExit(f"{label}: 波形が空。時刻・データ保持期間を確認しろ。")
         band, ratio, onsets, rect, vec = analyze(
             data, fs, start_us, args.band, args.axes, args.sta, args.lta, args.thr, args.rect_win)
-        report(label, fs, start_us, band, ratio, onsets, rect, vec, data)
+        window_reports[dev] = report(label, fs, start_us, band, ratio, onsets, rect, vec, data)
         if args.dump:
             stem, dot, ext = args.dump.rpartition(".")
             dump_csv(f"{stem}.dev{dev}.{ext}" if dot else f"{args.dump}.dev{dev}",
@@ -768,7 +811,7 @@ def main() -> int:
             print_corr_bin_report(*precomputed_corr, args.corr_bin, 0.6, origin_us)
         plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
                     show=args.show or not args.out, corr_win=args.corr_win,
-                    precomputed_corr=precomputed_corr)
+                    precomputed_corr=precomputed_corr, window_reports=window_reports)
         return 0
     else:
         device_id = args.device[0]
@@ -799,7 +842,7 @@ def main() -> int:
                 print_corr_bin_report(*precomputed_corr, args.corr_bin, 0.6, origin_us)
             plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
                         show=args.show or not args.out, corr_win=args.corr_win,
-                        precomputed_corr=precomputed_corr)
+                        precomputed_corr=precomputed_corr, window_reports=window_reports)
             return 0
 
         data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
