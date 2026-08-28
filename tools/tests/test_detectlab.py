@@ -236,6 +236,17 @@ def test_print_corr_bin_report_handles_empty_input(capsys):
     assert "データなし" in out
 
 
+def test_coda_window_starts_at_s_window_end_and_spans_coda_s():
+    # S窓終了から後ろCODA_S秒ぶんが「コーダ想定域」——ピーク振幅が到達"瞬間"の窓の外に
+    # 来ることがあるため(2026-08-26福島県沖M4.5の事後解析で自動化した)。
+    origin_us = 0
+    s_win = detectlab.arrival_window(200.0, origin_us, detectlab.S_VEL_RANGE)
+    coda_win = (s_win[1], s_win[1] + int(detectlab.CODA_S * 1e6))
+    assert coda_win[0] == s_win[1]
+    assert (coda_win[1] - coda_win[0]) / 1e6 == detectlab.CODA_S
+    assert detectlab.CODA_S > 0
+
+
 def test_expand_event_ids_builds_full_ids_from_bare_suffix():
     # "59577127"のような裸のバケット番号は --device と組んで完全なIDへ展開される
     assert detectlab.expand_event_ids(["59577127"], [1, 2]) == \
