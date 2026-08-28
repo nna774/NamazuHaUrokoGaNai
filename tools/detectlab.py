@@ -60,6 +60,9 @@ JST = ZoneInfo("Asia/Tokyo")
 # P は地殻内(~6)〜Pn(~7.8)、S は ~3.5〜4.5 のばらつきを幅として表現。
 P_VEL_RANGE = (7.8, 6.0)
 S_VEL_RANGE = (4.5, 3.5)
+# S窓終了から後、ピーク振幅が来ても不思議はない「コーダ想定域」の長さ[秒]。
+# 岩手県沖M4.9(確定M5.6)の前例で観測された減衰(160〜180秒)に合わせた目安（docs/post_hoc_detection.md参照）。
+CODA_S = 180.0
 # センサ設置点の概略座標(町レベル)。--station / 環境変数 NAMZ_STATION_LATLON で上書き可。
 DEFAULT_STATION = (36.936, 138.815)  # 新潟県湯沢町
 
@@ -466,7 +469,7 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
         plt.show()
 
 
-def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0):
+def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, precomputed_corr=None):
     """複数デバイスのSTA/LTA・直線性を同一時間軸に重ねて描く。
 
     生波形やスペクトログラムは軸の向きが機体ごとに違い重ねる意味が無いので出さない
@@ -508,7 +511,8 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0):
 
     if show_corr:
         dev_a, dev_b = per_device[0][0], per_device[1][0]
-        t_c, corr = pair_rolling_correlation(per_device, ref_us, corr_win)
+        t_c, corr = precomputed_corr if precomputed_corr is not None else \
+            pair_rolling_correlation(per_device, ref_us, corr_win)
         if len(t_c):
             axs[2].plot(t_c, corr, lw=0.8, color="k")
             axs[2].fill_between(t_c, 0, corr, where=corr >= 0.6, color="C2", alpha=0.25,
@@ -625,11 +629,11 @@ def main() -> int:
                    help="直線性の移動窓[秒]（既定3）")
     p.add_argument("--corr-win", dest="corr_win", type=float, default=2.0,
                    help="2機重ね描き時、直線性の一致度パネルに使う移動相関の窓[秒]（既定2）")
-    p.add_argument("--corr-bin", dest="corr_bin", type=float,
-                   help="2機重ね描き時、直線性の一致度をこの秒数のbinでテキスト集計して出す"
-                        "（既定は集計しない）。コーダが保存範囲外までbackground水準に戻らず"
-                        "残っていないかを、相関パネルの目視ではなく数値で確認する用"
-                        "（docs/post_hoc_detection.md手順1参照）。--eew指定時はbackground"
+    p.add_argument("--corr-bin", dest="corr_bin", type=float, default=20.0,
+                   help="2機重ね描き時、直線性の一致度をこの秒数のbinでテキスト集計して常に出す"
+                        "（既定20秒）。片方の機体だけの孤立ピークが本物か、コーダが保存範囲外まで"
+                        "background水準に戻らず残っていないかを、相関パネルの目視ではなく数値で"
+                        "確認する用（docs/post_hoc_detection.md参照）。--eew指定時はbackground"
                         "(発生-150秒〜-30秒)の値も併記する")
     p.add_argument("--axes", choices=["xyz", "xy"], default="xyz",
                    help="STA/LTA・スペクトログラム・直線性に使う軸。xy=水平のみ"
@@ -672,7 +676,9 @@ def main() -> int:
         hypo, epi = hypocentral_km(eq_lat, eq_lon, depth, st_lat, st_lon)
         p_win = arrival_window(hypo, origin_us, P_VEL_RANGE)
         s_win = arrival_window(hypo, origin_us, S_VEL_RANGE)
-        arrivals = [("P窓", p_win[0], p_win[1], "C0"), ("S窓", s_win[0], s_win[1], "C3")]
+        coda_win = (s_win[1], s_win[1] + int(CODA_S * 1e6))
+        arrivals = [("P窓", p_win[0], p_win[1], "C0"), ("S窓", s_win[0], s_win[1], "C3"),
+                    ("コーダ想定域", coda_win[0], coda_win[1], "C1")]
         og = datetime.fromtimestamp(origin_us / 1e6, JST)
         print(f"# EEW: 震央({eq_lat},{eq_lon}) 深さ{depth:g}km  発生 {og:%H:%M:%S}"
               f"  震央距離{epi:.0f}km 震源距離{hypo:.0f}km")
@@ -756,11 +762,13 @@ def main() -> int:
                 d_data, d_start, d_fs = load_s3_event(bucket, eid, use_cache=not args.no_cache)
             per_device.append(overlay_source(f"event={eid}", dev, d_data, d_start, d_fs))
         ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
-        if args.corr_bin and len(per_device) == 2:
-            t_c, corr = pair_rolling_correlation(per_device, ref_us, args.corr_win)
-            print_corr_bin_report(t_c, corr, args.corr_bin, 0.6, origin_us)
+        precomputed_corr = None
+        if len(per_device) == 2:
+            precomputed_corr = pair_rolling_correlation(per_device, ref_us, args.corr_win)
+            print_corr_bin_report(*precomputed_corr, args.corr_bin, 0.6, origin_us)
         plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
-                    show=args.show or not args.out, corr_win=args.corr_win)
+                    show=args.show or not args.out, corr_win=args.corr_win,
+                    precomputed_corr=precomputed_corr)
         return 0
     else:
         device_id = args.device[0]
@@ -785,11 +793,13 @@ def main() -> int:
                                                        use_cache=not args.no_cache)
                 per_device.append(overlay_source(f"device={dev}", dev, d_data, d_start, d_fs))
             ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
-            if args.corr_bin and len(per_device) == 2:
-                t_c, corr = pair_rolling_correlation(per_device, ref_us, args.corr_win)
-                print_corr_bin_report(t_c, corr, args.corr_bin, 0.6, origin_us)
+            precomputed_corr = None
+            if len(per_device) == 2:
+                precomputed_corr = pair_rolling_correlation(per_device, ref_us, args.corr_win)
+                print_corr_bin_report(*precomputed_corr, args.corr_bin, 0.6, origin_us)
             plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
-                        show=args.show or not args.out, corr_win=args.corr_win)
+                        show=args.show or not args.out, corr_win=args.corr_win,
+                        precomputed_corr=precomputed_corr)
             return 0
 
         data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
