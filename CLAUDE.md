@@ -31,7 +31,7 @@
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
 | 決定の経緯・作業ログ索引（**新しいものから読む**） | [docs/progress.md](docs/progress.md) → `docs/log/` |
-| 各領域の詳細 | `firmware/` `lambda/` `terraform/` `dashboard/` `tools/` の各 `README.md` |
+| 各領域の詳細 | [firmware/README.md](firmware/README.md) [lambda/README.md](lambda/README.md) [terraform/README.md](terraform/README.md) [dashboard/README.md](dashboard/README.md) [tools/README.md](tools/README.md) |
 
 `memo.md` はユーザーの作業メモ（TODO・思いつき）。要件の出所になることがあるが、
 コミット対象ではない。
