@@ -572,21 +572,30 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
                         color=color, ha="center", fontsize=9)
 
     if window_reports and arrivals:
+        # 和文フォントはプロポーショナルなので、文字列パディングでは列が揃わない。
+        # ax.table()の実グリッドに任せる（axes座標なのでsuptitleとも衝突しない）。
         dev_ids = [d for d, *_ in per_device]
-        header = "窓          " + "   ".join(f"d{d}(SNR/直線性)" for d in dev_ids)
-        rows = [header]
+        col_labels = ["窓"] + [f"device {d} (SNR/直線性)" for d in dev_ids]
+        cell_text = []
         for label, *_r in arrivals:
-            cells = [f"{label:12s}"]
+            row = [label]
             for d in dev_ids:
                 entry = next((w for w in window_reports.get(d) or [] if w[0] == label), None)
                 if entry and entry[1] is not None:
                     _, snr, wrect, verdict = entry
-                    cells.append(f"{snr:4.2f}/{wrect:4.2f} {verdict}")
+                    row.append(f"{snr:.2f}/{wrect:.2f} {verdict}")
                 else:
-                    cells.append("-")
-            rows.append("  ".join(cells))
-        fig.text(0.99, 0.99, "\n".join(rows), ha="right", va="top", fontsize=7.5,
-                 bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="gray", alpha=0.9))
+                    row.append("-")
+            cell_text.append(row)
+        # axes上端(y=1)より上、waveformとは重ならない figure 上部の帯に置く。
+        # マージンを詰めて、タイトルの右側にちょうど収まる幅にする。
+        tbl = axs[0].table(cellText=cell_text, colLabels=col_labels, cellLoc="center",
+                           bbox=[0.56, 1.20, 0.44, 0.28], zorder=5)
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(6.5)
+        for cell in tbl.get_celld().values():
+            cell.set_facecolor("white")
+            cell.PAD = 0.03
 
     devices_note = ",".join(str(d) for d, *_ in per_device)
     fig.suptitle(f"detectlab overlay  devices={devices_note}  "
