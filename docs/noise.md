@@ -92,6 +92,15 @@
   **device1=5.61・device2=7.67と両機とも閾値を明確に超過**し、P窓・S窓それぞれに孤立した
   鋭いピークが2機一致で立った。**probable detection**（詳細・図:
   [log/2026-08-24-urakawa-oki-m6.0-post-hoc-detection.md](log/2026-08-24-urakawa-oki-m6.0-post-hoc-detection.md)）。
+- **2026-08-28 04:46 福島県沖 M4.0 深さ60km（震央距離212km）**: リアルタイム閾値未達で
+  正式イベントは立たず。標準設定（3軸・1-10Hz）ではSTA/LTA peak device1=1.88・device2=2.00と
+  閾値に遠く届かず。低帯域(0.5-2Hz)・水平2軸ではdevice1=3.80・device2=3.76と閾値4に肉薄し、
+  device2のS窓は単独ではSNR=1.56・直線性=0.65で「地震らしい」判定が出たが、同程度の
+  STA/LTA峰と直線性の一致は到達窓の前後にも継続的に出ており、他例で見えた
+  「到達窓だけ明確に跳ねる」コントラストが無い。**微妙／要検討**（probableと呼べる根拠不足）。
+  同程度の福島県沖M4.0（深さ50km・震央268km、本節冒頭のエントリ、probable判定）より
+  近いはずの条件でも判定が上がらず、震源要素が近くても検出可否は毎回一致しないことを
+  示す参考点（詳細・図: [log/2026-08-28-fukushima-oki-m4.0-post-hoc-detection.md](log/2026-08-28-fukushima-oki-m4.0-post-hoc-detection.md)）。
 
 ## 実務結論
 
