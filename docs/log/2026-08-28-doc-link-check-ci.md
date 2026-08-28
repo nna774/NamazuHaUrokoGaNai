@@ -25,4 +25,5 @@ cloneに乗らず`core.hooksPath`の設定漏れで静かに効かなくなる�
   出力を都度解読しなくて済む）
 - ツール本体（`nna774/doc-link-check`）の版はタグpin（`@latest`だと更新のたびに
   CIの挙動が黙って変わりうるため。`.github/workflows/doc-link-check.yml`内、
-  現在`v1.1.0`）
+  現在`v1.1.1`。`v1.1.1`はコードスパン内のリンク例（`` `[text](path.md)` ``の
+  ような説明文）を実リンクと誤検出する不具合の修正）

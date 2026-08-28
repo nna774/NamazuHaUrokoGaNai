@@ -37,7 +37,7 @@ CIの挙動が黙って変わりうるため）。
 手元で再現するには:
 
 ```bash
-go install github.com/nna774/doc-link-check@v1.1.0   # ワークフローと同じ版
+go install github.com/nna774/doc-link-check@v1.1.1   # ワークフローと同じ版
 cd /path/to/NamazuHaUrokoGaNai
 doc-link-check --root CLAUDE.md --root AGENTS.md --root README.md --ignore-missing memo.md
 ```

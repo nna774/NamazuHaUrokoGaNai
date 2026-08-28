@@ -18,7 +18,7 @@ jobs:
       # @latestだとツール更新のたびにCIの挙動が黙って変わりうるので、タグでpinする。
       - name: install doc-link-check
         run: |
-          go install github.com/nna774/doc-link-check@v1.1.0
+          go install github.com/nna774/doc-link-check@v1.1.1
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: check doc links
