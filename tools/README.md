@@ -40,6 +40,11 @@ python provision_device.py provision-h --id 2 --force                 # NVS書�
 python provision_device.py tfvars                                     # サーバ側（tfvarsへ貼る）
 python provision_device.py env --id 2                                 # 焼くenv名
 
+# 事後解析した地震を detection_events.csv に1行足したら、目安表を再生成
+python detection_range.py --out-md ../docs/detection_range.md
+# 手元の候補地震（M・震源距離）が投げる価値があるか即判定
+python detection_range.py --check 4.2 250
+
 # 確定イベントに人工地震（テスト等）フラグを立てる/降ろす（DynamoDBを直接更新）
 export NAMZ_EVENTS_TABLE=namz-events   # or --table
 python flag_event.py mark   0001-59462454        # このイベントを人工地震に
