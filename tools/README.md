@@ -45,6 +45,10 @@ python detection_range.py --out-md ../docs/detection_range.md
 # 手元の候補地震（M・震源距離）が投げる価値があるか即判定
 python detection_range.py --check 4.2 250
 
+# 気象庁の地震一覧から「投げる価値あり」「恐らく埋没(埋没側の実例集め用)」を機械的に抽出
+python scan_quakes.py                    # 直近3日
+python scan_quakes.py --days 7 --all     # 直近7日、近すぎ(ほぼ確実に捕れる)も含め全部
+
 # 確定イベントに人工地震（テスト等）フラグを立てる/降ろす（DynamoDBを直接更新）
 export NAMZ_EVENTS_TABLE=namz-events   # or --table
 python flag_event.py mark   0001-59462454        # このイベントを人工地震に

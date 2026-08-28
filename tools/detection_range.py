@@ -123,7 +123,10 @@ def write_markdown(path: str, events: list[Event], a: float, b: float) -> None:
                   "入っていたら[docs/post_hoc_detection.md](post_hoc_detection.md)の手順で確認する。"
                   "レンジより近い（＝ほぼ確実に捕れている）ものは優先度低、レンジより遠い（＝恐らく埋没）ものは"
                   "埋没側の実例を増やしたい時だけ拾えばよい。震源距離が分からない時は"
-                  "`python tools/detection_range.py --check <M> <震源距離km>`で判定できる。")
+                  "`python tools/detection_range.py --check <M> <震源距離km>`で判定できる。"
+                  "人間が気づいたものだけに頼らず機械的に洗い出すなら"
+                  "`python tools/scan_quakes.py`（気象庁の公開地震一覧から該当するものを抽出し、"
+                  "`--eew`込みの`detectlab.py`呼び出しまで出す）。")
     lines.append("")
     lines.append("## なぜ「投げる価値ありレンジ」なのか（帯であってシャープな円ではない理由）")
     lines.append("")
