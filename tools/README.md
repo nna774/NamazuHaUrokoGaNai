@@ -20,6 +20,8 @@ pip install -r requirements.txt
 | `realtime.py` | FIRによるストリーミング震度（ファーム実装のリファレンス） |
 | `rounding.py` | 気象庁の丸め規則・震度階級 |
 
+回帰確認用の実機キャプチャ3点セットは [testdata/README.md](testdata/README.md) 参照。
+
 ## スクリプト
 
 ```bash
