@@ -32,6 +32,7 @@
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
 | 決定の経緯・作業ログ索引（**新しいものから読む**） | [docs/progress.md](docs/progress.md) → `docs/log/` |
 | 各領域の詳細 | [firmware/README.md](firmware/README.md) [lambda/README.md](lambda/README.md) [terraform/README.md](terraform/README.md) [dashboard/README.md](dashboard/README.md) [tools/README.md](tools/README.md) |
+| CIが何を検査しているか・落ちた時の直し方 | [docs/ci.md](docs/ci.md) |
 
 `memo.md` はユーザーの作業メモ（TODO・思いつき）。要件の出所になることがあるが、
 コミット対象ではない。

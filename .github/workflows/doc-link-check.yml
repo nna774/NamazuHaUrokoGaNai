@@ -1,0 +1,28 @@
+name: doc-link-check
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      # @latestだとツール更新のたびにCIの挙動が黙って変わりうるので、タグでpinする。
+      - name: install doc-link-check
+        run: |
+          go install github.com/nna774/doc-link-check@v1.1.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: check doc links
+        run: |
+          doc-link-check \
+            --root CLAUDE.md --root AGENTS.md --root README.md \
+            --ignore-missing memo.md
