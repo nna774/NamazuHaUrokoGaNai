@@ -9,3 +9,5 @@ urakawa-oki-m6.0,浦河沖,2026-08-23,41.8,142.9,40,,6.0,good,probable,log/2026-
 sanriku-oki-m6.1,三陸沖,2026-08-27,38.1,143.9,10,,6.1,good,probable,log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md
 fukushima-oki-m4.0-2,福島県沖(新),2026-08-28,37.0,141.2,60,,4.0,warning,微妙/要検討,log/2026-08-28-fukushima-oki-m4.0-post-hoc-detection.md
 aomori-touhou-oki-m4.6,青森県東方沖,2026-08-28,40.6,142.3,50,,4.6,critical,完全埋没,log/2026-08-28-aomori-touhou-oki-m4.6-post-hoc-detection.md
+fukushima-oki-m4.5,福島県沖,2026-08-26,37.4,141.8,30,,4.5,warning,微妙/要検討(device2単独ピーク・device1追随なし),log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md
+ibaraki-nanbu-m3.4,茨城県南部,2026-08-26,36.1,139.9,50,,3.4,warning,微妙/要検討(device2単独ピーク・device1追随なし),log/2026-08-26-ibaraki-nanbu-m3.4-post-hoc-detection.md

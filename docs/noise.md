@@ -109,6 +109,17 @@
   と比べマグニチュードが小さい割に遠く、検出限界を下回った例。ユーザー指示で
   `0001-59595349`・`0002-59595349`として手動保存済み（詳細・図:
   [log/2026-08-28-aomori-touhou-oki-m4.6-post-hoc-detection.md](log/2026-08-28-aomori-touhou-oki-m4.6-post-hoc-detection.md)）。
+- **2026-08-26 05:23 福島県沖 M4.5 深さ30km（震源距離271km）**・**08:33 茨城県南部 M3.4
+  深さ50km（震源距離143km）**: `tools/scan_quakes.py`（気象庁の地震一覧を機械的に走査、
+  [2026-08-28の実装](log/2026-08-28-scan-quakes-jma-feed.md)）が拾った候補を確認。
+  どちらも標準設定または低帯域でdevice2**単独**がSTA/LTA閾値を超え、記録全体で最も
+  孤立したピークかつ到達窓に近いタイミングだったが、**device1が同時刻に対応する山を
+  作らなかった**——他のprobable判定例に共通する「2台同時に立つ」パターンが無い。
+  **どちらも微妙／要検討。** device2(ADXL355)はdevice1(IIS3DHHC)よりノイズフロアが低い
+  （[本節「他機との比較」](#他機との比較同一地震ほぼ同距離)参照）ため閾値ぎりぎりの揺れを
+  拾いやすい可能性はあるが、2件だけでは傾向と呼ぶには早い（詳細・図:
+  [log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md](log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md)、
+  [log/2026-08-26-ibaraki-nanbu-m3.4-post-hoc-detection.md](log/2026-08-26-ibaraki-nanbu-m3.4-post-hoc-detection.md)）。
 
 ## 実務結論
 
