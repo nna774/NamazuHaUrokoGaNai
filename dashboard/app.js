@@ -1042,7 +1042,7 @@ async function reloadEvents(pageNum = 1) {
       // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）。
       // 手動保存(manual)は意図して残したものなので薄くしない。
       if (ev.artificial || (ev.checked && !ev.cloud_confirmed && !ev.manual)) tr.style.opacity = '0.45';
-      tr.onclick = () => { location.hash = eventHash(ev.event_id); };
+      tr.onclick = () => { location.hash = eventHash(ev.event_id, false); };
       tbody.appendChild(tr);
     }
     // ページャ
@@ -1099,7 +1099,7 @@ function renderEventInfo(m) {
   if (m.related_events && m.related_events.length) {
     const links = m.related_events.map(id => {
       const dev = String(id).split('-', 1)[0];
-      return `<a href="#${eventHash(id)}">${dev}号機 (${escapeHtml(id)})</a>`;
+      return `<a href="#${eventHash(id, false)}">${dev}号機 (${escapeHtml(id)})</a>`;
     }).join(' / ');
     rows.push(['関連イベント（同一地震・他機）', links]);
   }
@@ -1535,10 +1535,12 @@ function eventsHash(pageNum) {
 
 // イベント詳細ハッシュ。戻り先の一覧状態(p/all/d)・縦軸レンジ(r)・時間ズーム(t)を持たせ、
 // リロード・共有URLでフィルタや表示範囲が復元されるようにする。
-function eventHash(id) {
+// includeZoom=false は「別イベントへ移動するリンク」用。eventZoomは今表示中のイベントの
+// 時間窓なので、遷移先のイベントには時刻が対応せず引き継ぐとグラフが壊れる。
+function eventHash(id, includeZoom = true) {
   const all = document.getElementById('events-all').checked ? 1 : 0;
   const r = document.getElementById('event-yrange').value;
-  const t = eventZoom ? `&t=${Math.round(eventZoom.fromUs)}-${Math.round(eventZoom.toUs)}` : '';
+  const t = includeZoom && eventZoom ? `&t=${Math.round(eventZoom.fromUs)}-${Math.round(eventZoom.toUs)}` : '';
   return `event/${encodeURIComponent(id)}?p=${eventsPageNum}&all=${all}`
     + `${eventsDeviceHash()}&r=${r}&ax=${axesStr('event')}${t}`;
 }
