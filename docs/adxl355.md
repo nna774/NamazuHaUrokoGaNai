@@ -175,8 +175,15 @@ CS が IIS3DHHC(GPIO33) と別なので、**比較フェーズでは両方を同
 **TASK_WDT（ESP32タスクウォッチドッグタイマ）**と判明した。5分未満の欠測はwatchdog
 (`offline_after_s=300`)にも引っかからず、地震の事後解析（`store.load_window`が欠落を
 跨いだ窓でonset時刻を誤って計算するバグ）を追っていて偶然見つかるまで気づかれていなかった。
-ファーム側の対応は別途進行中。詳細:
-[docs/log/2026-08-29-gunma-kitabu-m3.2-post-hoc-detection.md](log/2026-08-29-gunma-kitabu-m3.2-post-hoc-detection.md)。
+
+**2026-08-29続報**: 実機のcoredumpを読み出し、原因を確定した。**この機体固有のSPI配線
+問題ではない**——`uploaderTask`が`WiFiClientSecure::connect()`のTLSハンドシェイク待ちで
+20秒間WDTを養えず停止していた（`sampling`タスク/SPI側は健全）。2026-08-08〜09にdevice1で
+立てた仮説と同じ機構で、`docs/design.md`「送信の信頼性」に統合した。ファーム側の修正
+方針は未実装・未決定のまま。詳細:
+[log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)
+（周期欠落そのものの発見経緯は
+[log/2026-08-29-gunma-kitabu-m3.2-post-hoc-detection.md](log/2026-08-29-gunma-kitabu-m3.2-post-hoc-detection.md)）。
 
 ### 5.2 サンプルのビット幅（int32 か `>>3` か）
 
