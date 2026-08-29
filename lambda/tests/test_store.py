@@ -107,3 +107,30 @@ def test_copy_raw_to_event_only_copies_one_device(s3):
     n = store.copy_raw_to_event(s3, "b", "0002-1", T0, T0 + 4_000_000, device_id=2)
     assert n == 4
     assert all("/0002-" in k for k in copied)
+
+
+def test_load_window_drops_samples_before_a_real_gap():
+    """バッチ間に許容ジッタを超える空き(WiFi再接続等)があったら、その前を捨てて
+    欠落後の連続区間だけを返す（2026-08-29 NERV防災通知の事後解析で発見）。
+
+    単純に全部連結すると、欠落後のサンプルの時刻が win_start + i/fs で実時刻より
+    欠落秒数ぶん早く計算され、onset時刻が実際より早くズレる。
+    """
+    objs = {}
+    # 欠落前: dc_gal=-7.0 のバッチが2本(T0, T0+1_000_000)
+    for i in range(2):
+        st = T0 + i * 1_000_000
+        objs[s3util.raw_key(1, st)] = build(1, st, dc_gal=-7.0)
+    # 40秒の欠落(BATCH_GAP_TOLERANCE_USを大きく超える)を挟んで、欠落後: dc_gal=+42.0
+    gap_start = T0 + 2_000_000 + 40_000_000
+    for i in range(2):
+        st = gap_start + i * 1_000_000
+        objs[s3util.raw_key(1, st)] = build(1, st, dc_gal=+42.0)
+    s3 = FakeS3(objs)
+
+    gal, win_start, _ = store.load_window(
+        s3, "b", gap_start + 2_000_000, seconds=200.0, device_id=1)
+
+    assert win_start == gap_start
+    assert gal.shape[0] == 200  # 欠落前の2バッチ(200サンプル)は含まれない
+    assert gal[:, 0].max() - gal[:, 0].min() == pytest.approx(0.0, abs=1e-6)

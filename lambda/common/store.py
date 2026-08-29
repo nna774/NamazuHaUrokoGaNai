@@ -24,6 +24,10 @@ def _key_batch_start_us(key: str) -> int | None:
 # 「この時刻に始まったバッチはどんなに長くても window に届かない」を判定する余裕。
 MAX_BATCH_DURATION_US = 60_000_000
 
+# バッチ間の正常な送信ジッタの上限目安（実測で~0.1-0.4秒）。これを超える空きは
+# WiFi再接続等でサンプリング自体が数十秒単位で止まっていた実欠落とみなす。
+BATCH_GAP_TOLERANCE_US = 2_000_000
+
 
 def list_raw_keys_in_range(s3, bucket: str, start_us: int, end_us: int,
                            device_id: int | None = None) -> list[str]:
@@ -55,6 +59,39 @@ def list_raw_keys_in_range(s3, bucket: str, start_us: int, end_us: int,
     return keys
 
 
+def _concat_batches_dropping_leading_gaps(
+    batches: list[wire.Batch],
+) -> tuple[np.ndarray, int | None, float]:
+    """バッチ列を時系列連結する。ただし `BATCH_GAP_TOLERANCE_US` を超える欠落が
+    見つかったら、そこより前を捨てて欠落後の連続区間だけを残す。
+
+    単純に全部連結すると、欠落後のサンプルの時刻が `win_start + i/fs` で
+    実時刻より欠落秒数ぶん早く計算され、STA/LTAのonset時刻等が実際より早くズレる
+    （2026-08-29 NERV防災通知の事後解析で発見。device2はWiFi再接続と見られる
+    30秒台の欠落を2〜4分おきに繰り返しており、窓がこれをまたぐと発生した。
+    docs/log/2026-08-29-gunma-kitabu-m3.2-post-hoc-detection.md参照）。
+    捨てずに欠落を跨ぐより、短くても時刻が正しい区間を返す方を選ぶ。
+    """
+    parts: list[np.ndarray] = []
+    win_start: int | None = None
+    prev_end: int | None = None
+    fs = 100.0
+    for b in batches:
+        b_start = b.meta.batch_start_us
+        b_end = b_start + int(b.meta.sample_count / b.meta.sample_rate_hz * 1e6)
+        if prev_end is not None and b_start - prev_end > BATCH_GAP_TOLERANCE_US:
+            parts = []
+            win_start = None
+        fs = b.meta.sample_rate_hz
+        if win_start is None:
+            win_start = b_start
+        parts.append(b.gal)
+        prev_end = b_end
+    if not parts:
+        return np.empty((0, 3)), win_start, fs
+    return np.concatenate(parts, axis=0), win_start, fs
+
+
 def load_event(s3, bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
     """events/<id>/*.bin を時系列に連結して返す（永久保存したイベント波形）。
 
@@ -75,21 +112,14 @@ def load_event(s3, bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
         else:
             break
     keys.sort()  # キー末尾の startus(20桁ゼロ埋め) で時系列順
-    parts = []
-    win_start = None
-    fs = 100.0
+    batches = []
     for key in keys:
         try:
-            b = get_batch(s3, bucket, key)
+            batches.append(get_batch(s3, bucket, key))
         except Exception:
             continue
-        if win_start is None:
-            win_start = b.meta.batch_start_us
-        fs = b.meta.sample_rate_hz
-        parts.append(b.gal)
-    if not parts:
-        return np.empty((0, 3)), 0, fs
-    return np.concatenate(parts, axis=0), win_start, fs
+    gal, win_start, fs = _concat_batches_dropping_leading_gaps(batches)
+    return gal, win_start or 0, fs
 
 
 def copy_raw_to_event(s3, bucket: str, eid: str, start_us: int, end_us: int,
@@ -121,8 +151,7 @@ def load_window(s3, bucket: str, end_us: int, seconds: float,
     """
     start_us = int(end_us - seconds * 1e6)
     keys = list_raw_keys_in_range(s3, bucket, start_us - 60_000_000, end_us, device_id)
-    parts = []
-    win_start = None
+    batches = []
     fs = 100.0
     for key in keys:
         # list_raw_keys_in_range の Prefix は時間(hour)+device までしか絞れないので、
@@ -144,9 +173,8 @@ def load_window(s3, bucket: str, end_us: int, seconds: float,
         if b_end < start_us or b_start > end_us:
             continue
         fs = b.meta.sample_rate_hz
-        if win_start is None:
-            win_start = b_start
-        parts.append(b.gal)
-    if not parts:
-        return np.empty((0, 3)), end_us, fs
-    return np.concatenate(parts, axis=0), win_start, fs
+        batches.append(b)
+    gal, win_start, fs = _concat_batches_dropping_leading_gaps(batches)
+    if gal.shape[0] == 0:
+        return gal, end_us, fs
+    return gal, win_start, fs
