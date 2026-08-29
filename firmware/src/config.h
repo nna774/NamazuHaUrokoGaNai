@@ -1,6 +1,7 @@
 #pragma once
 // ハード・動作パラメータの定数。秘密情報は secrets.h に置く。
 
+#include <cstddef>
 #include <cstdint>
 
 // --- シリアル ---
@@ -54,6 +55,20 @@ static constexpr uint32_t kMaxRamBatches = 2;
 static constexpr uint32_t kMaxRamBatches = 2;
 #endif
 static constexpr const char* kSpillDir = "/spill";
+
+// --- coredump自動送信(docs/log/2026-08-29-coredump-auto-upload-plan.md) ---
+// LittleFS上のcoredumpキューディレクトリ(/spillとは別)。
+// パーティション自体は単一image・次のパニックで上書きされる仕様(espcoredumpの
+// esp_core_dump_image_get())なので、起動直後にここへコピーしてから空ける。
+static constexpr const char* kCoredumpQueueDir = "/coredump";
+// クラッシュループでspillパーティションの容量を圧迫しないための上限。
+// 1件最大64KB(coredumpパーティションのサイズ)×8件=512KB、spillパーティション
+// 11.87MBに対して無視できる量。
+static constexpr size_t kMaxCoredumpFiles = 8;
+// coredumpアップロード1件あたり・全体それぞれのタイムアウト[ms]。WDTには頼らず
+// millis()ベースの自前デッドラインで打ち切る。
+static constexpr uint32_t kCoredumpPerFileTimeoutMs = 10000;
+static constexpr uint32_t kCoredumpTotalBudgetMs = 30000;
 
 // --- リアルタイム検知 ---
 // リアルタイム震度がこの値以上の状態が kAlertHoldSeconds 続いたらデバイス速報を出す。
