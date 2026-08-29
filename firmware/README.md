@@ -164,3 +164,28 @@ TTGO T-Display 系ボード（ESP32 + 内蔵ST7789 TFT）向けの割り当て�
 ```bash
 pio device monitor -b 115200
 ```
+
+## クラッシュ後のcoredump吸い出し
+
+**ESP-IDFのcoredump-to-flashが既定で有効・パーティションも確保済み**
+（`partitions_16mb.csv`の`coredump`パーティション）。パニック（WDTリブート含む）が
+起きると、その瞬間の全タスクのレジスタ・コールスタックがフラッシュへ自動で残る——
+シリアルに張り付いてクラッシュの瞬間に立ち会う必要はなく、**後日USBを挿すだけで
+過去に起きたクラッシュの中身を読める**（次に別のクラッシュが起きて上書きされるまで）。
+
+```bash
+pip install esp-coredump   # .venv等へ
+
+# 実機のfw_version(=gitの短縮hash)と同じコミットでelfを用意する
+git worktree add --detach /tmp/coredump-elf <fw_version>
+(cd /tmp/coredump-elf/firmware && pio run -e <env>)
+
+# 読み出し（parttool.py・SHA256チェックまわりの回避が要る場合の詳細は下記ログ）
+esp-coredump --chip esp32 --port <port> --baud 115200 info_corefile \
+  --gdb <toolchain-xtensa-esp32-elf-gdb> --off 0xFF0000 \
+  /tmp/coredump-elf/firmware/.pio/build/<env>/firmware.elf
+```
+
+初回は`esp-coredump`がESP-IDF本体（`parttool.py`）を前提にしていて素直には動かなかった。
+回避手順・実例は
+[docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](../docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)。
