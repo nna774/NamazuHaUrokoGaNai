@@ -58,9 +58,12 @@ curl -s "https://api.namazu.dark-kuins.net/events?all=1&size=20" | python3 -m js
 やる**（自動検知が無い≠揺れていない。標準設定の閾値未達で正式イベントが立たないことは多い）。
 
 見つかった場合は、その`onset_us`・`max_intensity`・`peak_gal`・`cloud_confirmed`を記録し、
-手順2（detectlab裏取り）は任意（自動検知の答え合わせをしたい時だけ）、手順5（手動イベント化）
-は不要（すでにイベントがある）。**ただし、保存済み範囲の先にコーダが残っていないかは
-必ず確認する**（下記）。
+手順2（detectlab裏取り）は任意（自動検知の答え合わせをしたい時だけ）、手順4前半（手動
+イベント化）は不要（すでにイベントがある）。**ただし、保存済み範囲の先にコーダが残って
+いないかは必ず確認する**（下記）。**さらに、複数デバイスのevent_idが揃っているのに
+`related_events`が空なら、自動確定だけで完結していても手順4後半の相互リンクは必ず行う**
+——`relate`はイベントの作られ方（`cloud_confirmed`か`manual`か）に関係なく必要な作業で、
+`promote_event.py`を経由しないと自動では張られない。
 
 ### イベントがあっても、保存済み範囲の先にコーダが残っていないか確認する
 
@@ -269,7 +272,16 @@ worktreeには`.venv`が無く`terraform output`も通らないことがある�
 - 新しい知見があれば`docs/noise.md`にも追記し、その旨をログに書く
 - `docs/progress.md`に1〜3文の要約+ログへのリンクを1行追記する
 
-## 4. 正式イベントが無ければ手動イベント化する
+## 4. 正式イベントが無ければ手動イベント化し、複数デバイスなら相互リンクする
+
+この手順は**前半（無ければ手動イベント化）と後半（相互リンク）が独立した作業**である。
+**後半（相互リンク）は、手順1で見つけたイベントが`cloud_confirmed`だけで完結していて
+前半が完全に不要な場合でも、device1・device2など複数のevent_idが同じ地震に対応するなら
+必ず行う**——`related_events`は`promote_event.py`を経由しないと自動では張られないため、
+「手動イベント化しなかったからrelateもしなくていい」という話にはならない。まず両方の
+event_idを`curl .../event?id=<eid>`で見て`related_events`が空かどうか確認すること。
+
+### 前半: イベントが無ければ手動イベント化する
 
 手順1で該当イベントが無かった場合、raw の保持期限（90日）で消える前に
 `tools/promote_event.py`で永久保存する。
@@ -285,13 +297,18 @@ python tools/promote_event.py --onset "<発生時刻 or 検知した立ち上が
 `--dry-run`で内容（event_id・バッチ数・計測震度）を確認してから`--yes`を付けて実行する。
 onsetは検知できていれば実際の立ち上がり時刻、判然としなければ発生時刻そのものでよい。
 **`--post`は迷ったら300〜600秒まで広げる**（振幅では目立たないコーダが後続することがある。
-`docs/log/2026-08-23-event-post-window-extension.md`参照）。デバイスごとに繰り返し、
+`docs/log/2026-08-23-event-post-window-extension.md`参照）。デバイスごとに繰り返す。
+
+### 後半: 複数デバイスのイベントを相互リンクする
+
+**前半をやったかどうかに関係なく**、同じ地震に対応するevent_idが2つ以上あって
+`related_events`が空なら実行する。
 
 ```bash
+export NAMZ_EVENTS_TABLE=namazu-events
+export AWS_REGION=ap-northeast-1
 python tools/flag_event.py relate 0001-<bucket> 0002-<bucket>
 ```
-
-で相互リンクする。
 
 **CloudFront invalidationは、書き換え時点でそのevent_idが既に一般に取得され得た場合だけ要る。**
 `/event`のキャッシュキーは`id`クエリを含みevent_idごとに別エントリなので、判断基準は
@@ -306,6 +323,9 @@ python tools/flag_event.py relate 0001-<bucket> 0002-<bucket>
 - **要るのは、その時点で既に一覧・ダッシュボード等から辿れる状態だった（＝取得され得た）
   event_idを後から書き換える時。** 手順1のコーダ延長（自動検知・前セッションでの手動昇格など、
   既に存在していたevent_idに対して`relate`後にさらに`note`を足す等）はここに該当する。
+  **`cloud_confirmed`イベントに後から`relate`する場合も同様**——確定した瞬間から
+  ダッシュボード・`/events`一覧に載って取得され得るため、後半の相互リンクを`cloud_confirmed`
+  イベントに対して行った時は必ずinvalidationを打つ。
 
 打つ時は`--paths`に実際に書き換えたevent_idを`/event?id=<eid>`の形で列挙する。
 **`/event*`のようなワイルドカードは使わない**——キャッシュキーがevent_idごとに
