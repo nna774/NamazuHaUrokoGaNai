@@ -350,7 +350,7 @@ YAML ではなく JSON にしたのは、`tools/` に PyYAML 依存を持ち込�
   - **実装済み(2026-08-11)。** `batch-uplink` PR #22をマージし`v2.13.0`をタグ付け、`firmware/platformio.ini`・`terraform/build_lambda.sh`のpinを揃えた。実機(esp32dev機/fake-sensor env)でWiFi遮断→復旧の一連の流れを確認済み。device2(ADXL355機)は未確認・投入保留のまま
   - `samplingTask`側から直接LittleFSへ書く案は却下。100Hzサンプリングを担うタスクをflash I/O(数十ms級)でブロックさせたくない
   - **新たに見つかった別のボトルネック(2026-08-09)。** `gBatchQueue`にすら乗る前、`namzwire::newBatch()`(=`Batch`の`malloc()`)自体がヒープに十分な空きがあるように見えるのに失敗し、`samplingTask`がバッチを作れなくなる現象を実機で確認した。原因は`ESP.getMaxAllocHeap()`(`heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)`)が、`malloc()`が実際に要求する`MALLOC_CAP_8BIT`基準の最大空きブロックを大きく過大報告していたこと（実測: `INTERNAL`基準45044バイトに対し`8BIT`基準17396バイト、必要な18038バイトに642バイト不足）。断片化そのものの発生源は未特定。`getMaxAllocHeap()`が`MALLOC_CAP_INTERNAL`基準であること自体はArduino-ESP32コアのソース(`cores/esp32/Esp.cpp`)で確認済みだが、上記の実測数値(45044/17396)は1回の観測のみで再現確認はまだ——単発ログから断定はせず、有力な説明という位置づけに留める（2026-08-10追記）。対策として、`Batch`に外部バッファ+解放コールバックのコンストラクタを足し、`samplingTask`側に固定サイズのバッファプールを持たせる設計を検討し、`batch-uplink`側は実装・[PR #13](https://github.com/nna774/batch-uplink/pull/13)まで進めた（`v2.4.0`先行タグ、`Uploader`の所有権契約は変えていない）。プールを`static uint8_t[][]`(=`.dram0.bss`)で確保しようとしたら`dram0_0_seg`のリンク時オーバーフローで一度失敗したが、原因は静的配列という実装選択そのものだった——`tools/sdk/esp32/ld/memory.ld`のコメントに「`dram0_0_seg`の宣言サイズ(約121KB)はROM起動時の一時使用と衝突しないための静的配置専用の保守的な制限で、本来のDRAM(320KB)の残りは実行時のヒープでは普通に使える」と明記されており、`setup()`で1回`malloc()`する方式に変えたら制限を受けなかった。実機（予備基板、esp32dev/adxl355両env）で6スロット(108384B、`kMaxRamBatches=1`)の確保成功・7スロット(126448B、`kMaxRamBatches=2`)の失敗を確認し、6スロットを採用して`firmware/`側を最終化した（`config.h`の`kMaxRamBatches=1`、`main.cpp`の`sBatchPool`は`malloc()`確保）。PSRAMは無いと予備基板の実機確認で判明済みだが、上記の理由で不要になった。**しかしその後、予備基板での結合試験(FakeSensor+実際のingest経路)で新たな問題が続けて見つかった**——6スロットは実機でsamplingTaskのタスク生成に必要なヒープを食い潰しパニックループし、5スロットに削ると別の未定義動作(`kMaxRamBatches=0`は不可と判明)を踏み、5スロット+`kMaxRamBatches=1`まで調整してもUploaderの送信(`pump()`)が進まない原因不明の停滞が残った。**このハードの8bit可能DRAM予算自体が既に限界に近く、何を積んでも他を圧迫する構造的な問題に見える。プール化は一旦見送り、`firmware/`側は`main.cpp`/`config.h`ともプール導入前の状態へ戻した(2026-08-10)。** `batch-uplink`のPR #13(前方互換な追加のみ)は巻き戻していないため再開時はそのまま使える。次に検討するのは(1) design.md予備案のmbedTLS専用固定プール化(`Batch`のバッファは増やさずTLS側だけ隔離)、(2) プール化自体を諦め`newBatch()`失敗時の再試行に任せる、のどちらか——**未定**。実機（device1/device2）は一切触っていない。結合試験用に作った`FakeSensor`/`env:fake-sensor`は汎用ツールとして残した。**追記(2026-08-10):** 見送りの直接の原因だった静的DRAM予算の逼迫は、無関係に見えた`Shindo::currentIntensity()`の静的24KB作業バッファ(`tmp[6000]`、移動窓`composite_`と同サイズのコピー)を撤去したことで大きく緩和された（静的RAM使用量106092B→82092B）。プールのスロット数見積もり直しは可能になったが、結合試験で見つかった他の問題（`kMaxRamBatches=0`のUploader未定義動作、`pump()`の原因不明の停滞）はDRAM予算とは別の話で未解決のまま残っているため、プール化の再開は次の課題。詳細は[log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md](log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md)・[log/2026-08-10-newbatch-buffer-pool-handoff.md](log/2026-08-10-newbatch-buffer-pool-handoff.md)・[log/2026-08-10-shindo-currentintensity-heap-tmp-buffer-removal.md](log/2026-08-10-shindo-currentintensity-heap-tmp-buffer-removal.md)。**再追記(2026-08-10、別の並行セッション):** TlsMemPool導入（下記(1)）とPR#59〜61での静的RAM削減(計約28KB)を経てから、プール化を`kMaxRamBatches+1`(3本、54192B)へさらに小さく絞って再挑戦したところ、実機(fake-sensor)でタスク生成失敗を再現せず、通常運転(平常時はプールが常にヒットし一般ヒープのmalloc(18032)を叩かない設計)を確認できた。**ただし確認できたのはspill=0の定常状態のみ。これまで実際に問題が起きていたのはspillに大量の未送信分が溜まった状態から復旧する局面で、そこは物理的なWiFi遮断が要るため未検証のまま残っている——「直った」とはまだ言えない。** また`pump()`のspill読み込み用バッファ(`Uploader.cpp`内`malloc(len)→POST→free()`、断片化の原因になりうる箇所の**もう一方**)は**今回も未対応のまま**。詳細は[log/2026-08-10-batch-ram-pool.md](log/2026-08-10-batch-ram-pool.md)
-- **構想メモ(2026-08-29、未実装)。coredumpを自動でクラウドへ送る仕組み。** 2026-08-29の
+- **実装済み(2026-08-30、コード面。実機検証は未実施)。coredumpを自動でクラウドへ送る仕組み。** 2026-08-29の
   device2調査で、ESP-IDFのcoredump-to-flash機構（既定で有効・パーティションも確保済み）
   を使えば、パニック時のタスク別バックトレースが自動でフラッシュに残ると分かった
   （詳細[log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)）。
@@ -379,10 +379,22 @@ YAML ではなく JSON にしたのは、`tools/` に PyYAML 依存を持ち込�
   が「単一TLS接続前提の固定プール」である制約(OTAが`closeConnection()`してからCloudFrontへ
   張り直すのと同じ理由)を、この順序なら自然に満たせるため。WDTには頼らず`millis()`ベースの
   締め切りで打ち切る。`Uploader`(batch-uplink)は経由させない(測定対象非依存という
-  batch-uplinkの設計原則に反するため)。ペイロードは`HTTPClient::sendRequest(method, Stream*, size)`
-  で`File`を直接渡しストリーミングする(素朴に64KB全体をmallocすると18KBのバッチ用バッファより
-  大きい単発mallocになってしまうため)。リングバッファの保持件数上限・ファイル命名は未確定。
+  batch-uplinkの設計原則に反するため)。リングバッファの保持件数上限・ファイル命名は未確定。
   詳細は[log/2026-08-29-coredump-auto-upload-design-continued.md](log/2026-08-29-coredump-auto-upload-design-continued.md)
+  **実装(2026-08-30)。** PR #167(lambda/terraform)・PR #171(firmware)で実装した。
+  クラウド側は設計通り`lambda/ingest`への`POST /coredump`ルート・`coredump_key()`・
+  `coredump/`prefixの60日ライフサイクルをそのまま実装した。firmware側は
+  `firmware/lib/CoredumpQueue`として実装し、設計から1点変更した——ペイロードは
+  「署名計算用バッファ」と「POSTボディ」を分けて`Stream*`でストリーミングする案
+  だったが、HMAC署名(`hmacSha256Hex()`)がどのみちファイル全体をバッファへ読む
+  必要があるため、そのバッファをPOSTボディにも使い回す形に単純化した(64KBは
+  coredumpパーティションの上限で、setup()内の一過性の確保のため定常状態の
+  ヒープ断片化には影響しない)。リングバッファの保持件数上限は8件
+  (`kMaxCoredumpFiles`)、ファイル名はNVS(Preferences)の連番カウンタを
+  ゼロ埋めしたもの。`pio run -e esp32dev -e adxl355`のフルビルドは確認したが、
+  **実機フラッシュ・実際のパニック誘発による動作確認(LittleFSへのコピー・
+  クラウドへのアップロード・Slack通知)はまだ実施していない**。
+  詳細は[log/2026-08-30-coredump-auto-upload-implementation-wrapup.md](log/2026-08-30-coredump-auto-upload-implementation-wrapup.md)
 - クラッシュ直前にRAMキューをLittleFSへ退避する経路（`flushToSpill()`はOTA前専用。パニックハンドラやtask watchdogのフックに仕込めるか）。上記の`gBatchQueue`問題を踏まえると、これだけでは「直近2〜3分」しか救えない点に注意
 - **実装済み(2026-08-08)。** 物理ボタン長押しでの手動再起動（`flushToSpill()`→`ESP.restart()`）。2026-08-07の実測で「`uploaderTask`だけが詰まり、`loop()`（ボタンを読んでいるのと同じタスク）は生きている」パターンが実際にあると確認できたので、想定どおり有効という判断のまま実装した。誤操作防止のため2段階にし、2秒(`kRebootHoldConfirmMs`)押し続けたら確認画面(黄)に切り替えつつその時点で先回り`flushToSpill()`を始め、5秒(`kRebootHoldTriggerMs`)まで押し続けたら実際に再起動する（未満で離せばキャンセル、通常表示に戻る）。実際の再起動はリモート再起動(`docs/remote_restart.md`)と同じ`restartRequested`の仕組みに合流させており、Uploaderの「2xxが返るまで捨てない」不変条件は破らない。ボタン読み取り(`loop()`/Core1)と送信タスク(`uploaderTask`/Core0)は別コアなので、Core0側が長時間ブロックしていてもボタンは効く。ただし`gBatchQueue`分より前は既に失われた後なので、早めに気づいて押すことが前提になる点は変わらない。詳細は[log/2026-08-08-emergency-reboot-button.md](log/2026-08-08-emergency-reboot-button.md)
 - **バックフィル起因のクラッシュ（device2で発見、上記）の対策。定期再起動は不採用**——地震はいつ来るか分からず、メンテナンス目的の再起動と本震のタイミングが重なるリスクを許容できないため、意図的に選択肢から外した。検討した案（優先度順）:
