@@ -1,8 +1,10 @@
-"""ingest Lambda: デバイスからのバッチPOSTと速報アラートを受ける。
+"""ingest Lambda: デバイスからのバッチPOST・速報アラート・coredumpを受ける。
 
 Lambda Function URL (payload v2.0) 前提。
-- POST /       : 30秒バッチ（application/octet-stream, HMAC署名）→ S3 raw/ へ
-- POST /alert  : デバイス速報（JSON, HMAC署名）→ DynamoDB + 即Slack通知
+- POST /          : 30秒バッチ（application/octet-stream, HMAC署名）→ S3 raw/ へ
+- POST /alert     : デバイス速報（JSON, HMAC署名）→ DynamoDB + 即Slack通知
+- POST /coredump  : 起動時に見つかったコアダンプ（application/octet-stream, HMAC署名）
+                    → S3 coredump/ へ（docs/log/2026-08-29-coredump-auto-upload-plan.md）
 """
 
 from __future__ import annotations
@@ -27,6 +29,10 @@ _devices_table = boto3.resource("dynamodb").Table(os.environ["NAMZ_DEVICES_TABLE
 # デバイス速報を Slack 通知する最小計測震度(k)。確定報の閾値(l)より高くする想定。
 NOTIFY_PROMPT_MIN = float(os.environ.get("NAMZ_NOTIFY_PROMPT_MIN", "3.0"))
 
+# watchdog(lambda/watchdog/handler.py)と同じメンション先。coredumpは再起動原因の
+# 調査を促す通知なので、欠測アラートと同じ人に飛ばす。
+SLACK_MENTION = "<@U0323ESK6> "
+
 
 def _resp(code: int, msg: str, extra_headers: dict[str, str] | None = None):
     headers = {"content-type": "text/plain"}
@@ -49,8 +55,11 @@ def handler(event, context):
         return _resp(401, f"auth: {e}")
 
     try:
-        if path.rstrip("/").endswith("alert"):
+        p = path.rstrip("/")
+        if p.endswith("alert"):
             return _handle_alert(raw, device)
+        if p.endswith("coredump"):
+            return _handle_coredump(raw, device, headers)
         return _handle_batch(raw, device, headers)
     except Exception as e:  # noqa: BLE001
         print(f"ingest error: {e!r}")
@@ -202,3 +211,28 @@ def _handle_alert(raw: bytes, auth_device: str):
         )
         events.set_field(eid, "notified_prompt_ord", ord_now)
     return _resp(200, "alert ok")
+
+
+def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
+    # コアダンプ本体はwire formatを持たない生バイナリなので、device_idは(認証済みの)
+    # X-Namz-Deviceヘッダだけが情報源(バッチ/速報のような本文とのdevice_id一致検証は
+    # 元々できない)。
+    device_id = int(auth_device)
+    fw_version = headers.get("x-namz-fw-version", "unknown")
+    uploaded_at_us = int(time.time() * 1e6)
+    key = s3util.coredump_key(device_id, fw_version, uploaded_at_us)
+    s3.put_object(Bucket=BUCKET, Key=key, Body=raw, ContentType="application/octet-stream")
+
+    # 通知は主経路ではないので、S3保存が済んでいれば失敗してもACK(200)は返す
+    # （_handle_batchのdevices.get_device失敗時と同じ扱い）。
+    try:
+        notify.from_env().notify(
+            f"{SLACK_MENTION}コアダンプを回収した",
+            f"device *{device_id:04d}* (fw={fw_version}) の起動時にコアダンプが見つかり、"
+            "S3へ保存した。再起動原因の調査に使える。",
+            {"S3キー": key},
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"coredump notify failed: {e!r}")
+
+    return _resp(200, f"stored {key}")
