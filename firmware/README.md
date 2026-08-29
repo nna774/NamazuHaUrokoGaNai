@@ -189,3 +189,9 @@ esp-coredump --chip esp32 --port <port> --baud 115200 info_corefile \
 初回は`esp-coredump`がESP-IDF本体（`parttool.py`）を前提にしていて素直には動かなかった。
 回避手順・実例は
 [docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](../docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)。
+
+**再ビルドしたelfが実機のバイナリと本当に一致するか不安なら**、`tools/publish_ota.sh`が
+アップロードした`ota/<env>/<fw_version>.bin`がS3(`namazu-dashboard-*`バケット)に残っている
+（OTAで配信した版に限る）。`aws s3 cp`で取れば、手元の再ビルド版と`cmp -l`でバイト単位の
+検証ができる（`esp_app_desc_t.app_elf_sha256`フィールド自体を除けば完全一致するはず——
+このフィールドは自己参照のハッシュ値なのでビルドのたびに変わりうる。実例は上記ログ参照）。
