@@ -40,7 +40,15 @@ NOTIFY_CONFIRM_MIN = float(os.environ.get("NAMZ_NOTIFY_CONFIRM_MIN", "1.5"))
 # 上回ったまま長く続くケースの取りこぼしを避けるため。2026-08-23、M5.9の事後解析で
 # コーダが+190秒近くまで残ると分かったのを受けて90→600に引き上げた。
 # docs/log/2026-08-23-event-post-window-extension.md）。
-PRE_SECONDS = 30
+# PRE_SECONDSはonset基準の安全マージンであって、detectlab.pyが背景比較に使う
+# 「発生時刻基準-150〜-30秒」の背景RMS推定窓を狙ったものではない。onsetは常に
+# 「発生時刻+伝播時間」より後に来るため、30秒では伝播時間が30秒を超える地震
+# （震源距離が数十km以上ある大半のケース）で保存開始点が発生時刻より後ろに
+# なってしまい、rawの保持期限(90日)を過ぎた後は事後解析で背景に一切届かなく
+# なる。手動昇格のデフォルト(--pre 180)に揃え、保存範囲そのものに背景ぶんを
+# 焼き込む（2026-08-30千葉県東方沖M4.9の事後解析で発覚、
+# docs/log/2026-08-30-chiba-oki-m4.9-post-hoc-detection.md参照）。
+PRE_SECONDS = 180
 POST_SECONDS = 600
 
 
