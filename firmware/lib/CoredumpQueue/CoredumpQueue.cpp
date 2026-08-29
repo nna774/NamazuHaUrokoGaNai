@@ -68,16 +68,22 @@ void sortNames(String* names, size_t count) {
 }  // namespace
 
 void captureIfPresent(const char* queueDir, size_t maxQueuedFiles) {
-  size_t addr = 0, size = 0;
-  if (esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) return;  // 無ければ何もしない
-
-  Serial.printf("[coredump] found hardware coredump: %u bytes\n", (unsigned)size);
-
+  // LittleFSは今回コアダンプが見つかるかどうかに関わらず必ずマウントする。
+  // 以前は「見つかった時だけ」begin()していたため、今回何も見つからない
+  // (=早期return)起動ではLittleFSが一切マウントされず、後段のdrainToCloud()が
+  // 前回起動で送り損ねたキュー内ファイルを見つけられない(LittleFS.open()が
+  // 「File system is not mounted」で失敗し空扱いになる)実機バグを踏んだ
+  // (2026-08-30、予備基板での実機テストで発見)。
   if (!LittleFS.begin(true)) {
-    Serial.println("[coredump] LittleFS.begin() failed, leaving hardware coredump for next boot");
+    Serial.println("[coredump] LittleFS.begin() failed");
     return;
   }
   if (!LittleFS.exists(queueDir)) LittleFS.mkdir(queueDir);
+
+  size_t addr = 0, size = 0;
+  if (esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) return;  // 無ければ以降は何もしない
+
+  Serial.printf("[coredump] found hardware coredump: %u bytes\n", (unsigned)size);
 
   const esp_partition_t* part = esp_partition_find_first(
       ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);

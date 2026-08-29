@@ -885,6 +885,23 @@ void loop() {
   static bool active = false;
   static int tick = 0;
 
+#ifdef NAMZ_PANIC_TEST_MS
+  // coredump自動送信の実機動作確認用(docs/log/2026-08-30-
+  // coredump-auto-upload-implementation-wrapup.md「未了」)。起動から
+  // NAMZ_PANIC_TEST_MSミリ秒経過したら意図的にabort()し、ESP-IDFの
+  // coredump-to-flashへ書かせる。予備基板専用のビルドフラグで、通常の
+  // env(esp32dev/adxl355等)には効かない——本番機に混入させないこと。
+  {
+    static bool triggered = false;
+    if (!triggered && millis() > (NAMZ_PANIC_TEST_MS)) {
+      triggered = true;
+      Serial.println("[panic-test] triggering deliberate abort() now");
+      Serial.flush();
+      abort();
+    }
+  }
+#endif
+
 #ifndef NAMZ_SENSOR_TEST
   // ボタン長押しでの緊急手動再起動（config.hのkRebootHoldConfirmMs/
   // kRebootHoldTriggerMs参照）。
