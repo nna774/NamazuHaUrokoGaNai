@@ -128,10 +128,11 @@ def load_s3_window(bucket: str, end_us: int, seconds: float,
     return store.load_window(_s3_client(use_cache), bucket, end_us, seconds, device_id)
 
 
-def load_s3_event(bucket: str, eid: str, use_cache: bool = True) -> tuple[np.ndarray, int, float]:
+def load_s3_event(bucket: str, eid: str, use_cache: bool = True,
+                  near_us: int | None = None) -> tuple[np.ndarray, int, float]:
     from common import store
 
-    return store.load_event(_s3_client(use_cache), bucket, eid)
+    return store.load_event(_s3_client(use_cache), bucket, eid, near_us=near_us)
 
 
 def load_event_onset_us(bucket: str, eid: str, use_cache: bool = True) -> int:
@@ -784,8 +785,10 @@ def main() -> int:
         device_id = None  # CSVは任意データなので--deviceの既定値は意味を持たない
     elif args.event and len(args.event) == 1:
         eid = args.event[0]
-        data, start_us, fs = load_s3_event(resolve_bucket(args.bucket), eid,
-                                          use_cache=not args.no_cache)
+        bucket = resolve_bucket(args.bucket)
+        onset_us = load_event_onset_us(bucket, eid, use_cache=not args.no_cache)
+        data, start_us, fs = load_s3_event(bucket, eid, use_cache=not args.no_cache,
+                                          near_us=onset_us)
         device_id = int(eid.split("-", 1)[0])  # event_id先頭4桁=device
     elif args.event:
         # 複数event_idの重ね描き。既定はevents/の保存済み範囲、--from-rawでraw/を
@@ -794,15 +797,16 @@ def main() -> int:
         per_device = []
         for eid in args.event:
             dev = int(eid.split("-", 1)[0])
+            onset_us = load_event_onset_us(bucket, eid, use_cache=not args.no_cache)
             if args.from_raw:
-                onset_us = load_event_onset_us(bucket, eid, use_cache=not args.no_cache)
                 after_s = args.minutes * 60.0
                 lead_s = args.lead_min * 60.0
                 end_us = int(onset_us + after_s * 1e6)
                 d_data, d_start, d_fs = load_s3_window(bucket, end_us, after_s + lead_s, dev,
                                                        use_cache=not args.no_cache)
             else:
-                d_data, d_start, d_fs = load_s3_event(bucket, eid, use_cache=not args.no_cache)
+                d_data, d_start, d_fs = load_s3_event(bucket, eid, use_cache=not args.no_cache,
+                                                      near_us=onset_us)
             per_device.append(overlay_source(f"event={eid}", dev, d_data, d_start, d_fs))
         ref_us = origin_us if origin_us is not None else min(p[1] for p in per_device)
         precomputed_corr = None

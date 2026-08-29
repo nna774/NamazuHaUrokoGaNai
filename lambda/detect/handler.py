@@ -114,7 +114,7 @@ def _quicklook_url(eid: str, ci: float, onset_us: int) -> str | None:
     onset 後が数秒しか溜まっていなくても手前の平坦部に潰されず読める。
     画像化・配信のどこかで失敗しても通知本体は止めない（テキストのみで飛ばす）。"""
     try:
-        gal, win_start, fs = store.load_event(s3, BUCKET, eid)
+        gal, win_start, fs = store.load_event(s3, BUCKET, eid, near_us=onset_us)
         if gal.shape[0] == 0:
             return None
         png = quicklook.render_png(gal, fs, win_start, onset_us)

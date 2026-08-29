@@ -109,9 +109,9 @@ def test_copy_raw_to_event_only_copies_one_device(s3):
     assert all("/0002-" in k for k in copied)
 
 
-def test_load_window_drops_samples_before_a_real_gap():
-    """バッチ間に許容ジッタを超える空き(WiFi再接続等)があったら、その前を捨てて
-    欠落後の連続区間だけを返す（2026-08-29 NERV防災通知の事後解析で発見）。
+def test_load_window_keeps_only_the_trailing_segment_across_a_real_gap():
+    """バッチ間に許容ジッタを超える空き(WiFi再接続等)があったら、`load_window`は
+    末尾（＝直近）の連続区間だけを返す（2026-08-29 NERV防災通知の事後解析で発見）。
 
     単純に全部連結すると、欠落後のサンプルの時刻が win_start + i/fs で実時刻より
     欠落秒数ぶん早く計算され、onset時刻が実際より早くズレる。
@@ -134,3 +134,55 @@ def test_load_window_drops_samples_before_a_real_gap():
     assert win_start == gap_start
     assert gal.shape[0] == 200  # 欠落前の2バッチ(200サンプル)は含まれない
     assert gal[:, 0].max() - gal[:, 0].min() == pytest.approx(0.0, abs=1e-6)
+
+
+def _events_with_two_gaps():
+    """先頭区間(dc=-1)・欠落・onsetを含む中央区間(dc=+99)・欠落・post側区間(dc=-3)
+    の3区間を持つイベントを作る。2026-08-29の群馬県北部M3.2の事後解析で実際に
+    踏んだ形（保存範囲に2回の無関係な欠落があり、onsetは先頭でも末尾でもない
+    真ん中の区間に入っていた）そのもの。"""
+    objs = {}
+    for i in range(2):
+        st = T0 + i * 1_000_000
+        objs[s3util.event_batch_key("0002-x", st)] = build(2, st, dc_gal=-1.0)
+    mid_start = T0 + 2_000_000 + 40_000_000
+    onset_us = mid_start + 500_000  # 中央区間の内側
+    for i in range(2):
+        st = mid_start + i * 1_000_000
+        objs[s3util.event_batch_key("0002-x", st)] = build(2, st, dc_gal=+99.0)
+    post_start = mid_start + 2_000_000 + 40_000_000
+    for i in range(2):
+        st = post_start + i * 1_000_000
+        objs[s3util.event_batch_key("0002-x", st)] = build(2, st, dc_gal=-3.0)
+    return FakeS3(objs), mid_start, onset_us
+
+
+def test_load_event_picks_the_segment_containing_near_us():
+    """`near_us`(通常はonset_us)を渡したら、それを含む区間を返す——先頭でも
+    末尾でもない真ん中の区間に入っていても正しく拾える。"""
+    s3, mid_start, onset_us = _events_with_two_gaps()
+
+    gal, win_start, _ = store.load_event(s3, "b", "0002-x", near_us=onset_us)
+
+    assert win_start == mid_start
+    assert gal.shape[0] == 200
+    assert gal[:, 0].max() - gal[:, 0].min() == pytest.approx(0.0, abs=1e-6)
+    assert gal[0, 0] > 50  # dc_gal=+99.0側の区間が返っている
+
+
+def test_load_event_without_near_us_falls_back_to_the_largest_segment():
+    """`near_us`未指定なら最大（サンプル数最多）の区間を返す。"""
+    objs = {}
+    for i in range(2):  # 小さい先頭区間(200サンプル)
+        st = T0 + i * 1_000_000
+        objs[s3util.event_batch_key("0002-y", st)] = build(2, st, dc_gal=-1.0, n=100)
+    big_start = T0 + 2_000_000 + 40_000_000
+    for i in range(5):  # 大きい後続区間(500サンプル)
+        st = big_start + i * 1_000_000
+        objs[s3util.event_batch_key("0002-y", st)] = build(2, st, dc_gal=+42.0, n=100)
+    s3 = FakeS3(objs)
+
+    gal, win_start, _ = store.load_event(s3, "b", "0002-y")
+
+    assert win_start == big_start
+    assert gal.shape[0] == 500
