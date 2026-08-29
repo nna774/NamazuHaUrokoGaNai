@@ -32,3 +32,6 @@
 - LittleFSリングバッファの保持件数上限
 - `/coredump/`のファイル命名(採番方式)
 - 実装の着手順序（プランを立ててから）
+
+**続き**: 上記の未確定点も含めて実装プランに落とした。
+[log/2026-08-29-coredump-auto-upload-plan.md](2026-08-29-coredump-auto-upload-plan.md)
