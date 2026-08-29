@@ -129,6 +129,23 @@ python tools/detectlab.py --at "<発生時刻、分単位 例 2026-08-23 22:45:0
 `--eew`使用時の背景RMS推定に必要な下限）。P窓/S窓のSNR・直線性が標準出力に出る。
 STA/LTA peakが閾値(4)を超えていれば、その時点で「地震らしい」と言い切れる。
 
+**続けてdevice単体のプロットもdevice1・device2それぞれ毎回作る（必須。[#163](https://github.com/nna774/NamazuHaUrokoGaNai/pull/163)以降の標準）:**
+
+```bash
+python tools/detectlab.py --at "<同じ発生時刻>" \
+  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 10 --device 1 \
+  --out docs/log/img/<slug>-device1.png
+python tools/detectlab.py --at "<同じ発生時刻>" \
+  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 10 --device 2 \
+  --out docs/log/img/<slug>-device2.png
+```
+
+`--device`を1個だけ渡すと重ね合わせ図（`plot_overlay`）ではなく単体窓のプロット（`plot`）になり、
+重ね合わせ図には無い**生波形（重力DC除去）・バンドパス後・スペクトログラム**の3パネルが
+STA/LTA比・直線性に加えて出る。「重ね合わせでSTA/LTA・直線性が閾値超過している」ことと
+「実際に過渡がどう見えるか」は別の情報で、後者は重ね合わせ図だけでは確認できない
+（[群馬県北部M3.2の事後解析](log/2026-08-29-gunma-kitabu-m3.2-post-hoc-detection.md)参照）。
+
 **拡大（2分窓ズーム）版は普通は作らない。** 標準設定・低帯域設定の図だけで説明が
 つくならそれで十分。人間から「ズームして見せて」と頼まれた時、または閾値ぎりぎりで
 視覚的な裏取りがどうしても要る時だけ追加で作る:
@@ -222,7 +239,9 @@ worktreeには`.venv`が無く`terraform output`も通らないことがある�
 
 - 震源要素・気象庁発表時刻・最大震度（各地の震度一覧があれば要約）
 - 自動検知の有無（あれば`event_id`・`onset_us`・確定状態、無ければ`/events?all=1`で確認した旨）
-- detectlab解析結果（標準設定の表、必要なら低帯域設定の表、画像）
+- detectlab解析結果（標準設定の表、必要なら低帯域設定の表、画像）。画像は重ね合わせ図
+  （`<slug>-8min.png`）に加えて、device単体プロット（`<slug>-device1.png`・
+  `<slug>-device2.png`）も必ずリンクする
 - 判定（probable detection / 微妙 / 完全埋没）とその根拠
 - 新しい知見があれば`docs/noise.md`にも追記し、その旨をログに書く
 - `docs/progress.md`に1〜3文の要約+ログへのリンクを1行追記する
