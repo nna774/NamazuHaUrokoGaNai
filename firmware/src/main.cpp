@@ -18,6 +18,7 @@
 #include <time.h>
 
 #include "Batch.h"
+#include "CoredumpQueue.h"
 #include "DeviceIdentity.h"
 #include "Display.h"
 #include "NamzWire.h"
@@ -719,6 +720,12 @@ void setup() {
   tlsmempool::install();
 #endif
 #ifndef NAMZ_SENSOR_TEST
+  // WiFi/identity未ロードでも動く、ネットワーク非依存のローカルflash操作のみ。
+  // coredumpパーティションは単一image・次のパニックで上書きされる仕様なので、
+  // 何よりも先にLittleFSへ退避してから空ける
+  // (docs/log/2026-08-29-coredump-auto-upload-plan.md)。
+  coredumpqueue::captureIfPresent(kCoredumpQueueDir, kMaxCoredumpFiles);
+
   // Display/SPI/センサ初期化(フォント読み込み等でヒープを消費する)より前、
   // 起動直後の最も断片化していない時点で確保する。理由はsetupBatchPool()の
   // コメント参照。
@@ -781,6 +788,21 @@ void setup() {
   connectWifi();
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
+
+  // coredumpキューのアップロードは、Uploader/task起動より前のこの時点で行う。
+  // main.cppがsetup()冒頭でinstallしたTlsMemPool(mbedTLS用固定プール)は
+  // 「単一TLS接続前提」で見積もっており(OTAがgUploader->closeConnection()して
+  // からCloudFrontへ張り直すのと同じ制約)、gUploader生成前ならcoredump送信用の
+  // TLS接続だけが存在する状態を保てる。新しいtaskは作らず同期呼び出しにする
+  // (docs/log/2026-08-29-coredump-auto-upload-plan.md)。WiFi接続に失敗していれば
+  // 何もせず、次回起動での再試行に委ねる。
+  if (WiFi.status() == WL_CONNECTED) {
+    coredumpqueue::drainToCloud(kCoredumpQueueDir, gIdentity.ingestUrl.c_str(),
+                                gIdentity.hmacSecret.c_str(), gIdentity.deviceId, kFwVersion,
+                                reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
+                                kCoredumpPerFileTimeoutMs, kCoredumpTotalBudgetMs);
+  }
+
   // ingest/alert先はLambda Function URL直（*.lambda-url.ap-northeast-1.on.aws、
   // CloudFrontを介さない）。openssl s_clientで実機のチェーンを確認したところ
   // leaf -> Amazon RSA 2048 M01 -> Amazon Root CA 1 で、OTA用に埋め込み済みの
