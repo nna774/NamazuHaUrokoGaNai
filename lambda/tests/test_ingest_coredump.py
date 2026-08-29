@@ -52,7 +52,13 @@ def test_handle_coredump_stores_to_s3(fake_s3, monkeypatch):
     assert put["Key"].startswith("coredump/0002/326488d-")
     assert put["Body"] == b"\x7fELFdummy"
     assert len(notifier.calls) == 1
-    assert "326488d" in notifier.calls[0][1]
+    title, text, _fields = notifier.calls[0]
+    assert "326488d" in text
+    # メンション(<@...>)はtitle(plain_textヘッダ、mrkdwn非対応)ではなくtext
+    # (mrkdwn section)に入れないと、Slack上でIDがそのまま文字列として表示され
+    # 実際のメンションにならない(watchdog/handler.pyと同じ書き方に揃える)。
+    assert ingest.SLACK_MENTION not in title
+    assert ingest.SLACK_MENTION in text
 
 
 def test_handle_coredump_acks_even_if_notify_fails(fake_s3, monkeypatch):

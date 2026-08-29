@@ -227,9 +227,9 @@ def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
     # （_handle_batchのdevices.get_device失敗時と同じ扱い）。
     try:
         notify.from_env().notify(
-            f"{SLACK_MENTION}コアダンプを回収した",
-            f"device *{device_id:04d}* (fw={fw_version}) の起動時にコアダンプが見つかり、"
-            "S3へ保存した。再起動原因の調査に使える。",
+            "コアダンプを回収した",
+            f"{SLACK_MENTION}device *{device_id:04d}* (fw={fw_version}) の起動時にコアダンプが"
+            "見つかり、S3へ保存した。再起動原因の調査に使える。",
             {"S3キー": key},
         )
     except Exception as e:  # noqa: BLE001
