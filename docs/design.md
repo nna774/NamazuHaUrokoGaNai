@@ -316,6 +316,31 @@ YAML ではなく JSON にしたのは、`tools/` に PyYAML 依存を持ち込�
     最適化を失う上、タイムアウト無制限という根本原因を直さないまま損失
     ウィンドウだけ塞ぐ対症療法になるため、根本対策を先に実施する順序にした。
     詳細は[log/2026-08-29-device2-wdt-panic-fix-direction.md](log/2026-08-29-device2-wdt-panic-fix-direction.md)
+  - **実装(2026-08-29、`batch-uplink`側、[PR #27](https://github.com/nna774/batch-uplink/pull/27))。**
+    上記「レスポンスボディ読み取りのタイムアウト無制限」は実装直前に見送った——
+    `HTTPClient::sendRequest()`は`handleHeaderResponse()`直後に`return`しており、
+    `writeToStreamDataBlock`は`getString()`等を呼んだ時にしか実行されない。
+    `postBatch()`/`sendAlert()`はどちらも`http_.POST()`の戻り値とヘッダしか見ておらず
+    ボディを一切読まないため、**このコードパスは現状到達しないデッドコード**だと
+    判明した(今は起きないシナリオへの防御コードは書かない方針に沿い見送り)。
+    代わりに接続・ハンドシェイク・ヘッダ読み取りの3区間をいずれも3000msへ縮め、
+    最悪合計を19秒→12秒(WDT20秒に対し8秒=40%の余裕)へ切り詰めた。3値は
+    `Uploader`のコンストラクタ引数(`connectTimeoutMs`/`handshakeTimeoutMs`/
+    `responseTimeoutMs`、既定3000/3000/3000)として外から指定できる——`Uploader`は
+    周波数モニタElectabuzzとも共有しており、呼び出し側のWDT設定はプロジェクト
+    ごとに異なりうるため引数化した。DNS解決の締切は引き続き対象外のまま。
+    詳細は[log/2026-08-29-device2-wdt-timeout-budget-implementation.md](log/2026-08-29-device2-wdt-timeout-budget-implementation.md)
+  - **新たに見つかった既知の問題(2026-08-29、未着手)。** 上記の調査中、
+    `postBatch()`がレスポンスボディを一切読まないまま`setReuse(true)`で接続を
+    使い回している設計に気付いた。ingest Lambdaは成功時も含め常にテキスト
+    ボディを返す(`lambda/ingest/handler.py`の`_resp()`)ため、読み残された平文が
+    mbedtlsコンテキスト内に残ったまま次のリクエストへ持ち越され、次回`postBatch()`
+    が接続を再利用してヘッダを読む際に前回の読み残しボディを誤読しうる。
+    メモリに無限に溜まるわけではなく(mbedtlsの内部バッファは1TLSレコード分の
+    固定サイズで上書きされるだけ)、誤読すれば`code`がおかしくなり`ok=false`から
+    `client_.stop()`で次回強制的に繋ぎ直され自己修復するが、その代償として
+    説明のつかない散発的なPOST失敗・バックオフが起きている可能性がある。
+    今回のWDT対処とは独立した別バグのため未着手のまま残す。
 - **`gBatchQueue`（深さ4・drop-oldest）がボトルネックだと分かった。** `uploaderTask`が長時間ブロックする間も真っ先に失われるのはここ。`Uploader`のRAMキュー(`kMaxRamBatches`)より手前で対策しないと、退避の仕組み自体に一度もデータが届かない。
   - **実装済み(2026-08-11)。** `uploaderTask`を「吸い出し(`gBatchQueue`→`Uploader`、退避含む)」と「送信」の2タスクに割った。どちらもCore0に置く（`loop()`と`samplingTask`がCore1を共有しているのと同じ理屈で、吸い出し側は`xQueueReceive(..., portMAX_DELAY)`でブロックして待てば、来ない間はCPUをほぼ使わない）。**分割が効くのはCPU競合の解消のためではなく**、以前は「吸い出し」と「送信」が1つのタスクの中で直列に書かれていたため、送信側の1行が長時間ブロックすると後ろの吸い出し処理に**プログラムカウンタが物理的に到達できない**ことだった。タスクを分けたことで、送信側が(CPUを使わない正しいブロッキング待ちとして)何十分固まっていようと、吸い出し側は別の実行の流れとしてスケジューラに動かしてもらえる——2026-08-07のdevice1のように送信側だけが詰まるケースにこれがそのまま効く。`batchDrainTask`は送信タスクより優先度を高くし、task watchdogには登録しない（待機自体が正常状態のため）。詳細は[log/2026-08-11-uploader-task-split-design.md](log/2026-08-11-uploader-task-split-design.md)
   - **実装済み(2026-08-11)。** `Uploader.ram_`・spillディレクトリを2タスクが触るようになったため、`batch-uplink`側([PR #22](https://github.com/nna774/batch-uplink/pull/22))に`Uploader`内部mutexを追加した。**`pump()`のネットワークI/O区間(`postBatch()`呼び出し)はロックを保持しない**——ここを握ると吸い出し側の`enqueue()`まで巻き込んでブロックし、分割の意味が消えるため。また`pump()`のRAM分岐は「popしてから送る」方式に変更した——`front()`を覗いたまま送ると、送信中に`enqueue()`側のRAM満杯検知が同じ先頭要素を退避・deleteする競合windowがあったため
