@@ -12,6 +12,7 @@ from typing import Iterator
 
 RAW_PREFIX = "raw"
 EVENTS_PREFIX = "events"
+COREDUMP_PREFIX = "coredump"
 
 
 def _dt(us: int) -> dt.datetime:
@@ -37,6 +38,17 @@ def raw_hour_prefixes(start_us: int, end_us: int) -> Iterator[str]:
         yield f"{RAW_PREFIX}/{cur:%Y/%m/%d/%H}/"
         cur += dt.timedelta(hours=1)
         count += 1
+
+
+def coredump_key(device_id: int, fw_version: str, uploaded_at_us: int) -> str:
+    """coredump/<device>/<fw_version>-<uploadedus>.bin。
+
+    fw_versionをキーに含めるのは、coredumpの読み出し(esp-coredumpでのsymbolize)に
+    fw_versionと同じコミットで再ビルドしたelfが要るため(firmware/README.md
+    「クラッシュ後のcoredump吸い出し」)。S3の場所を見ただけでどのelfが要るか分かる。
+    """
+    return (f"{COREDUMP_PREFIX}/{device_id:04d}/"
+            f"{fw_version}-{uploaded_at_us:020d}.bin")
 
 
 def event_meta_key(event_id: str) -> str:
