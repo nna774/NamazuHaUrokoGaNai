@@ -306,7 +306,17 @@ YAML ではなく JSON にしたのは、`tools/` に PyYAML 依存を持ち込�
   今回は手動でUSB接続して読み出したが、起動直後にcoredumpの有無を確認し、あれば
   S3等へ自動アップロードしてから消す仕組みがあれば、「気づいたら直っていた」再起動でも
   原因調査ができるようになる。送信先・認証・容量・読み出し側(現状espcoredump+一致する
-  elfが必要)の運用は未検討
+  elfが必要)の運用は未検討。
+  **一次検討(2026-08-29、同日)。** `gIdentity`(WiFiパスワード・HMAC共有鍵)はブート中ずっと
+  RAM上にあるが、実機のESP-IDF sdkconfigは`CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF`で
+  `CONFIG_ESP_COREDUMP_CAPTURE_DRAM`は無効——既定ではタスクのスタックとレジスタのみが
+  残る仕様で、グローバル変数がまるごと写り込むわけではなさそうだと分かった。ただし
+  「絶対に写らない」証明にはならない(HMAC計算等の途中でキーがローカル変数へ一時的に
+  コピーされる瞬間はあり得る)ため、**「写るかもしれない」前提で保存先を隔離する方針**とする。
+  また`espcoredump`のヘッダ確認により、coredumpパーティションは単一image・複数世代を
+  持たない設計（次のパニックで上書き、`esp_core_dump_image_erase()`という送信成功後専用の
+  消去APIあり）と確定した——64KBは「1回分の記録の上限」であって履歴容量ではない。
+  詳細は[log/2026-08-29-coredump-auto-upload-design-discussion.md](log/2026-08-29-coredump-auto-upload-design-discussion.md)
 - クラッシュ直前にRAMキューをLittleFSへ退避する経路（`flushToSpill()`はOTA前専用。パニックハンドラやtask watchdogのフックに仕込めるか）。上記の`gBatchQueue`問題を踏まえると、これだけでは「直近2〜3分」しか救えない点に注意
 - **実装済み(2026-08-08)。** 物理ボタン長押しでの手動再起動（`flushToSpill()`→`ESP.restart()`）。2026-08-07の実測で「`uploaderTask`だけが詰まり、`loop()`（ボタンを読んでいるのと同じタスク）は生きている」パターンが実際にあると確認できたので、想定どおり有効という判断のまま実装した。誤操作防止のため2段階にし、2秒(`kRebootHoldConfirmMs`)押し続けたら確認画面(黄)に切り替えつつその時点で先回り`flushToSpill()`を始め、5秒(`kRebootHoldTriggerMs`)まで押し続けたら実際に再起動する（未満で離せばキャンセル、通常表示に戻る）。実際の再起動はリモート再起動(`docs/remote_restart.md`)と同じ`restartRequested`の仕組みに合流させており、Uploaderの「2xxが返るまで捨てない」不変条件は破らない。ボタン読み取り(`loop()`/Core1)と送信タスク(`uploaderTask`/Core0)は別コアなので、Core0側が長時間ブロックしていてもボタンは効く。ただし`gBatchQueue`分より前は既に失われた後なので、早めに気づいて押すことが前提になる点は変わらない。詳細は[log/2026-08-08-emergency-reboot-button.md](log/2026-08-08-emergency-reboot-button.md)
 - **バックフィル起因のクラッシュ（device2で発見、上記）の対策。定期再起動は不採用**——地震はいつ来るか分からず、メンテナンス目的の再起動と本震のタイミングが重なるリスクを許容できないため、意図的に選択肢から外した。検討した案（優先度順）:
