@@ -132,6 +132,13 @@
   閾値ぎりぎりの揺れを拾いやすい可能性はあるが、2件だけでは傾向と呼ぶには早い（詳細・図:
   [log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md](log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md)、
   [log/2026-08-26-ibaraki-nanbu-m3.4-post-hoc-detection.md](log/2026-08-26-ibaraki-nanbu-m3.4-post-hoc-detection.md)）。
+- **2026-08-30 00:17 千葉県東方沖 M4.9 深さ40km（震源距離229km）**: リアルタイムで
+  自動確定（`0001/0002-59600556`、両機とも確定震度1）。事後のdetectlab解析でも
+  標準設定でSTA/LTA peak 5.32/5.59（閾値4超過）、S波窓・コーダ想定域でSNR・直線性とも
+  「地震らしい」、直線性一致度もt+40〜100s区間で背景(frac 0.18)の3〜4倍(frac 0.65〜0.88)
+  と明瞭な**probable detection**。`docs/detection_range.md`の目安（M4.9→予測290km、
+  レンジ232〜464km）の下限のすぐ外側だが実際は明瞭に検出できており、目安が絶対的な
+  境界ではないことの一例（詳細: [log/2026-08-30-chiba-oki-m4.9-post-hoc-detection.md](log/2026-08-30-chiba-oki-m4.9-post-hoc-detection.md)）。
 
 ## 実務結論
 
