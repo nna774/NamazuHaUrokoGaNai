@@ -93,12 +93,50 @@ TASK_WDT（タスクウォッチドッグタイマ）**と判明。ファーム�
 見られる」という記述があるが、それは分単位の話で規模が違う——今回のような数十秒・
 数分〜十数分おきの頻発パターンは未記載だったため、`docs/adxl355.md`に追記した。
 
+## デプロイ後に気づいた第2のバグ: `load_event`が末尾を残すと肝心のonsetごと消える
+
+最初の修正（`_concat_batches_dropping_leading_gaps`、欠落があったら**末尾**の連続区間を
+残す）を`terraform apply`で本番反映した直後、ユーザーに促されて手動昇格した
+`0002-59599897`を`load_event()`で読み直したところ、返ってきたのは**onsetより後、
+しかも本震を含まない120秒**だけだった（`0001`側は810秒フルで正常）。
+
+原因: `load_event`の保存範囲(pre180s/post600s)の中に、本震(18:48:58)と直接関係ない
+**2回目の欠落**(18:56:11〜18:57:02、TASK_WDTの次の発火)が入っていた。保存範囲は
+「先頭区間(18:45:43-18:46:58)・欠落・本震を含む中央区間(18:47:35-18:56:11)・欠落・
+post側区間(18:57:02-)」の3区間に分かれており、`load_window`用に書いた「末尾を残す」
+ロジックをそのまま`load_event`にも使い回したのが誤りだった。`load_window`(直近窓)は
+末尾＝知りたい時刻でよいが、`load_event`(保存済みイベント)は先頭でも末尾でもない
+真ん中の区間にonsetが入ることがある。
+
+**再修正**: `_concat_batches_dropping_leading_gaps`を`_split_into_contiguous_segments`
+（分割するだけ、選択は呼び出し側）に変更し、`_pick_segment(segments, fs, near_us)`を
+新設。`load_event`は`near_us`（通常はonset_us）を受け取り、それを含む区間（無ければ
+最も近い区間）を返す。呼び出し側（`detect/handler.py`の`_quicklook_url`・
+`tools/calibrate_orientation.py`・`tools/detectlab.py`の`--event`系2箇所）は既に
+onset_usを知っているか`load_event_onset_us()`で取れるので、そこを渡すよう変更した。
+`near_us`未指定時は最大（サンプル数最多）の区間にフォールバックする。
+`load_window`は`_pick_segment`を使わず引き続き末尾（`segments[-1]`）を直接選ぶ
+（直近窓には「近い時刻」という概念がそもそも無い＝end_usそのものが知りたい時刻）。
+
+テストに`test_load_event_picks_the_segment_containing_near_us`・
+`test_load_event_without_near_us_falls_back_to_the_largest_segment`を追加、
+実データで`0002-59599897`をnear_us=onset付きで読み直し、本震を含む525秒
+(18:47:35-18:56:20)が返ることを確認してから再デプロイした。`pytest lambda/tests`は
+161件通過。
+
+**教訓**: 「窓を短くして時刻を正しくする」という修正方針自体は正しかったが、
+「どちらの端を残すか」は呼び出し側の意味論（直近が欲しいのか、既知の時刻を含む区間が
+欲しいのか）に依存する。片方の用途で書いたロジックをもう片方に安易に使い回すと、
+今回のように**本震そのものを消す**という、元のバグより悪い結果になりうる。
+
 ## 次に可能になったこと
 
 - `store.load_window`/`load_event`が欠落を跨ぐ窓でも正しい時刻を返すようになり、
-  今後の事後解析・`detect`のonset時刻がより正確になる。
+  今後の事後解析・`detect`のonset時刻がより正確になる。`load_event`は保存範囲内に
+  複数の欠落があっても、onsetを含む区間を正しく拾えるようになった。
 - 手動イベント化: `0001-59599897`・`0002-59599897`として永久保存・相互リンク済み
-  （`onset=2026-08-29 18:48:58 JST`、pre180s/post600s）。
+  （`onset=2026-08-29 18:48:58 JST`、pre180s/post600s）。`0002`側は再修正後の
+  `load_event(near_us=onset)`で読み直せば本震を含む波形が正しく見える。
 
 ## 新しい知見の反映先
 

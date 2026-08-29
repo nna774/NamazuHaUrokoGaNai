@@ -165,7 +165,7 @@ def load_calibrations(events_table, bucket: str, eids: list[str]) -> list[Device
         waveform_prefix = item.get("waveform_prefix")
         if not waveform_prefix:
             raise SystemExit(f"{eid}: waveform_prefix が無い(まだ events/ へ永久保存されていない)")
-        gal, start_us, fs = store.load_event(s3, bucket, eid)
+        gal, start_us, fs = store.load_event(s3, bucket, eid, near_us=onset_us)
         if len(gal) == 0:
             raise SystemExit(f"{eid}: 波形が空(events/{eid}/ が無いかもしれない)")
         cals.append(DeviceCal(eid, device_id, onset_us, gal, start_us, fs))
