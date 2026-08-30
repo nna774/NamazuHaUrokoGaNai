@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-30 | **バッチ組み立て完了直後に`flushToSpill()`でLittleFSへ即座に退避する「常時spill化」を実験実装した（採用は未確定）。** WDTパニック等の瞬時再起動で送信直前のRAM上バッチが消える窓を塞ぐのが狙い。`docs/design.md`には同じ案が2026-08-07の別障害(70分ブロッキング、既にタイムアウト予算で対処済み)への対症療法として一度「保留」と記録されていたが、今回は別の目的での実装とユーザーに確認した上で進めた。`batch-uplink`側の変更は不要(既存の`flushToSpill()`を呼ぶだけ)。`main.cpp`の`batchDrainTask`・`piezo_main.cpp`の`uploaderTask`両方に配線。firmwareビルド(`esp32dev`/`adxl355`/`piezo`)・`test/run.sh`は確認済み。**実機での動作確認・flash摩耗/I/O負荷の実測はまだ、健全時のコストとのトレードオフを見て採用可否を判断する** | [log/2026-08-30-batch-spill-before-send.md](log/2026-08-30-batch-spill-before-send.md) |
 | 2026-08-30 | **`noise.md`の刈り込みで専用ログが無く消えていた2026-08-02/08-11測定の生の記述を、事後的にログとして書き起こした。** 当時は`docs/log/`運用が始まる前でnoise.md自体が唯一の記録だったため | [log/2026-08-30-noise-md-historical-measurements-backfill.md](log/2026-08-30-noise-md-historical-measurements-backfill.md) |
 | 2026-08-30 | **`design.md`・`noise.md`・`piezo.md`・`adxl355.md`に居座っていた日付付きの調査経緯・実験過程の記述を刈り込み、現在の結論だけを残す形に圧縮した(4ファイル合計-272行)。** 詳細は各ログへのリンクに置き換えた | [log/2026-08-30-trim-historical-narrative-from-docs.md](log/2026-08-30-trim-historical-narrative-from-docs.md) |
 | 2026-08-30 | **coredump以外にESP32の未活用機能がないか棚卸しし、RTC memoryの使いどころを検討した。** `ESP.getMinFreeHeap()`・`WiFi.RSSI()`が未使用と判明。「組み立て済みバッチをRTC memoryへ退避すれば再起動でも失わずに済むか」を検証したが、ESP32(無印)のRTCメモリ合計16KBに対しバッチは18KB/本と最初から入らず、brownoutリセットではRTC memory自体の保持も非保証と分かり「バッチ本体の退避には使えない」と判断が覆った。代わりに、容量が小さくて済む用途（再起動ループカウンタ・失われたバッチの封筒のみ記録・ブロッキング処理のパンくず）を候補として整理。実装は未着手 | [log/2026-08-30-esp32-hidden-features-survey.md](log/2026-08-30-esp32-hidden-features-survey.md) |

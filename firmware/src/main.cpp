@@ -579,11 +579,24 @@ static void checkAndPerformPullOta(const String& target) {
 // 待機自体をハング扱いされると困る。Uploader::enqueue()自体はmutexで守られており
 // 送信タスク側のpump()/flushToSpill()と安全に並行できる（batch-uplink側の変更、
 // docs/log/2026-08-11-uploader-task-split-design.md）。
+// enqueue()直後にflushToSpill()を毎回呼び、RAMキューに積んだ端から即座に
+// LittleFSへ退避する（常時spill化）。組み立て完了〜送信成功までRAM上にしか
+// 無い区間をほぼ無くし、WDTパニック等の瞬時再起動でその区間のバッチが消える
+// 窓を塞ぐのが狙い（docs/log/2026-08-30-esp32-hidden-features-survey.mdの
+// RTC memory検討から派生）。docs/design.md「送信の信頼性」の検討済み案一覧に
+// 「常時spill化」は一度保留と記録されているが、あれは別問題（2026-08-07の
+// 70分ブロッキング、既にタイムアウト予算で対処済み）への対症療法として
+// 見送られたもので、瞬時パニックでのRAM損失はタイムアウト予算では塞げない
+// 別の窓。健全時に常時LittleFS I/Oが乗るコストは変わらず残る——採用するか
+// どうかは実機での様子見込みで未確定（ユーザー指示、2026-08-30）。
+// flushToSpill()はファイルI/Oのみでネットワークを触らないため、このタスクを
+// 分けた本来の目的（送信タスクのブロックに巻き込まれない）は損なわない。
 static void batchDrainTask(void*) {
   for (;;) {
     Batch* b = nullptr;
     if (xQueueReceive(gBatchQueue, &b, portMAX_DELAY) == pdTRUE) {
       gUploader->enqueue(b);
+      gUploader->flushToSpill();
     }
   }
 }

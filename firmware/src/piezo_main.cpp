@@ -242,9 +242,14 @@ static void uploaderTask(void*) {
   bool restartRequested = false;  // サーバからのリモート再起動要求（docs/remote_restart.md）
   for (;;) {
     Batch* b = nullptr;
+    bool drained = false;
     while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) {
       gUploader->enqueue(b);
+      drained = true;
     }
+    // 吸い出した端から即座にLittleFSへ退避する（常時spill化、本線main.cppと同じ
+    // 理由）。ファイルI/Oのみでpump()のネットワークI/Oより前なのでブロックしない。
+    if (drained) gUploader->flushToSpill();
     // 送信直前に稼働時間・ヒープヘッダを更新（Uploaderは値をコピーせずポインタを
     // 保持するため、pump()がPOSTする直前の値を確実に使わせるにはこの位置で書く
     // 必要がある。本線main.cppと同じ理由）。
