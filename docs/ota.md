@@ -190,6 +190,12 @@ ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファー�
    `WiFiClientSecure`+`HTTPClient`、書き込みは`Update.h`）。`onProgress`
    コールバックで毎回`esp_task_wdt_reset()`を呼ぶ（ブロッキングAPIそのままだと
    進行中にWDTを養えない）。`rebootOnUpdate(false)`にして再起動はこちらで制御する。
+   **既知の制約**: `onProgress`はチャンク書き込みが完了するたびにしか呼ばれず、
+   1回のブロッキング読み取り自体が長引く分はカバーしない。`client`に
+   `setTimeout()`を呼んでいないため既定のソケット読み取りタイムアウト(30秒)が
+   WDT(20秒)より長く残っており、device2実機でTASK_WDT再起動を実際に踏んでいる
+   （[docs/log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md)）。
+   修正方針は未着手。
 3. 成功なら`ESP.restart()`。失敗系は`resumeSamplingAfterOtaFailure()`で測定
    タイマー・WDT登録を復旧して測定続行し、1分のバックオフを置いて次回のバッチ
    送信時のチェックでリトライする（後述、実機で踏んだ不具合）。
