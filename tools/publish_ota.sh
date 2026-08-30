@@ -6,6 +6,10 @@
 # 含むため、公開後に内容が変わることはない（同じ版は同じ内容を指す）。
 # CloudFrontは新しいパスを自動で取りに行くので invalidation は不要。
 #
+# 同じprefixに.elf(デバッグシンボル込み、.binの約17倍)も上げる。crash後のcoredump
+# シンボル解決に使う本物のビルド成果物で、これがあれば同じコミットを手元で
+# 再ビルドする必要がなくなる（firmware/README.md「クラッシュ後のcoredump吸い出し」参照）。
+#
 # 使い方:
 #   tools/publish_ota.sh esp32dev   # IIS3DHHC機向け
 #   tools/publish_ota.sh adxl355    # ADXL355機向け
@@ -19,7 +23,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIRMWARE_DIR="$ROOT/firmware"
-TERRAFORM_DIR="$ROOT/terraform"
 
 usage() {
   echo "usage: $0 <esp32dev|adxl355|piezo> [--allow-dirty]" >&2
@@ -61,16 +64,21 @@ PIO="$ROOT/.venv/bin/pio"
 
 BIN_PATH="$FIRMWARE_DIR/.pio/build/$OTA_ENV/firmware.bin"
 [ -f "$BIN_PATH" ] || { echo "ビルド成果物が見つからない: $BIN_PATH" >&2; exit 1; }
+ELF_PATH="$FIRMWARE_DIR/.pio/build/$OTA_ENV/firmware.elf"
+[ -f "$ELF_PATH" ] || { echo "ビルド成果物が見つからない: $ELF_PATH" >&2; exit 1; }
 
 SHA256="$(shasum -a 256 "$BIN_PATH" | awk '{print $1}')"
 echo "$SHA256" > "$BIN_PATH.sha256"
 
-BUCKET="$(cd "$TERRAFORM_DIR" && terraform output -raw dashboard_bucket)"
+# AWSアカウントID由来の固定値なのでterraform initなしのworktreeでも動くよう既定値に埋め込む。
+# terraformが引ける環境ではNAMZ_OTA_BUCKETで上書き不要（既定値がそのままterraform outputと一致する）。
+BUCKET="${NAMZ_OTA_BUCKET:-namazu-dashboard-486414336274}"
 KEY_PREFIX="ota/$OTA_ENV/$FW_VERSION"
 
 echo "# uploading to s3://$BUCKET/$KEY_PREFIX.bin (sha256=$SHA256)"
 aws s3 cp "$BIN_PATH" "s3://$BUCKET/$KEY_PREFIX.bin"
 aws s3 cp "$BIN_PATH.sha256" "s3://$BUCKET/$KEY_PREFIX.sha256"
+aws s3 cp "$ELF_PATH" "s3://$BUCKET/$KEY_PREFIX.elf"
 
 echo "# done. 次はデバイスに許可を出す:"
 echo "#   python tools/request_ota.py request <device_id> $FW_VERSION"
