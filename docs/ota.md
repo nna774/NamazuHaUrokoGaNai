@@ -154,6 +154,7 @@ S3バケット（`aws_s3_bucket_policy`が`${bucket.arn}/*`とバケット全体
 ```
 ota/<env>/<version>.bin      # 例: ota/esp32dev/a1b2c3d.bin
 ota/<env>/<version>.sha256   # 運用者が手元で照合する用（ファームは未検証。後述）
+ota/<env>/<version>.elf      # crash後のcoredumpシンボル解決用（firmware/README.md参照）
 ```
 
 `env`は`esp32dev`/`adxl355`（センサ・ボードの組）。`tools/publish_ota.sh esp32dev`
