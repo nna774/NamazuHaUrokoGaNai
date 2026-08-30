@@ -173,41 +173,36 @@ pio device monitor -b 115200
 シリアルに張り付いてクラッシュの瞬間に立ち会う必要はなく、**後日USBを挿すだけで
 過去に起きたクラッシュの中身を読める**（次に別のクラッシュが起きて上書きされるまで）。
 
-読み出しにはシンボル解決用の`firmware.elf`が要る。`.elf`自体はS3に置いていない
-（`tools/publish_ota.sh`が上げるのはフラッシュ用の`.bin`だけ）ので、**実機の
-`fw_version`(=gitの短縮hash)と同じコミットで手元で再ビルドし、S3のOTA配布物と
-バイト比較して検証してから使う**のを基本手順にする——rebuildが本当に実機と
-一致するかは自明ではない（ビルド環境が変わっていれば当然ズレる）ため、いきなり
-再ビルドしたelfを信用せず、必ず突き合わせる。
+読み出しにはシンボル解決用の`firmware.elf`が要る。OTAで配信した版なら
+`tools/publish_ota.sh`が`.bin`と同時に本物の`.elf`もS3へ上げている
+（`ota/<env>/<version>.elf`）ので、それをそのまま使う——手元での再ビルドは不要。
+再ビルドしたelfは`esp_app_desc_t.app_elf_sha256`フィールド自体がビルドのたびに
+違う値で焼き直されるため、実機のcoredumpとは原理的に一致しない
+（コードがビット一致していてもSHA256照合には引っかかる）。本物のelfならこの
+問題自体が起きない。
 
 ```bash
 pip install esp-coredump   # .venv等へ
 
-# 1. 実機のfw_versionと同じコミットでelfを用意する
-git worktree add --detach /tmp/coredump-elf <fw_version>
-(cd /tmp/coredump-elf/firmware && pio run -e <env>)
+# 1. 実機のfw_versionに対応するelfをS3から取得する
+aws s3 cp s3://namazu-dashboard-<account-id>/ota/<env>/<fw_version>.elf firmware.elf
 
-# 2. OTAで配信した版なら、実際に焼かれたバイナリがS3にそのまま残っている
-#    （namazu-dashboard-*バケット。publish_ota.shはアップロードするだけで消さない）
-aws s3 cp s3://namazu-dashboard-<account-id>/ota/<env>/<fw_version>.bin deployed.bin
-
-# 3. 再ビルド版とバイト比較する。差分はesp_app_desc_t.app_elf_sha256フィールド
-#    自体(32バイト、自己参照ハッシュなのでビルドのたびに変わりうる)と、それに伴う
-#    末尾の全体チェックサムだけのはず——それ以外に差分があればrebuildが実機と
-#    一致していない(ビルド環境がズレている)ということなので、シンボル解決を
-#    信用してはいけない
-cmp -l deployed.bin /tmp/coredump-elf/firmware/.pio/build/<env>/firmware.bin
-
-# 4. 読み出し（parttool.py・SHA256チェックまわりの回避が要る場合の詳細は下記ログ）
+# 2. 読み出し（parttool.py周りの回避が要る場合の詳細は下記ログ）
 esp-coredump --chip esp32 --port <port> --baud 115200 info_corefile \
   --gdb <toolchain-xtensa-esp32-elf-gdb> --off 0xFF0000 \
-  /tmp/coredump-elf/firmware/.pio/build/<env>/firmware.elf
+  firmware.elf
 ```
 
-OTAで一度も配信していない版（USB書き込みのみ）だと3の照合ができない——その場合は
-rebuildをそのまま信用するしかない点に注意。初回は`esp-coredump`がESP-IDF本体
-（`parttool.py`）を前提にしていて素直には動かなかった。回避手順・実例は
-[docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](../docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)。
+OTAで一度も配信していない版（USB書き込みのみ、または`.elf`保存より前に配信した版）
+だと`.elf`がS3に無い——その場合のみ、実機の`fw_version`と同じコミットで手元で
+再ビルドし、S3の`.bin`とバイト比較して検証してから使う（差分は
+`app_elf_sha256`フィールド自体と末尾チェックサムのみのはず。それ以外に差分が
+あればビルド環境がズレているのでシンボル解決を信用してはいけない）。
+初回は`esp-coredump`がESP-IDF本体（`parttool.py`）を前提にしていて素直には
+動かなかった。回避手順・実例は
+[docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](../docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)、
+`.elf`保存に至った経緯は
+[docs/log/2026-08-31-store-ota-elf-artifact.md](../docs/log/2026-08-31-store-ota-elf-artifact.md)。
 
 ### 自動送信されたcoredumpの場合: fw_versionラベルを鵜呑みにしない
 
@@ -244,5 +239,7 @@ for path in sorted(glob.glob("history/*.bin")):
 EOF
 ```
 
-一致したファイル名(=git短縮hash)が実際にクラッシュした時のfw_version。以降のシンボル
-解決はこちらのコミットで再ビルドする（S3キーのfw_versionではなく）。
+一致したファイル名(=git短縮hash)が実際にクラッシュした時のfw_version。以降は
+`ota/<env>/<その版>.elf`がS3にあればそのまま使い（`.elf`保存より前の古い版なら
+無いので、上記の「再ビルドしてバイト比較」に切り替える）、S3キーの`fw_version`
+（＝アップロード時点のfirmware）は無視する。
