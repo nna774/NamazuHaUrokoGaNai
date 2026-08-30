@@ -5,7 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
-| 2026-08-31 | **device2(ADXL355機)へ`70ae824`をOTA配信し、`heap_minfree_bytes`が実際にCloudWatch経由で`/devices/2`に現れることを実機で確認した。** OTA許可から約2分で`fw_version`が着地・`pending_ota_version`もingestが自動クリア。device1は未配信のまま | [log/2026-08-31-heap-minfree-device2-ota-verified.md](log/2026-08-31-heap-minfree-device2-ota-verified.md) |
+| 2026-08-31 | **device1(IIS3DHHC機)・device2(ADXL355機)へOTA配信し、`heap_minfree_bytes`が実際にCloudWatch経由で`/devices/<id>`に現れることを実機で確認した。** device1は`publish_ota.sh`のバケット名固定化(PR #189)の実地テストを兼ねた。device3(ピエゾ機)は未配信のまま | [log/2026-08-31-heap-minfree-device2-ota-verified.md](log/2026-08-31-heap-minfree-device2-ota-verified.md) |
 | 2026-08-31 | **PR #183(生涯最小空きヒープのテレメトリ化)をmergeし、Lambda 4本(`api`/`detect`/`ingest`/`watchdog`)・ダッシュボードを本番デプロイした。** masterに積まれていた他の未デプロイLambda変更(coredump自動送信等)も合わせて反映された。実機ファームのOTA配信・`X-Namz-Heap-Minfree`到達確認はまだ | [log/2026-08-31-heap-minfree-lambda-dashboard-deploy.md](log/2026-08-31-heap-minfree-lambda-dashboard-deploy.md) |
 | 2026-08-30 | **`ESP.getMinFreeHeap()`(起動後の生涯最小空きヒープ)を`X-Namz-Heap-Minfree`ヘッダで送るようにした。** 前回棚卸しでユーザーが即決した項目の実装。既存の`heap_free`/`heap_maxblock`と同じ`extraRequestHeaderNames/Values`の仕組みに乗せ、`main.cpp`・`piezo_main.cpp`両方に配線。`metrics.record_heap()`/`latest_heap()`の第3引数はOptionalにし、旧ファーム(ヘッダ未送信)との後方互換を保った。ダッシュボードのヒープ行・CloudWatch深リンクにも反映。pytest 168件・firmwareビルド(`esp32dev`/`adxl355`/`piezo`)・`test/run.sh`は確認済み。**実機配信・CloudWatch到達確認はまだ** | [log/2026-08-30-heap-minfree-telemetry.md](log/2026-08-30-heap-minfree-telemetry.md) |
 | 2026-08-30 | **`noise.md`の刈り込みで専用ログが無く消えていた2026-08-02/08-11測定の生の記述を、事後的にログとして書き起こした。** 当時は`docs/log/`運用が始まる前でnoise.md自体が唯一の記録だったため | [log/2026-08-30-noise-md-historical-measurements-backfill.md](log/2026-08-30-noise-md-historical-measurements-backfill.md) |
