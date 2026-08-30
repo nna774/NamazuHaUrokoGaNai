@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-08-31 | **device2がOTA配信直前にTASK_WDTで再起動した原因をcoredumpのシンボライズで特定した。** 既知の「batch送信TLSハンドシェイク待ち」（v3.3.0で対処済み）とは別経路——`performPullOta()`が使う生の`WiFiClientSecure`に`setTimeout()`を一度も呼んでおらず、既定のソケット読み取りタイムアウト30秒がWDTの20秒より長く残っていた。`onProgress`によるWDT給餌はチャンク間でしか効かず、1チャンクの読み取り自体が20秒を超えるとすり抜ける。再起動後は1分バックオフの自然な再試行で`70ae824`稼働まで自己復旧しており実害は軽微。修正方針(setTimeout短縮/チャンク内給餌/WDT延長)は未着手・ユーザー確認待ち | [log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md) |
 | 2026-08-30 | **`ESP.getMinFreeHeap()`(起動後の生涯最小空きヒープ)を`X-Namz-Heap-Minfree`ヘッダで送るようにした。** 前回棚卸しでユーザーが即決した項目の実装。既存の`heap_free`/`heap_maxblock`と同じ`extraRequestHeaderNames/Values`の仕組みに乗せ、`main.cpp`・`piezo_main.cpp`両方に配線。`metrics.record_heap()`/`latest_heap()`の第3引数はOptionalにし、旧ファーム(ヘッダ未送信)との後方互換を保った。ダッシュボードのヒープ行・CloudWatch深リンクにも反映。pytest 168件・firmwareビルド(`esp32dev`/`adxl355`/`piezo`)・`test/run.sh`は確認済み。**実機配信・CloudWatch到達確認はまだ** | [log/2026-08-30-heap-minfree-telemetry.md](log/2026-08-30-heap-minfree-telemetry.md) |
 | 2026-08-30 | **`noise.md`の刈り込みで専用ログが無く消えていた2026-08-02/08-11測定の生の記述を、事後的にログとして書き起こした。** 当時は`docs/log/`運用が始まる前でnoise.md自体が唯一の記録だったため | [log/2026-08-30-noise-md-historical-measurements-backfill.md](log/2026-08-30-noise-md-historical-measurements-backfill.md) |
 | 2026-08-30 | **`design.md`・`noise.md`・`piezo.md`・`adxl355.md`に居座っていた日付付きの調査経緯・実験過程の記述を刈り込み、現在の結論だけを残す形に圧縮した(4ファイル合計-272行)。** 詳細は各ログへのリンクに置き換えた | [log/2026-08-30-trim-historical-narrative-from-docs.md](log/2026-08-30-trim-historical-narrative-from-docs.md) |
