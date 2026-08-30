@@ -165,7 +165,9 @@ python tools/detectlab.py --csv <win>.csv --axes xy --band 0.5 2 --sta 2 --lta 6
 
 据え付けが確定していない状態の測定。**合否は書かない**。仮据え付けで測った値は
 「センサ＋環境振動＋設置のガタ」の合計であり、真のフロアの**上限**でしかないため。
-[adxl355.md](adxl355.md) §6 の受け入れ判定はここではやらない。
+[adxl355.md](adxl355.md) §6 の受け入れ判定はここではやらない。以下は要点だけに
+圧縮してある。圧縮前の全文（削った比較表・考察）は
+[log/2026-08-30-noise-md-historical-measurements-backfill.md](log/2026-08-30-noise-md-historical-measurements-backfill.md)参照。
 
 ### 2026-08-02 ADXL355 初回・据え付け前
 
