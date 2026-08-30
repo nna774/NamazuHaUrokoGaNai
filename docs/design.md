@@ -302,9 +302,12 @@ TlsMemPool導入と静的RAM削減を経て小さいスロット数で再挑戦�
 
 - `esp_reset_reason()`を毎バッチ`X-Namz-Reset-Reason`ヘッダで報告し、再起動が
   「パニック」「電源断」等どれだったか区別できる
-- heap free/maxblockを`X-Namz-Heap-Free`/`X-Namz-Heap-Maxblock`ヘッダで報告し
-  CloudWatchカスタムメトリクスに蓄積（ダッシュボードのデバイス詳細ページにも
-  直近値とCloudWatchコンソールへの深リンクがある）
+- heap free/maxblock/minfreeを`X-Namz-Heap-Free`/`X-Namz-Heap-Maxblock`/
+  `X-Namz-Heap-Minfree`ヘッダで報告しCloudWatchカスタムメトリクスに蓄積
+  （ダッシュボードのデバイス詳細ページにも直近値とCloudWatchコンソールへの
+  深リンクがある）。minfree(`ESP.getMinFreeHeap()`、起動後の生涯最小値)は
+  他の2つと違い瞬間値ではないので、free_heapの推移だけでは見逃しうるスロー
+  リークも必ず反映される
 - ボタン長押しでの手動緊急再起動（`flushToSpill()`→`ESP.restart()`、2秒で
   確認画面・5秒で実行）。`uploaderTask`(Core0)が詰まっていても、別コアの
   `loop()`（ボタン読み取り）は生きているため効く
