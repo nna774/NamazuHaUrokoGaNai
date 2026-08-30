@@ -1329,7 +1329,8 @@ function cloudwatchHeapUrl(deviceId) {
   const id = String(deviceId);
   return `https://${CLOUDWATCH_REGION}.console.aws.amazon.com/cloudwatch/home?region=${CLOUDWATCH_REGION}`
     + `#metricsV2:graph=~(metrics~(~(~'Namazu~'HeapFreeBytes~'DeviceId~'${id})`
-    + `~(~'Namazu~'HeapMaxAllocBytes~'DeviceId~'${id}))~view~'timeSeries~stacked~false`
+    + `~(~'Namazu~'HeapMaxAllocBytes~'DeviceId~'${id})`
+    + `~(~'Namazu~'HeapMinFreeBytes~'DeviceId~'${id}))~view~'timeSeries~stacked~false`
     + `~region~'${CLOUDWATCH_REGION}~start~'-PT24H~end~'P0D)`;
 }
 
@@ -1363,8 +1364,12 @@ function renderDeviceInfo(d) {
     ['稼働時間', d.uptime_s != null ? fmtAgoExact(d.uptime_s) : '不明'],
     ['前回の再起動理由', d.reset_reason ? escapeHtml(d.reset_reason) : '不明'],
   ];
+  const heapMinfreeText = d.heap_minfree_bytes != null
+    ? ` / 最小${(d.heap_minfree_bytes / 1024).toFixed(0)}KB`
+    : '';  // 旧ファーム(ヘッダ未送信)ではキー自体が無い
   const heapText = d.heap_free_bytes != null
-    ? `空き${(d.heap_free_bytes / 1024).toFixed(0)}KB / 最大連続${(d.heap_maxblock_bytes / 1024).toFixed(0)}KB　`
+    ? `空き${(d.heap_free_bytes / 1024).toFixed(0)}KB / 最大連続${(d.heap_maxblock_bytes / 1024).toFixed(0)}KB`
+      + `${heapMinfreeText}　`
     : '直近データなし　';
   rows.push(['ヒープ', heapText
     + `<a href="${cloudwatchHeapUrl(d.device_id)}" target="_blank" rel="noopener">CloudWatchで見る →</a>`]);

@@ -53,6 +53,9 @@ static constexpr const char* kHeapFreeHeader = "X-Namz-Heap-Free";
 static constexpr const char* kHeapMaxblockHeader = "X-Namz-Heap-Maxblock";
 static char sHeapFreeBuf[16];
 static char sHeapMaxblockBuf[16];
+// 起動してから今までの最小空きヒープ(本線main.cppと同じ理由)。
+static constexpr const char* kHeapMinfreeHeader = "X-Namz-Heap-Minfree";
+static char sHeapMinfreeBuf[16];
 static constexpr const char* kSpillCountHeader = "X-Namz-Spill-Count";
 static constexpr const char* kRamQueuedHeader = "X-Namz-Ram-Queued";
 static char sSpillCountBuf[16];
@@ -78,10 +81,12 @@ static const char* resetReasonToString(esp_reset_reason_t reason) {
 
 static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
                                                   kHeapFreeHeader, kHeapMaxblockHeader,
+                                                  kHeapMinfreeHeader,
                                                   kResetReasonHeader, kSpillCountHeader,
                                                   kRamQueuedHeader, nullptr};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
                                                    sHeapFreeBuf, sHeapMaxblockBuf,
+                                                   sHeapMinfreeBuf,
                                                    sResetReasonBuf, sSpillCountBuf,
                                                    sRamQueuedBuf};
 
@@ -251,6 +256,7 @@ static void uploaderTask(void*) {
     snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
     snprintf(sHeapFreeBuf, sizeof(sHeapFreeBuf), "%u", (unsigned)ESP.getFreeHeap());
     snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
+    snprintf(sHeapMinfreeBuf, sizeof(sHeapMinfreeBuf), "%u", (unsigned)ESP.getMinFreeHeap());
     snprintf(sSpillCountBuf, sizeof(sSpillCountBuf), "%u", (unsigned)gUploader->spillCount());
     snprintf(sRamQueuedBuf, sizeof(sRamQueuedBuf), "%u", (unsigned)gUploader->ramQueued());
     gUploader->pump();

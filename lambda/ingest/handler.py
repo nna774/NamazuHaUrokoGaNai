@@ -114,15 +114,19 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
         except Exception as e:  # noqa: BLE001
             print(f"device_temp.record failed: {e!r}")
 
-    # ヒープ空き容量ヘッダ(X-Namz-Heap-Free/-Maxblock、docs/design.md「送信の
-    # 信頼性」未定事項4)をCloudWatchカスタムメトリクスへ送る。TLS接続使い回し
-    # (v1.7.0)がバックフィル中の断片化にどう効くか、実機のシリアルログ無しでも
-    # 事後に推移で追えるようにするための可観測性。
+    # ヒープ空き容量ヘッダ(X-Namz-Heap-Free/-Maxblock/-Minfree、docs/design.md
+    # 「送信の信頼性」未定事項4)をCloudWatchカスタムメトリクスへ送る。TLS接続
+    # 使い回し(v1.7.0)がバックフィル中の断片化にどう効くか、実機のシリアルログ
+    # 無しでも事後に推移で追えるようにするための可観測性。
     heap_free_raw = headers.get("x-namz-heap-free", "")
     heap_maxblock_raw = headers.get("x-namz-heap-maxblock", "")
+    # X-Namz-Heap-Minfree(ESP.getMinFreeHeap())は後から追加したヘッダなので旧
+    # ファームは送ってこない。無ければNoneのままrecord_heapへ渡す(そちらが省く)。
+    heap_minfree_raw = headers.get("x-namz-heap-minfree", "")
     if heap_free_raw and heap_maxblock_raw:
         try:
-            metrics.record_heap(b.meta.device_id, int(heap_free_raw), int(heap_maxblock_raw))
+            metrics.record_heap(b.meta.device_id, int(heap_free_raw), int(heap_maxblock_raw),
+                                 int(heap_minfree_raw) if heap_minfree_raw else None)
         except Exception as e:  # noqa: BLE001
             print(f"metrics.record_heap failed: {e!r}")
 

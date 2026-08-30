@@ -127,6 +127,11 @@ static constexpr const char* kHeapFreeHeader = "X-Namz-Heap-Free";
 static constexpr const char* kHeapMaxblockHeader = "X-Namz-Heap-Maxblock";
 static char sHeapFreeBuf[16];
 static char sHeapMaxblockBuf[16];
+// 起動してから今までの最小空きヒープ(ESP.getMinFreeHeap())。free_heapは瞬間値
+// なので、一時的にしか出ないスローリークの兆候を見逃す。生涯最小値ならリーク
+// があれば必ず反映される（docs/log/2026-08-30-esp32-hidden-features-survey.md）。
+static constexpr const char* kHeapMinfreeHeader = "X-Namz-Heap-Minfree";
+static char sHeapMinfreeBuf[16];
 
 // 未送信バックログ件数(spill=LittleFS退避済み・ram=RAMキュー内)。OLED表示・
 // backlogAgeS計算(下のgUploader->spillCount()/ramQueued()呼び出し箇所参照)では
@@ -172,10 +177,12 @@ static const char* resetReasonToString(esp_reset_reason_t reason) {
 // （ループはnamesの終端で止まる）。
 static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
                                                   kHeapFreeHeader, kHeapMaxblockHeader,
+                                                  kHeapMinfreeHeader,
                                                   kResetReasonHeader, kSpillCountHeader,
                                                   kRamQueuedHeader, nullptr};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
                                                    sHeapFreeBuf, sHeapMaxblockBuf,
+                                                   sHeapMinfreeBuf,
                                                    sResetReasonBuf, sSpillCountBuf,
                                                    sRamQueuedBuf};
 
@@ -638,6 +645,7 @@ static void uploaderTask(void*) {
     snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
     snprintf(sHeapFreeBuf, sizeof(sHeapFreeBuf), "%u", (unsigned)ESP.getFreeHeap());
     snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
+    snprintf(sHeapMinfreeBuf, sizeof(sHeapMinfreeBuf), "%u", (unsigned)ESP.getMinFreeHeap());
     snprintf(sSpillCountBuf, sizeof(sSpillCountBuf), "%u", (unsigned)gUploader->spillCount());
     snprintf(sRamQueuedBuf, sizeof(sRamQueuedBuf), "%u", (unsigned)gUploader->ramQueued());
     gUploader->pump();
