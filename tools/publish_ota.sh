@@ -23,7 +23,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIRMWARE_DIR="$ROOT/firmware"
-TERRAFORM_DIR="$ROOT/terraform"
 
 usage() {
   echo "usage: $0 <esp32dev|adxl355|piezo> [--allow-dirty]" >&2
@@ -71,7 +70,9 @@ ELF_PATH="$FIRMWARE_DIR/.pio/build/$OTA_ENV/firmware.elf"
 SHA256="$(shasum -a 256 "$BIN_PATH" | awk '{print $1}')"
 echo "$SHA256" > "$BIN_PATH.sha256"
 
-BUCKET="$(cd "$TERRAFORM_DIR" && terraform output -raw dashboard_bucket)"
+# AWSアカウントID由来の固定値なのでterraform initなしのworktreeでも動くよう既定値に埋め込む。
+# terraformが引ける環境ではNAMZ_OTA_BUCKETで上書き不要（既定値がそのままterraform outputと一致する）。
+BUCKET="${NAMZ_OTA_BUCKET:-namazu-dashboard-486414336274}"
 KEY_PREFIX="ota/$OTA_ENV/$FW_VERSION"
 
 echo "# uploading to s3://$BUCKET/$KEY_PREFIX.bin (sha256=$SHA256)"
