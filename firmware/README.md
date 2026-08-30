@@ -208,3 +208,41 @@ OTAで一度も配信していない版（USB書き込みのみ）だと3の照�
 rebuildをそのまま信用するしかない点に注意。初回は`esp-coredump`がESP-IDF本体
 （`parttool.py`）を前提にしていて素直には動かなかった。回避手順・実例は
 [docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](../docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)。
+
+### 自動送信されたcoredumpの場合: fw_versionラベルを鵜呑みにしない
+
+coredump自動送信（`X-Namz-Fw-Version`ヘッダ・S3キー`coredump/<device>/<fw_version>-...bin`)の
+`fw_version`は「アップロード時点で動いているfirmware」であって、**実際にクラッシュした
+瞬間のfirmwareとは限らない**。coredumpパーティションは単一image・次のパニックまで
+上書きされない仕様のため、特にその機で初めて拾えたcoredumpは何ヶ月も前の古いクラッシュの
+可能性がある（実例:
+[docs/log/2026-08-31-device1-lwip-null-deref-coredump.md](../docs/log/2026-08-31-device1-lwip-null-deref-coredump.md)、
+S3キーは`e82f81e`(当日公開)だが実際は20日前の`5dab9a4`で発生していた）。
+
+**coredump自体にRTC/壁時計のタイムスタンプは無い**（ESP-IDFのフォーマットはTOTAL_LEN・
+VERSION・TASKS_NUM・TCB_SIZE+各タスクのTCB/スタック+チェックサムのみ）。代わりに
+`esp_app_desc_t.app_elf_sha256`（32バイト、ビルドごとに変わる自己参照ハッシュ）が
+手がかりになる——`publish_ota.sh`は公開済みバージョンを削除も再ビルドもしないため、
+S3に残る全履歴の`.bin`から**該当バイトが完全一致する版**を探せば、fw_versionラベルに
+頼らず実際にクラッシュした時のビルドを一意に特定できる:
+
+```bash
+# coredumpが記録している自己参照ハッシュの値はesp-coredumpの警告メッセージに出る
+# (SHA256不一致チェックを読み進めるための回避と合わせて、下記ログのモンキーパッチ参照)
+# 例: "coredump SHA256(6342f1ecfab0cd37) != app SHA256(...)" の前半がそれ
+
+aws s3 sync s3://namazu-dashboard-<account-id>/ota/<env>/ history/ --exclude "*.sha256"
+python3 - <<'EOF'
+import glob
+target = "6342f1ecfab0cd37"  # coredumpの警告に出た値
+for path in sorted(glob.glob("history/*.bin")):
+    with open(path, "rb") as f:
+        f.seek(176)
+        hexval = f.read(32).hex()
+    if hexval.startswith(target):
+        print("MATCH", path, hexval)
+EOF
+```
+
+一致したファイル名(=git短縮hash)が実際にクラッシュした時のfw_version。以降のシンボル
+解決はこちらのコミットで再ビルドする（S3キーのfw_versionではなく）。
