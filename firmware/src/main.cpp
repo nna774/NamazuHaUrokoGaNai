@@ -726,10 +726,19 @@ static void uploaderTask(void*) {
 }
 #endif
 
+// NamazuHaUrokoGaNai診断: 2.x/3.xのmaxblock_8bit差の犯人捜し用に、setup()の
+// 要所でヒープ断片化状況を打点する(docs/log/2026-09-01-pioarduino-arduino3-poc.md)。
+// 調査後に取り除くこと。
+#define NAMZ_HEAP_CHECKPOINT(label)                                                     \
+  Serial.printf("[namz-heap] %-24s free=%u maxblock_8bit=%u\n", label,                  \
+                (unsigned)ESP.getFreeHeap(),                                            \
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
+
 void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
   Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
+  NAMZ_HEAP_CHECKPOINT("setup start");
   // WiFi/Uploaderより前、mbedTLSが一度も呼ばれていないうちにフックする
   // （後から差し替えても、既にそれ以前の呼び出しで確保済みの分は追えない）。
   // mbedtls_platform_set_calloc_free()はグローバルフック1系統しか持てないため、
@@ -740,6 +749,7 @@ void setup() {
 #else
   tlsmempool::install();
 #endif
+  NAMZ_HEAP_CHECKPOINT("after tlsmempool");
 #ifndef NAMZ_SENSOR_TEST
   // WiFi/identity未ロードでも動く、ネットワーク非依存のローカルflash操作のみ。
   // coredumpパーティションは単一image・次のパニックで上書きされる仕様なので、
@@ -751,6 +761,7 @@ void setup() {
   // 起動直後の最も断片化していない時点で確保する。理由はsetupBatchPool()の
   // コメント参照。
   setupBatchPool();
+  NAMZ_HEAP_CHECKPOINT("after setupBatchPool");
   // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
   // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
   // 同じ#ifndefで囲まれている）。
@@ -807,8 +818,10 @@ void setup() {
   gBatchQueue = xQueueCreate(4, sizeof(Batch*));
   gAlertQueue = xQueueCreate(4, sizeof(AlertMsg));
   connectWifi();
+  NAMZ_HEAP_CHECKPOINT("after connectWifi");
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
+  NAMZ_HEAP_CHECKPOINT("after timesync::begin");
 
   // coredumpキューのアップロードは、Uploader/task起動より前のこの時点で行う。
   // main.cppがsetup()冒頭でinstallしたTlsMemPool(mbedTLS用固定プール)は
@@ -823,6 +836,7 @@ void setup() {
                                 reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
                                 kCoredumpPerFileTimeoutMs, kCoredumpTotalBudgetMs);
   }
+  NAMZ_HEAP_CHECKPOINT("after coredump drain");
 
   // ingest/alert先はLambda Function URL直（*.lambda-url.ap-northeast-1.on.aws、
   // CloudFrontを介さない）。openssl s_clientで実機のチェーンを確認したところ
@@ -847,6 +861,7 @@ void setup() {
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
                            kBatchBufferBytes, /*discardSpillOn400=*/true);
   gUploader->begin();
+  NAMZ_HEAP_CHECKPOINT("after Uploader begin");
 
   // batchDrainTaskは送信タスクより優先度を上げておく——新しいバッチが来た瞬間に
   // 確実に先へ進めることを保証するため（送信タスクは大半ネットワーク待ちで

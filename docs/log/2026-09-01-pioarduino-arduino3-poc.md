@@ -547,6 +547,56 @@ Uploader::oldestQueuedStartUs → Uploader::loadOldestSpillPath
 （TLS専用プール確保後の残り約90KB強で、そこからさらにbatchバッファプール
 54KB・spillの都度確保が食い合っている構図）自体を見直す必要があるかもしれない。
 
+## maxblock_8bit崩壊の犯人を特定: 2.x/3.xの差ではなく、spill蓄積によるO(n)ディレクトリ走査
+
+`setup()`の要所に`heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)`の打点
+（`NAMZ_HEAP_CHECKPOINT`、docs/log記載後に取り除くローカル診断）を追加し、
+実機で計測した:
+
+```
+setup直後:              free=259236  maxblock_8bit=110580
+tlsmempool後:            free=203936  maxblock_8bit=110580  (TLSプール52KBはmaxblock無影響)
+setupBatchPool後:        free=146480  maxblock_8bit= 57332  (batchプール54KB、想定通り)
+connectWifi後:           free= 92912  maxblock_8bit= 51188  (WiFi/lwIP初期化、軽微)
+timesync::begin後:       free= 92888  maxblock_8bit= 51188  (ほぼ無変化)
+coredump drain後:        free= 92784  maxblock_8bit= 51188  (実TLS/HTTPS往復1回でも断片化ゼロ)
+Uploader::begin()後:     free= 70112  maxblock_8bit= 27636  (-23.5KB、まだ通信前なのに激減)
+最初のspill読込直後:                  maxblock_8bit=  1012  (さらに壊滅的)
+```
+
+**犯人は`Uploader::begin()`と`loadOldestSpillPath()`（batch-uplink
+`Uploader.cpp`）——どちらも溜まった退避ファイルをLittleFSの`openNextFile()`で
+1件ずつ列挙するO(n)スキャン。** `begin()`は起動時に退避数を数えるため184件
+全部を、`loadOldestSpillPath()`は**pumpサイクルのたびに毎回**184件を舐めて
+最古のファイルを探す（ソート済みインデックス等は無く、毎回ゼロから
+ディレクトリを辿る実装）。`openNextFile()`はArduino-ESP32のFS実装内部で
+`std::make_shared<VFSFileImpl>`を使っており、ファイル1個の開閉のたびに
+ヒープ確保・解放が走る——これが184回×毎pumpサイクルで積み重なり、
+一般ヒープを激しく断片化させていた。
+
+**このコードパス自体は2.x/3.xで同一**（`std::make_shared<VFSFileImpl>`は
+2.xの`vfs_api.cpp`にも同一実装で存在すると確認済み、上の「訂正」節参照）。
+既にコード側にも「ヒープ極度逼迫時に`std::bad_alloc`相当の未捕捉例外→
+`abort()`で再起動する」ことを把握した上での`try/catch`ガードが入っている
+（クラッシュ自体は防ぐが、断片化そのものは防げない設計）。
+
+**つまり「2.x/3.xのアーキテクチャ差」という当初の見立てより、以下の悪循環
+の方が実態に近い:**
+
+```
+3.x固有のDNS/TCP接続系バグ（dns_clear_cache thread bug[修正済]・
+断続的なERR_VAL失敗・TCP connectタイムアウト）
+  → POST失敗が続く → spillファイルが蓄積(184件)
+  → begin()/loadOldestSpillPath()のO(n)スキャンが毎回重くなる
+  → ヒープが激しく断片化(maxblock_8bit低下)
+  → fopen()等の新規小確保が失敗しやすくなる → 別のクラッシュ・失敗を誘発
+  → さらにspillが溜まる（自己強化）
+```
+
+健全にPOSTが成功し続けている状態ならspillはほぼ0件で保たれ、このスキャン
+コストは無視できる規模のはず——**今観測している深刻な断片化は、3.xの
+DNSバグ由来の失敗の蓄積が引き金になった二次的な症状**という理解に至った。
+
 ## TODO
 
 - [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
@@ -558,10 +608,20 @@ Uploader::oldestQueuedStartUs → Uploader::loadOldestSpillPath
 - [x] `dns_clear_cache()`パッチを`firmware/patches/patch_network_manager.py`
       （`extra_scripts`でビルド時自動適用）として本実装した。DNS解決の診断ログも
       同時に追加、実機で動作確認済み。
-- [ ] **`netconn_gethostbyname_addrtype()`への診断専用呼び出し
-      （`patch_network_manager.py`内、生の`err_t`を見るためのもの）を、本採用前に
-      取り除くこと。** 追加のDNS問い合わせを発生させるため、実機でWDTタイムアウト
-      →再起動を誘発した（診断コード自体の副作用、本題のバグではない）。
+- [x] ~~`netconn_gethostbyname_addrtype()`への診断専用呼び出しを取り除く。~~ →
+      完了。目的（生の`err_t`確認）を達成後に撤去し、代わりに`dns_table`等の
+      生バイトダンプ診断へ差し替えた。
+- [x] **`main.cpp`の`NAMZ_HEAP_CHECKPOINT`診断で`maxblock_8bit`崩壊の犯人を
+      特定した** → 完了、上の節参照。`Uploader::begin()`/`loadOldestSpillPath()`
+      （batch-uplink）のO(n)ディレクトリスキャンが原因で、2.x/3.xのコード自体は
+      同一——3.xのDNSバグ由来の失敗蓄積が引き金になった二次的な症状と判断。
+- [ ] **`main.cpp`の`NAMZ_HEAP_CHECKPOINT`診断（6箇所）を本採用前に取り除く
+      こと。** 調査用途のみ。
+- [ ] （任意・batch-uplink側の改善案）`loadOldestSpillPath()`をO(n)スキャン
+      からO(1)相当（ファイル名でソートされたリストのキャッシュ、または
+      LittleFSのタイムスタンプ順走査等）に変える余地がある——spillが健全に
+      0件付近を保つ限り優先度は低いが、大量滞留時の悪循環を弱める効果は
+      ある。Electabuzzとも共有するコードなので変更する場合は要相談。
 - [x] `dns0=dns1=8.8.4.4`になるタイミングを切り分けた → 完了、下記参照。
       **`connectWifi()`直後は正しい(`8.8.8.8`/`8.8.4.4`)、`timesync::begin()`の
       区間で壊れる。**
