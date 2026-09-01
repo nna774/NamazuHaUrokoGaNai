@@ -70,6 +70,16 @@ Espressifの回答は「ヒープ枯渇で`malloc()`がNULLを返しチェック
 修正も入っていない。** `lwip.a`はビルド済みプリコンパイル済みライブラリとして配布されて
 おり（`dns.c`はこのレポにソースが存在しない）、自前でパッチを当てる経路も無い。
 
+**esp-lwip本体側も当たったが、この件をピンポイントで直したコミットは無かった。**
+`dns_pcbs`/`pcb_idx`でissue・commit検索しても無関係な結果のみ——唯一のヒット
+（`dns_alloc_pcb`のidx進行バグ修正、2015年）はうちがpinする`a45be9e`(2023-11-27)に
+最初から反映済みで無関係。直近のDNS関連コミット(複数IPレコード対応・multi-IP
+buffer overflow修正・キャッシュクリアdeadlock対策)は`git compare`で`a45be9e`と
+**diverged**——ESP-IDF 4.4.7系列にはそもそも乗っていない別系統の変更と確認した。
+現行の既定ブランチ(`2.2.0-esp`)でも該当コード(`dns.c:928,957`)は当時と同じ実装の
+ままで、**ESP-IDFを上げても直る保証はない**。`entry->pcb_idx`と`dns_pcbs[]`の
+どちらが壊れているかはupstream側でも未解明。
+
 ## 現状の評価
 
 device1は現在`e82f81e`・`reset_reason: PANIC`・`online: true`・heap正常で稼働中——今回の
