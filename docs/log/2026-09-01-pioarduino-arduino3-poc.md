@@ -683,6 +683,32 @@ SYNパケットの構築（`tcp_connect()`/`tcp_output()`、これも`dns_send()
 `liblwip.a`にプリコンパイル済みで、これ以上ソースパッチでは追えない
 ——`dns_send()`調査の時と同じ壁に当たる。
 
+## 2.x側パッチ（PR#8672バックポート）を本番envに実装した
+
+深い調査が長期化する一方、device2で再発した本題（PR#191/#193の
+`WiFiGenericClass::hostByName()`スレッドセーフ違反）自体は上流で既に
+修正手法が確立している（[espressif/arduino-esp32#8672](https://github.com/espressif/arduino-esp32/pull/8672)、
+`release/v2.x`未バックポート）ため、根本のTCP接続タイムアウト調査とは切り離し、
+**先に暫定パッチとして本番env(`esp32dev`・`adxl355`)へ適用した**
+（ユーザー判断: 「一旦今ある程度は2系で問題が発生しているところへのパッチは
+あるならそれをひとまずあてる。調査はあとで」）。
+
+`firmware/patches/patch_wifi_generic.py`を新設し、`patch_network_manager.py`
+と同じ仕組み（SENTINEL冪等・対象ファイル無ければno-op・`extra_scripts`で
+ビルド時自動適用）で実装。`WiFiGeneric.cpp`の`hostByName()`が直接呼んでいた
+`dns_gethostbyname()`を、`esp_netif_tcpip_exec()`経由でTCPIPスレッドへ委譲する
+ヘルパー(`namz_wifi_gethostbyname_tcpip_ctx`)に差し替えた——PR#8672と同じ手法。
+実際の`WiFiGeneric.cpp`(2.0.17)のソース(includeリスト・`wifi_dns_found_callback`・
+`hostByName()`本体)と1行単位で照合し、文字列置換が全箇所ヒットすることを確認。
+`esp_netif.h`は`esp32-hal.h`経由で既に間接includeされていたが、PR#8672と同様
+明示includeも追加した(無害・防御的)。
+
+`[env:esp32dev]`の`extra_scripts`に`pre:patches/patch_wifi_generic.py`を追加
+（`[env:adxl355]`は`esp32dev`をextendsするため自動的に対象に入る）。
+`pio run -e esp32dev`・`pio run -e adxl355`双方でコンパイル・リンクまで
+SUCCESSを確認——`esp_netif_tcpip_exec`はESP-IDF 4.4.7(2.x系)にも存在し
+問題なく解決された。**実機への書き込み確認はまだ行っていない。**
+
 ## TODO
 
 - [x] `NetworkClientSecure::connect()`の`hostByName()`失敗判定バグを
@@ -759,9 +785,10 @@ SYNパケットの構築（`tcp_connect()`/`tcp_output()`、これも`dns_send()
       食い合い）自体を見直す必要があるかもしれない。
 - [ ] `dns0`破損が`timesync::begin()`の**どの内部処理**(SNTPの`ntp.nict.jp`
       解決失敗？)によって引き起こされているかは、上記の壁により未特定のまま。
-- [ ] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）はまだ
-      `firmware/patches/`化していない・実機検証もしていない——device2で再発した
-      本題はこちら。
+- [x] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）を
+      `firmware/patches/patch_wifi_generic.py`として実装し、本番env
+      (`esp32dev`・`adxl355`)へ`extra_scripts`で適用した → 完了、上の節参照。
+      コンパイル・リンクは確認済みだが**実機書き込み確認はまだ**。
 - [ ] 3.x側パッチ込みでの長期観察（TFT・OTA・coredump・WDT・spillまわり）は
       まだ未実施——今回は短時間確認のみ。
 - [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
