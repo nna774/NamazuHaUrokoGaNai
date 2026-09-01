@@ -438,6 +438,12 @@ static void samplingTask(void*) {
 static void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  // 再接続はこの関数(WiFi.status()を見てループから呼び直す)が一手に引き受ける。
+  // フレームワーク組み込みのauto-reconnectを有効なままにすると、こちらの
+  // WiFi.begin()呼び直しと競合し、arduino-esp32 3.x系では
+  // "sta is connecting, cannot set config"で再接続不能になったまま固まる
+  // （docs/log/2026-09-01-pioarduino-arduino3-poc.md）。
+  WiFi.setAutoReconnect(false);
   WiFi.begin(gIdentity.wifiSsid.c_str(), gIdentity.wifiPass.c_str());
   Serial.print("[wifi] connecting");
   uint32_t t0 = millis();
