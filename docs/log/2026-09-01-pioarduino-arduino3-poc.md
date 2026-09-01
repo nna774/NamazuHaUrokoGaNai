@@ -64,12 +64,69 @@ Flash 55.8%・RAM 19.9%）。2.x系にも実害の無い変更のはず（既に
 （`batch-uplink.git#v3.3.0`、未パッチ）に戻してある——**現状のままではこのenvはビルドが
 通らない**。理由はコメントに残した。
 
-## batch-uplink側にPRを出した
+## batch-uplink側にPRを出し、マージされた
 
 [nna774/batch-uplink#28](https://github.com/nna774/batch-uplink/pull/28)として
-`#include <WiFi.h>`を1行追加するPRを提出済み（未マージ）。Electabuzzとも共有する
-リポジトリなので、マージ判断・タグ切りはユーザー確認の上で行う。マージ後は新タグを
-切り、`platformio.ini`のpinを更新すればこのenvもビルドが通るはず（未検証）。
+`#include <WiFi.h>`を1行追加するPRを提出し、ユーザー判断でマージ済み（`master`
+`6ec000c`）。
+
+## arduino-esp32 2.x（本番と同じ公式platform）でのリグレッション確認
+
+マージ直後、**2.x側で壊れていないことを検証していなかった**とユーザーに指摘され、
+実際に確認した。その過程で1件ローカル環境の事故を起こし、直した記録を残す。
+
+### 事故: pioarduinoのインストールが公式platformの既定解決先を上書きしていた
+
+`[env:esp32dev]`（本番と同じ設定、`platform = espressif32`とバージョン無指定）で
+`batch-uplink#6ec000c`を使ってビルドしたところ、ログの`PLATFORM: Espressif 32
+(55.3.311)`——**公式7.0.1ではなくpioarduinoが動いていた**。
+
+原因: pioarduinoの`platform.json`は`"name": "espressif32"`と公式と同じ名前を
+名乗っている。このPoCの最初の手順でpioarduinoのzipを`platform = <URL>`で
+明示的にインストールした際、PlatformIOのパッケージマネージャが
+`~/.platformio/platforms/espressif32`（バージョン無指定時の既定解決先）を
+pioarduino版で上書きしてしまい、**このマシン上では`platform = espressif32`と
+書いてあるどのenvも（本番のesp32dev/adxl355含めて）静かに3.x系を掴む状態に
+なっていた**。commitされたコードには何の影響も無いが、**このマシンで
+`pio run`する限り実機書き込みが意図せず3.x系になる**という、実害のある
+ローカル環境汚染だった。
+
+復旧作業中に並行して`pio pkg uninstall`と`pio run`を同時に走らせてしまい、
+一時`framework-arduinoespressif32`が3.3.11(pioarduino版)のまま公式7.0.1に
+紐付くという更に壊れた中間状態も踏んだ（`TypeError: expected str, bytes or
+os.PathLike object, not NoneType`でビルド失敗）。教訓: **同じグローバル
+`~/.platformio`ストアを触るpioコマンドを並列実行しない。**
+
+最終的に`~/.platformio/platforms/espressif32`と壊れた
+`~/.platformio/packages/framework-arduinoespressif32`を削除し、
+`pio pkg install -g --platform "platformio/espressif32@7.0.1"`を単独実行で
+やり直して復旧した。`framework-arduinoespressif32@3.20017.241212`
+（=arduino-esp32 2.0.17相当）に戻っていることを確認済み。
+
+### 本題: 2.x系でのビルド結果
+
+`platform = espressif32@7.0.1`を明示指定した上で`batch-uplink#6ec000c`
+（マージ済みfix込み）を使い`pio run -e esp32dev`——**SUCCESS**
+（Flash 50.2%・RAM 19.3%）。`#include <WiFi.h>`の追加はarduino-esp32 2.x系にも
+実害が無いことを実際に確認できた。検証後`platformio.ini`は`git checkout`で
+元のコミット内容（タグpinのまま）へ戻し、コミットには一切影響していない。
+
+### 今後への警告: pioarduinoと公式platformの名前衝突
+
+**pioarduinoは`platform.json`の`name`を公式と同じ`espressif32`のまま配っている**
+ため、同一マシンに両方を（`platform = <URL>`のようなバージョン無指定に近い形で）
+入れると、今回のように既定解決先が上書きされうる。`[env:pioarduino-fake-sensor]`
+を今後また実行する時は、この事故が再発しないよう次のどちらかを徹底すること:
+
+- 本番系の全env（`esp32dev`・`adxl355`とその派生）の`platform`行を
+  `espressif32@7.0.1`のように**バージョン明示pin**に変える（batch-uplinkの
+  タグpinと同じ考え方。これをやっておけば、他のenvが何をインストールしようと
+  本番envは既定解決先の汚染から免疫を持てる）。
+- または`pioarduino-fake-sensor`のビルドだけ`PLATFORMIO_CORE_DIR`で
+  別のホームディレクトリに隔離する。
+
+このPoCの範囲では前者（本番envのバージョンpin化）を実施していない
+（`platformio.ini`本体への変更提案はユーザー確認してから）。
 
 ## 現時点の評価・次にできること
 
