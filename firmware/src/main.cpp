@@ -457,6 +457,16 @@ static void connectWifi() {
   }
   Serial.printf("\n[wifi] %s\n",
                 WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "FAILED");
+#ifdef NAMZ_DNS_CHECKPOINT_ENABLED
+  // NamazuHaUrokoGaNai診断: DHCPが配ったDNSサーバがconnectWifi()直後の時点で
+  // 何になっているかを見る(docs/log/2026-09-01-pioarduino-arduino3-poc.md、
+  // hostByName()失敗時にdns0=dns1=8.8.4.4という期待値とズレた値が出た件の切り分け)。
+  // 普段は無効、ビルドフラグ-DNAMZ_DNS_CHECKPOINT_ENABLED=1で有効化する。
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[namz-dns] connectWifi() done: dns0=%s dns1=%s\n",
+                  WiFi.dnsIP(0).toString().c_str(), WiFi.dnsIP(1).toString().c_str());
+  }
+#endif
 }
 
 // --- OTA更新の安全な停止・再開（docs/ota.md）---
@@ -719,10 +729,24 @@ static void uploaderTask(void*) {
 }
 #endif
 
+// NamazuHaUrokoGaNai診断: setup()の要所でヒープ断片化状況を打点する
+// (docs/log/2026-09-01-pioarduino-arduino3-poc.md、maxblock_8bit崩壊の犯人捜しで
+// 導入)。普段は無効(何もしない)、ビルドフラグ-DNAMZ_HEAP_CHECKPOINT_ENABLED=1で
+// 有効化する。
+#ifdef NAMZ_HEAP_CHECKPOINT_ENABLED
+#define NAMZ_HEAP_CHECKPOINT(label)                                                     \
+  Serial.printf("[namz-heap] %-24s free=%u maxblock_8bit=%u\n", label,                  \
+                (unsigned)ESP.getFreeHeap(),                                            \
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
+#else
+#define NAMZ_HEAP_CHECKPOINT(label) ((void)0)
+#endif
+
 void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
   Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
+  NAMZ_HEAP_CHECKPOINT("setup start");
   // WiFi/Uploaderより前、mbedTLSが一度も呼ばれていないうちにフックする
   // （後から差し替えても、既にそれ以前の呼び出しで確保済みの分は追えない）。
   // mbedtls_platform_set_calloc_free()はグローバルフック1系統しか持てないため、
@@ -733,6 +757,7 @@ void setup() {
 #else
   tlsmempool::install();
 #endif
+  NAMZ_HEAP_CHECKPOINT("after tlsmempool");
 #ifndef NAMZ_SENSOR_TEST
   // WiFi/identity未ロードでも動く、ネットワーク非依存のローカルflash操作のみ。
   // coredumpパーティションは単一image・次のパニックで上書きされる仕様なので、
@@ -744,6 +769,7 @@ void setup() {
   // 起動直後の最も断片化していない時点で確保する。理由はsetupBatchPool()の
   // コメント参照。
   setupBatchPool();
+  NAMZ_HEAP_CHECKPOINT("after setupBatchPool");
   // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
   // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
   // 同じ#ifndefで囲まれている）。
@@ -800,8 +826,10 @@ void setup() {
   gBatchQueue = xQueueCreate(4, sizeof(Batch*));
   gAlertQueue = xQueueCreate(4, sizeof(AlertMsg));
   connectWifi();
+  NAMZ_HEAP_CHECKPOINT("after connectWifi");
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
+  NAMZ_HEAP_CHECKPOINT("after timesync::begin");
 
   // coredumpキューのアップロードは、Uploader/task起動より前のこの時点で行う。
   // main.cppがsetup()冒頭でinstallしたTlsMemPool(mbedTLS用固定プール)は
@@ -816,6 +844,7 @@ void setup() {
                                 reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
                                 kCoredumpPerFileTimeoutMs, kCoredumpTotalBudgetMs);
   }
+  NAMZ_HEAP_CHECKPOINT("after coredump drain");
 
   // ingest/alert先はLambda Function URL直（*.lambda-url.ap-northeast-1.on.aws、
   // CloudFrontを介さない）。openssl s_clientで実機のチェーンを確認したところ
@@ -840,6 +869,7 @@ void setup() {
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
                            kBatchBufferBytes, /*discardSpillOn400=*/true);
   gUploader->begin();
+  NAMZ_HEAP_CHECKPOINT("after Uploader begin");
 
   // batchDrainTaskは送信タスクより優先度を上げておく——新しいバッチが来た瞬間に
   // 確実に先へ進めることを保証するため（送信タスクは大半ネットワーク待ちで

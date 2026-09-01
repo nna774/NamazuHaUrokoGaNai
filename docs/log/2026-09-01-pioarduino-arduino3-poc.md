@@ -285,7 +285,7 @@ libraries/Network/src/NetworkManager.cpp:84`）自身が、IPv4/IPv6のグロー
 issueに同種の報告が無いか確認する価値はあるが、今回のPoCではそこまで手を
 広げていない。
 
-## 結論
+## 結論（初版）
 
 **「arduino-esp32 3.xへ移行すればPR#191のクラッシュが根治する」という当初の
 前提は、実機検証の結果誤りだったと判断できる。** 3.x系は別の、しかもより
@@ -298,22 +298,591 @@ arduino-esp32本体（`NetworkManager.cpp`）側の実装に起因するため�
 含め、**このPoCはここでいったん打ち止めとし、3.x移行は保留にするのが妥当**
 という評価に至った。
 
+**（後日追記）上記は`dns_clear_cache()`をローカルパッチで直すまでの暫定結論。
+実際に直したところ再現しなくなったため、下の「ローカルパッチで実機検証:
+再発しないことを確認」を経て評価を更新した——「結論（更新版）」参照。**
+
+## ローカルパッチで実機検証: 再発しないことを確認
+
+並行して[PR#193](https://github.com/nna774/NamazuHaUrokoGaNai/pull/193)で、
+2.x系device2でも`WiFiGenericClass::hostByName()`の同種バグ（[PR#191](https://github.com/nna774/NamazuHaUrokoGaNai/pull/191)参照）が再発していたと判明。
+2.x側には既にupstreamの修正が存在すると分かった:
+[espressif/arduino-esp32#8672](https://github.com/espressif/arduino-esp32/pull/8672)
+（2023-12-05マージ、`dns_gethostbyname()`を`esp_netif_tcpip_exec()`経由で
+TCPIPスレッド上に委譲する、1ファイル23行追加の小さな修正）——ただし`release/v2.x`
+ブランチには未バックポート。現在インストールされている実際の2.0.17の
+`WiFiGeneric.cpp`を確認したところ、この修正がほぼそのまま当たる構造（行番号
+まで一致）だった。
+
+ここから「3.x側の`dns_clear_cache()`にも同じ手法（`esp_netif_tcpip_exec()`で
+包む）を適用すれば直せるのでは」という発想に至り、`~/.platformio`上の
+`framework-arduinoespressif32`(3.3.11)の`NetworkManager.cpp`を直接パッチして
+検証した:
+
+```cpp
+// hostByName()内、80行目付近
+- dns_clear_cache();
++ esp_netif_tcpip_exec(namz_dns_clear_cache_tcpip_ctx, nullptr);
+  // namz_dns_clear_cache_tcpip_ctx()はdns_clear_cache()を呼ぶだけのラッパー
+  // (esp_netif_tcpip_execが要求するesp_err_t(*)(void*)シグネチャに合わせるため)
+```
+
+`pioarduino-fake-sensor`envでビルド・テスト機へ書き込み、**45秒間の観察で
+複数回のPOSTリトライ（＝複数回の`hostByName()`呼び出し）を経ても、
+`udp_new_ip_type`assert・パニック・再起動が一切発生しないことを確認した**。
+POSTが`connection refused`で失敗し続ける件は残っているが、これはクラッシュとは
+無関係の別問題（TODO参照、未着手のまま）。
+
+なおこのパッチは`~/.platformio`（プロジェクト外のグローバルパッケージキャッシュ）
+への直接編集による**使い捨ての検証**であり、リポジトリには反映されていない。
+本採用する場合は`firmware/patches/`への`.patch`ファイル化＋`extra_scripts`での
+ビルド時適用（`get_fw_version.py`と同じ仕組み）が必要——次のステップとして
+TODOに追加した。
+
+## 結論（更新版）
+
+**「3.xへ移行すればPR#191のクラッシュが根治する」という前提は、`hostByName()`
+関数をそのまま使う限りでは誤りだったが、`dns_clear_cache()`呼び出しに
+PR#8672と同じ手法の1行パッチを当てれば3.x側も直せる見込みが立った。**
+2.x側（`WiFiGeneric.cpp`、PR#8672のバックポート）・3.x側
+（`NetworkManager.cpp`、`dns_clear_cache()`の委譲）双方に同種のローカルパッチが
+必要になる——**3.x移行を「保留」から「パッチ込みで再検討」に格上げできる状態**。
+ただし今回の検証はまだ「使い捨てのローカル編集で45秒間クラッシュしなかった」
+段階に留まり、ビルド時パッチとしての本実装・長期観察・2.x側パッチの同等検証は
+未着手。
+
+## 事故: 並行セッションと`~/.platformio`の取り合いになった
+
+`dns_clear_cache()`パッチの動作確認を続けていたところ、`espressif32`の既定解決先が
+platform=pioarduino(55.3.311)・framework=公式2.0.17という**壊れた組み合わせ**に
+なっているのを発見した。このPoCセッションはこの間読み取り専用の操作しかしておらず、
+**このマシン上で並行して動いている別セッションが同じグローバルキャッシュを
+触っていた**と判断（[PR#193](https://github.com/nna774/NamazuHaUrokoGaNai/pull/193)の
+概要欄に「別セッションの`~/.platformio`キャッシュ変更の影響で完全一致が取れなかった」
+と書かれていたのは、まさにこちらの過去の作業が向こうを巻き込んでいた証拠）。
+
+これを受け、**グローバルキャッシュへの直接編集による検証はもう安全に続けられない**
+と判断し、以降は`firmware/patches/patch_network_manager.py`
+（`extra_scripts`でビルド時に自動適用、プロジェクト内で完結・他セッションの状態に
+非依存）へ切り替えた。内容は検証済みの`dns_clear_cache()`パッチに加え、DNS解決の
+成否・使用中DNSサーバを無条件で出す診断ログを追加したもの。`[env:pioarduino-fake-sensor]`
+の`extra_scripts`に追加し、`pioarduino-fake-sensor`env限定（対象ファイルが存在する
+時だけ動くので2.x系envには無害）。
+
+## 診断ログでPOST失敗の直接証拠を得た: DNS解決自体が失敗している
+
+```
+[namz-dns] hostByName('...lambda-url...') hasV4=1 hasV6=0 dns0=8.8.4.4 dns1=8.8.4.4
+[namz-dns] hostByName('...') FAILED err=-54
+[NetworkManager.cpp:159] hostByName(): DNS Failed for '...' with error '-54'
+```
+
+- **DNS解決は確かに失敗している**（ネットワーク自体というより解決処理側の問題という
+  当初の直感が支持された）
+- `54`は`lwip/errno.h`上`EXFULL`（"Exchange full"）。lwIPのDNS文脈では典型的に
+  **DNSリクエストテーブルが埋まっていて新規登録できない**時に出るコード
+  （lwIP本家`netdb.c`の`lwip_getaddrinfo()`はEAI_*系(200番台)しか返さないため、
+  ESP-IDF側の実装がこの生のerrno値を返している可能性が高いが、該当ソースの
+  正確な特定はできていない）
+- これは前段のcoredump symbolizeで見つけた「SNTPの`pool.ntp.org`問い合わせが
+  完了せず`dns_clear_cache()`から再入された」という話と直接つながる——この
+  問い合わせがずっと片付かずテーブルの枠を専有し続けていれば、後続の
+  `hostByName()`が軒並み「テーブル満杯」で即失敗する、という筋が通る
+- `dns0=dns1=8.8.4.4`という**両方とも同じGoogle Public DNS**という構成は、
+  ユーザーによるとルータのDHCPは`8.8.8.8`/`8.8.4.4`の2つを配っているはずとのことで、
+  **期待値と食い違っている**——自前コードにハードコードは無いので、DHCP応答の
+  読み取り・保存のどこかでprimary/secondaryの扱いが狂っている可能性がある
+- このプロジェクト自体に前例あり（`firmware/src/config.h`のコメント）:
+  device2で`maxblock_8bit`が1300〜2000台まで落ちると`DNS Failed`が繰り返し
+  起きていた実績（`kMaxRamBatches`を3→2に下げて解消）。今回の観測はそれより
+  さらに低い(900〜2500)水準で高止まりしている——ただし`kMaxRamBatches`は
+  既に2に設定済みで、この対策だけでは足りていない
+
+## dns0破損のタイミングを特定: connectWifi()直後は正常、timesync::begin()区間で壊れる
+
+`main.cpp`の`connectWifi()`末尾にも診断ログを追加し、リセット直後から捕捉した:
+
+```
+[namz-dns] connectWifi() done: dns0=8.8.8.8 dns1=8.8.4.4   ← WiFi接続直後は正しい
+...(約5秒後、最初のhostByName呼び出し時)...
+[namz-dns] hostByName(...) dns0=8.8.4.4 dns1=8.8.4.4        ← dns0がdns1と同じ値に
+```
+
+**DHCPは正しく`8.8.8.8`/`8.8.4.4`を配っている（ユーザーの認識通り）。
+`connectWifi()`が返った直後の時点ではまだ正しい値が入っている。** その後
+`main.cpp`が呼ぶ`timesync::begin(kNtpServer1="ntp.nict.jp",
+kNtpServer2="pool.ntp.org", ...)`（`main.cpp:810`、ESP-IDF標準SNTPクライアント
+`esp_sntp_setservername`/`esp_sntp_init`を叩くだけ、DNS設定を直接触るコードは
+batch-uplinkの`TimeSync.cpp`には無い）の区間で`dns0`が壊れる。
+
+lwIP本家`dns.c`を読んだ範囲では、個々のDNS問い合わせが失敗時に`server_idx`を
+進めてサーバを切り替える仕組みはあるが、グローバルな`dns_servers[]`配列自体を
+書き換えるコードは見当たらなかった——つまり内部フォールバックの副作用ではなく、
+**ESP-IDF側の別のコードパス（netif/DHCP/SNTP関連のどこか）が
+`esp_netif_set_dns_info()`相当を明示的に呼んで上書きしている**可能性が高い。
+SNTPが最初に解決しようとする`ntp.nict.jp`（`kNtpServer1`）の解決自体が
+このゲストVLANで失敗し、それが何らかの経路で`dns0`破損・DNSテーブル占有
+（前段の`err=-54`）の連鎖の起点になっている、というのが今のところ一番有力な仮説。
+
+## 訂正: 「err=-54(EXFULL/テーブル満杯)」説は誤りだった。型不一致バグの産物
+
+ユーザーから「DNSが8.8.4.4だけになったとしても、それだけで引けなくなるのは
+おかしい」と指摘を受け、調べ直した。**「EXFULL(テーブル満杯)」説は誤りだった。**
+
+`lwip/err.h`を確認したところ`typedef s8_t err_t;`——`err_t`は符号付き**8bit**
+（-128〜127）。一方`NetworkManager::hostByName()`はこの`err_t err`に
+`lwip_getaddrinfo()`の戻り値（`EAI_FAIL=202`のような`int`範囲のgetaddrinfo系
+コード）をそのまま代入していた。**202は8bit符号付きに収まらず暗黙に切り詰め
+られる：`202 - 256 = -54`。** さらに`lwip_getaddrinfo()`自体（ESP-IDF実装、
+espressif/esp-lwip@`fd432e4`の`src/api/netdb.c:495-498`で確認）は、内部の
+`netconn_gethostbyname_addrtype()`が返す本物の`err_t`を全部`EAI_FAIL`一つに
+握りつぶして返す実装になっている。つまり「err=-54」は**DNSリクエストテーブル
+満杯を意味しない**——単にこの型不一致バグが生んだ無意味な値だった。
+
+握りつぶされる前の本物の`err_t`を見るため、`NetworkManager.cpp`のパッチに
+`netconn_gethostbyname_addrtype()`への診断専用呼び出しを追加し、実機で
+再確認した:
+
+```
+[namz-dns] hostByName('...') raw netconn_gethostbyname_addrtype err_t=-6
+```
+
+**`-6`はlwIPの`ERR_VAL`（"Illegal value"）——今度は8bitに収まる本物の値。**
+（この診断呼び出しは追加のDNS問い合わせを発生させるため、WDTを踏んで再起動を
+招いた——診断コード自体の副作用であり、本題のバグではない。本採用時は
+外すこと。）
+
+## ERR_VALの発生源を`dns_send()`まで追った——プリコンパイル済み領域が壁
+
+`ERR_VAL`を返す箇所はESP-IDF版`dns.c`（`fd432e4`）に2箇所:
+
+1. `dns_gethostbyname_addrtype()`: `dns_server_is_set()`が偽（=`dns_servers[]`
+   全部未設定）の時。**該当しない**——診断ログで`dns0=dns1=8.8.4.4`と、
+   どちらも有効な値だったことを確認済み
+2. **`dns_send()`の`overflow_return:`**（`query_idx + n + 1 > 0xFFFF`という
+   u16オーバーフローガード）。こちらが該当する可能性が高い
+
+```c
+/* convert hostname into suitable query format. */
+query_idx = SIZEOF_DNS_HDR;
+do {
+  ...
+  for (n = 0; *hostname != '.' && *hostname != 0; ++hostname) { ++n; }
+  copy_len = (u16_t)(hostname - hostname_part);
+  if (query_idx + n + 1 > 0xFFFF) {
+    /* u16_t overflow */
+    goto overflow_return;   // ← ERR_VAL(-6)
+  }
+  ...
+} while (*hostname != 0);
+```
+
+うちが解決しようとしているホスト名（`5uglpx52w3n7ktm3clomjt5rfa0nmocn.lambda-url.ap-northeast-1.on.aws`、約66文字）で
+このガードに正常に引っかかることは**あり得ない**（65535を大きく下回る）。
+`pbuf_alloc()`失敗（ヒープ枯渇）は別の`ERR_MEM`経路になるので、これも除外できる
+（コード上、`if (p != NULL) {...} else { err = ERR_MEM; }`と分岐している）。
+
+**ここが今回の調査の到達点。** このガードが正常なホスト名長で引っかかるという
+ことは、`entry->name`（DNSテーブルエントリに格納されたホスト名文字列）自体が
+壊れている・終端が壊れて読み過ぎている、というのが最も筋の通る説明——
+**ユーザーの「中身が破壊されまくってるのでは」という直感を支持する結果**に
+なった。ただし`dns_send()`・`dns_table[]`は`liblwip.a`にプリコンパイル済みの
+領域で、今のソーステキストパッチ方式（Arduinoレイヤーの`.cpp`だけを書き換える）
+ではこれ以上覗けない——完全な再検証にはESP-IDFのlwipコンポーネントを自前で
+再ビルドするか、JTAG等での実機ライブデバッグが要る。今回のPoCの範囲としては
+一旦ここで打ち止めが妥当。
+
+## coredump形式の制約でdns_table[]は読めないと判明、生メモリダンプ診断へ切り替え
+
+前段のcoredump（symbolize済み、実は`netconn_gethostbyname_addrtype`診断呼び出し
+自体がWDTを誘発したもの）で`dns_table`（nmで判明したアドレス`0x3ffc9310`）を
+GDBで直接覗こうとしたところ、**そもそもESP32既定のcoredump形式には各タスクの
+スタック/TCBしか含まれず、`dns_table`のようなグローバル変数(BSS/DRAM)は
+対象外**と判明した（`.coredump.tasks.data`セグメント一覧に該当アドレスが
+無いことで確認）。JTAGでのライブデバッグなら生メモリを直接読めるが手元に無い。
+
+代わりに、`hostByName()`失敗の瞬間に`dns_table`/`dns_pcbs`の生バイトを
+`Serial.printf`で直接ダンプする診断コードを`patch_network_manager.py`に追加した
+（シンボルではなく既知の固定アドレスへの直接キャストで読む、リビルドの
+たびにnmで再確認が必要）。危険な`netconn_gethostbyname_addrtype`診断呼び出し
+（WDT誘発の原因、目的は達成済み）はここで撤去した。
+
+なお`esp-coredump`のSHA256不一致チェックは今回も再発した（ビルドごとに
+`app_elf_sha256`フィールドだけが変わる既知の癖、PR#191の時と同じ）。
+`.venv`本体を書き換える権限は無かった（worktree保護）ため、job tmpへ
+`esp_coredump`パッケージをコピーしてその場でモンキーパッチし、
+`PYTHONPATH`で差し替えて実行する方式で回避した——`.venv`は無傷のまま。
+
+## 新しいクラッシュ発見: heap枯渇によるfopen()内lock初期化失敗
+
+上記の診断コードを仕込んで再度実機確認したところ、**今回は`hostByName()`が
+2回とも成功した**（`54.168.221.225`→再起動後`52.69.247.194`）——DNSは常に
+失敗するわけではなく、`dns0=dns1=8.8.4.4`のままでも解決できる時はできる
+（ユーザーの「それだけで引けなくなるのはおかしい」という指摘とも整合する）。
+ただしDNS成功後もTCP接続が`select()`タイムアウトで失敗する場合があった。
+
+さらに直後、**DNSとは無関係の新種のクラッシュ**が発生し、自動アップロード
+済みのcoredumpをsymbolizeして特定した:
+
+```
+Uploader::oldestQueuedStartUs → Uploader::loadOldestSpillPath
+  (batch-uplink Uploader.cpp、spillの中で一番古いファイルを探す)
+→ fs::File::openNextFile → VFSFileImpl::openNextFile → fopen()
+→ _fopen_r() → __sfp()（newlib、新しいFILE構造体確保）
+→ __retarget_lock_init_recursive() → lock_init_generic()
+→ abort()（newlib locks.c:77、ロック用mutexの確保に失敗すると即abort()する実装）
+```
+
+このタイミングで**spillファイルが184個**溜まっていた（`spill files on boot: 184`）
+——POSTが継続的に失敗し続けているせいで送れなかったバッチが延々と積み上がって
+いる状態。`loadOldestSpillPath()`はLittleFSのディレクトリを`openNextFile()`で
+辿るが、その内部で新しい`FILE*`用のロックをFreeRTOSミューテックスとして確保
+しようとして、**ヒープが確保に足りず即abort()**——DNSの一連の問題とは別に、
+**このビルド構成では一般的なヒープ枯渇に対する耐性自体が低い**ことを示す
+新しい証拠。`maxblock_8bit`がずっと900〜2500byte台で高止まりしている状態と
+符合する。
+
+「DNS失敗→spill蓄積→ヒープ圧迫→別のクラッシュ」という悪循環になっている
+可能性が高い——DNS/dns_table自体の破損を追うだけでなく、根本のヒープ余裕
+（TLS専用プール確保後の残り約90KB強で、そこからさらにbatchバッファプール
+54KB・spillの都度確保が食い合っている構図）自体を見直す必要があるかもしれない。
+
+## maxblock_8bit崩壊の犯人を特定: 2.x/3.xの差ではなく、spill蓄積によるO(n)ディレクトリ走査
+
+`setup()`の要所に`heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)`の打点
+（`NAMZ_HEAP_CHECKPOINT`、docs/log記載後に取り除くローカル診断）を追加し、
+実機で計測した:
+
+```
+setup直後:              free=259236  maxblock_8bit=110580
+tlsmempool後:            free=203936  maxblock_8bit=110580  (TLSプール52KBはmaxblock無影響)
+setupBatchPool後:        free=146480  maxblock_8bit= 57332  (batchプール54KB、想定通り)
+connectWifi後:           free= 92912  maxblock_8bit= 51188  (WiFi/lwIP初期化、軽微)
+timesync::begin後:       free= 92888  maxblock_8bit= 51188  (ほぼ無変化)
+coredump drain後:        free= 92784  maxblock_8bit= 51188  (実TLS/HTTPS往復1回でも断片化ゼロ)
+Uploader::begin()後:     free= 70112  maxblock_8bit= 27636  (-23.5KB、まだ通信前なのに激減)
+最初のspill読込直後:                  maxblock_8bit=  1012  (さらに壊滅的)
+```
+
+**犯人は`Uploader::begin()`と`loadOldestSpillPath()`（batch-uplink
+`Uploader.cpp`）——どちらも溜まった退避ファイルをLittleFSの`openNextFile()`で
+1件ずつ列挙するO(n)スキャン。** `begin()`は起動時に退避数を数えるため184件
+全部を、`loadOldestSpillPath()`は**pumpサイクルのたびに毎回**184件を舐めて
+最古のファイルを探す（ソート済みインデックス等は無く、毎回ゼロから
+ディレクトリを辿る実装）。`openNextFile()`はArduino-ESP32のFS実装内部で
+`std::make_shared<VFSFileImpl>`を使っており、ファイル1個の開閉のたびに
+ヒープ確保・解放が走る——これが184回×毎pumpサイクルで積み重なり、
+一般ヒープを激しく断片化させていた。
+
+**このコードパス自体は2.x/3.xで同一**（`std::make_shared<VFSFileImpl>`は
+2.xの`vfs_api.cpp`にも同一実装で存在すると確認済み、上の「訂正」節参照）。
+既にコード側にも「ヒープ極度逼迫時に`std::bad_alloc`相当の未捕捉例外→
+`abort()`で再起動する」ことを把握した上での`try/catch`ガードが入っている
+（クラッシュ自体は防ぐが、断片化そのものは防げない設計）。
+
+**つまり「2.x/3.xのアーキテクチャ差」という当初の見立てより、以下の悪循環
+の方が実態に近い:**
+
+```
+3.x固有のDNS/TCP接続系バグ（dns_clear_cache thread bug[修正済]・
+断続的なERR_VAL失敗・TCP connectタイムアウト）
+  → POST失敗が続く → spillファイルが蓄積(184件)
+  → begin()/loadOldestSpillPath()のO(n)スキャンが毎回重くなる
+  → ヒープが激しく断片化(maxblock_8bit低下)
+  → fopen()等の新規小確保が失敗しやすくなる → 別のクラッシュ・失敗を誘発
+  → さらにspillが溜まる（自己強化）
+```
+
+健全にPOSTが成功し続けている状態ならspillはほぼ0件で保たれ、このスキャン
+コストは無視できる規模のはず——**今観測している深刻な断片化は、3.xの
+DNSバグ由来の失敗の蓄積が引き金になった二次的な症状**という理解に至った。
+
+## batch-uplinkに退避ファイル列挙の軽量化PRを出した
+
+犯人（`Uploader::begin()`/`loadOldestSpillPath()`のO(n)ディレクトリスキャン）
+への対処として、ユーザーと相談の上で以下の方針に決めた:
+
+1. `File`/`openNextFile()`（エントリごとに重い`std::make_shared<VFSFileImpl>`
+   を確保する）を、POSIXの`opendir`/`readdir`（軽量、ヒープ確保無し）へ置き換える
+2. `loadOldestSpillPath()`の「全件比較して厳密な最古を探す」実装自体を撤去し、
+   「`readdir()`が返す最初の非ディレクトリエントリをそのまま使う」に単純化する
+   ——この関数が実際に保証すべきなのは厳密な最古優先ではなく「新しいデータの
+   流入で古いバックログが飢餓しないこと」だけで、データ自体にタイムスタンプが
+   埋め込まれているため配送順の厳密さは下流の正しさに影響しない、という
+   ユーザーの指摘に基づく判断。`dropOldestWhenFull=true`のeviction対象も
+   同様に「既存の退避ファイル群のいずれか」になるが、捨てる対象は元々RAMキュー
+   より新しいデータより古い(spill済みの)ものに限られるため、「最新のRAMキュー
+   データを優先して残す」という本来の狙いは変わらない
+
+[nna774/batch-uplink#29](https://github.com/nna774/batch-uplink/pull/29)として
+実装・提出した（未マージ、Electabuzzは配送順に依存していないとユーザーに確認
+済み）。`esp32dev`（2.x、公式platform）・`pioarduino-fake-sensor`（3.x）双方で
+ローカルに取り込んでコンパイル成功を確認したが、**実機での断片化改善効果の
+実測はまだ行っていない**。
+
+## batch-uplink#29の効果を実機で確認、ただし2.xとの比較はまだフェアではない
+
+[batch-uplink#29](https://github.com/nna774/batch-uplink/pull/29)を
+コミットハッシュ(`cc1af5641d60ee98af69065424fcfe45d0027f46`)で先行して
+`pioarduino-fake-sensor`envへ取り込み、実機で確認した。`Uploader::begin()`
+直後の`maxblock_8bit`:
+
+- 修正前(spill 184件): `free=70112 maxblock_8bit=27636`
+- 修正後(spill 212件、むしろ件数は増えている): `free=70812 maxblock_8bit=30708`
+
+**ファイル数が増えているのに`maxblock_8bit`はむしろ改善している**——狙い通り
+効果があった。以降のpumpサイクルでも同じ1件(`00001788249788515959.bin`、DNS
+解決は成功するがTLS接続がまだ失敗し続けるため送れず残り続けている)を繰り返し
+掴み、スキャンコスト自体は低いまま推移した(3188→2676→2164→2164...)。
+
+**ただし、この推移は2.xの健全時基準(`maxblock_8bit=23540`、device2で
+`kMaxRamBatches`調整後に安定した値)を依然として下回る。** これは2.xとの
+フェアな比較にはなっていない——2.xの基準値は「DNS失敗0件・spillほぼ0件」の
+健全な状態で計測されたものだが、今の3.x側は**まだ未解決のDNS/TCP接続バグの
+せいで送信が失敗し続け、TLS接続の試行・失敗を延々と繰り返している状態**で
+計測している。「3.xが構造的に2.xより悪いのか」「今壊れているから悪く見える
+だけなのか」は、この状態のままでは切り分けられない。
+
+## NetworkClientSecure::connect()の真偽値バグを修正、しかし本題は別だった
+
+`NetworkClientSecure.cpp`の`if (!Network.hostByName(host, address))`
+（`hostByName()`は失敗時0以外の値を返すため、この判定は失敗を検知できない
+——「martian destination 0.0.0.0」のスイッチログの直接原因）を修正した。
+`Network.hostByName(host, address) != 1`という正しい判定に直し、
+`firmware/patches/patch_network_client_secure.py`として実装、2箇所とも
+patch適用を確認した。
+
+修正後、実機で90秒間観察したところ**驚くべきことにDNS解決は6回とも全部
+成功した**（`13.192.75.205`・`13.159.58.23`×4・`54.249.50.208`という
+バラバラの実在するAWS IP）。**それでもTCP接続は6回とも全部`select()`
+タイムアウトで失敗した。** つまり今回のセッションで主に観測している
+症状は、DNS失敗（`hostByName()`の真偽値バグ含む）が直接原因ではなく、
+**解決先IPが何であれ一貫してTCP接続そのものが応答無しでタイムアウトする**
+という、これまで追ってきたDNS系の話とは別の症状だった。
+
+3つの別々のAWS IP（いずれもap-northeast-1のLambda Function URL/CloudFront
+エッジと推定される範囲）すべてで同一の症状が出ていることから、アプリ側の
+コードの問題というより、経路側（このゲストVLANからこのIPレンジへの到達性）
+を疑う材料が強くなった——ただしこのMacからの`curl`は同じホスト名に対して
+即座に成功しており（前段参照）、単純な「このネットワークから素通しできない」
+という話でもなさそうで、まだ結論には至っていない。
+
+**ユーザーから「ネットワークに異常は無い、TCPスタックがメモリ不足で壊れて
+いるのでは」という指摘。** これは前段の`dns_send()`調査結果と符合する:
+約66文字の正常なホスト名でu16オーバーフローガード(65535超え)に引っかかる
+のは、`entry->name`の終端(NUL)が壊れていて延々とゴミを読み続けている、
+という説明でしか成立しない——単なる「容量不足」ではなく**ヒープ破壊**を
+示唆していた。今回TCP側でも3つの別々のIP宛に同一の「応答なしタイムアウト」
+が出ているのは、DNSだけでなくlwIPの複数のサブシステムに同種の破壊が
+及んでいる、という見方の方が筋が通る。`start_ssl_client()`のログでは
+`lwip_socket()`/`lwip_connect()`自体が一度もエラーを返しておらず
+（"ERROR opening socket"等は未観測）、`select()`が3秒間無応答なだけ——
+SYNパケットの構築（`tcp_connect()`/`tcp_output()`、これも`dns_send()`と
+同じくlwIP内部）が、壊れたデータを使って変なパケットを送っている
+（または送れていない）可能性がある。ただし`tcp_connect()`系も
+`liblwip.a`にプリコンパイル済みで、これ以上ソースパッチでは追えない
+——`dns_send()`調査の時と同じ壁に当たる。
+
+## 2.x側パッチ（PR#8672バックポート）を本番envに実装した
+
+深い調査が長期化する一方、device2で再発した本題（PR#191/#193の
+`WiFiGenericClass::hostByName()`スレッドセーフ違反）自体は上流で既に
+修正手法が確立している（[espressif/arduino-esp32#8672](https://github.com/espressif/arduino-esp32/pull/8672)、
+`release/v2.x`未バックポート）ため、根本のTCP接続タイムアウト調査とは切り離し、
+**先に暫定パッチとして本番env(`esp32dev`・`adxl355`)へ適用した**
+（ユーザー判断: 「一旦今ある程度は2系で問題が発生しているところへのパッチは
+あるならそれをひとまずあてる。調査はあとで」）。
+
+`firmware/patches/patch_wifi_generic.py`を新設し、`patch_network_manager.py`
+と同じ仕組み（SENTINEL冪等・対象ファイル無ければno-op・`extra_scripts`で
+ビルド時自動適用）で実装。`WiFiGeneric.cpp`の`hostByName()`が直接呼んでいた
+`dns_gethostbyname()`を、`esp_netif_tcpip_exec()`経由でTCPIPスレッドへ委譲する
+ヘルパー(`namz_wifi_gethostbyname_tcpip_ctx`)に差し替えた——PR#8672と同じ手法。
+実際の`WiFiGeneric.cpp`(2.0.17)のソース(includeリスト・`wifi_dns_found_callback`・
+`hostByName()`本体)と1行単位で照合し、文字列置換が全箇所ヒットすることを確認。
+`esp_netif.h`は`esp32-hal.h`経由で既に間接includeされていたが、PR#8672と同様
+明示includeも追加した(無害・防御的)。
+
+`[env:esp32dev]`の`extra_scripts`に`pre:patches/patch_wifi_generic.py`を追加
+（`[env:adxl355]`は`esp32dev`をextendsするため自動的に対象に入る）。
+`pio run -e esp32dev`・`pio run -e adxl355`双方でコンパイル・リンクまで
+SUCCESSを確認——`esp_netif_tcpip_exec`はESP-IDF 4.4.7(2.x系)にも存在し
+問題なく解決された。**実機への書き込み確認はまだ行っていない。**
+
+## batch-uplinkにv3.4.0タグを切り、pioarduino-fake-sensor・本番envとも揃えた
+
+[batch-uplink#29](https://github.com/nna774/batch-uplink/pull/29)がユーザー判断で
+マージされたのを受け、`master`(`b3350d8`)に[v3.4.0](https://github.com/nna774/batch-uplink/releases/tag/v3.4.0)
+を切った（`loadOldestSpillPath()`の全件比較撤去は動作の意味が変わる変更のため
+パッチではなくマイナー版を上げた）。`pioarduino-fake-sensor`env（PR#29プレマージの
+コミットハッシュpinをしていた）はタグpinに差し替え、さらに本番env
+(`esp32dev`・`adxl355`・`piezo`)の`v3.3.0`pinもユーザー判断で`v3.4.0`へ揃えて
+更新した——spillスキャン軽量化は2.x/3.x共通のコードパスで2.x本番機にも
+有効なはずという分析結果に基づく判断。`pioarduino-fake-sensor`は本番と
+同一のlib_depsになったため、env独自のlib_deps上書きを撤去し継承に一本化した。
+
+更新後、`esp32dev`・`adxl355`・`piezo`・`pioarduino-fake-sensor`の4env全てで
+コンパイル・リンクSUCCESSを確認した。
+
+### 事故再発: pioarduino-fake-sensorをビルドした直後、esp32devが再び汚染された
+
+上の確認作業中、`pioarduino-fake-sensor`をビルドした直後に`esp32dev`を再ビルド
+したところ、`esptool v5.3.0`・`PLATFORM: Espressif 32 (55.3.311)`と、**またしても
+pioarduinoが公式platformの既定解決先を上書きする既知の事故**が再発した
+（前述「事故: pioarduinoのインストールが公式platformの既定解決先を上書きしていた」
+と同一パターン）。今回は単独セッション内・順番のズレだけで踏んだ——並行セッションは
+無関係。`~/.platformio/platforms/espressif32`と`framework-arduinoespressif32*`を
+削除し公式7.0.1を再インストールして復旧、`esp32dev`・`adxl355`・`piezo`を
+再ビルドし直して正しいplatformでのSUCCESSを再確認した。**この事故はもはや
+「まれに起きる」ではなく「pioarduino-fake-sensorを本番envと同じセッションで
+ビルドするたび、順序に関わらず高確率で起きる」と考えるべき**——本番envの
+`platform`行のバージョン明示pin化(下記TODO)の優先度を上げる根拠が積み上がった。
+
+## NAMZ_HEAP_CHECKPOINTをビルドフラグで恒久的にトグルできるようにした
+
+「調査後に取り除く」前提のディスエーブルされていない診断だったが、
+`-DNAMZ_HEAP_CHECKPOINT_ENABLED=1`が定義されている時だけ`Serial.printf`に
+展開され、未定義（既定）では`((void)0)`に展開されるよう変更した。本番ビルドの
+バイナリに一切残らない一方、次に同種の断片化調査が必要になった時はビルドフラグ
+1行を足すだけで再利用できる——取り除く必要が無くなったため恒久化した。
+
+## 残っている調査用コードの棚卸し
+
+今回の一連の調査でコードに残った診断コードを洗い出した。上記2件（`NAMZ_HEAP_CHECKPOINT`）
+は対応済み、残りは未対応（要判断）:
+
+- `src/main.cpp`の`connectWifi()`末尾（458-466行付近）——`[namz-dns] connectWifi()
+  done: dns0=... dns1=...`を**ビルドフラグ無しで無条件に**出す。WiFi接続成功のたびに
+  1回だけなのでコスト自体は小さいが、本番機のシリアルログに恒久的に残る。
+  DNSサーバ破損の切り分け用に入れたもので、その調査自体は「訂正: err=-54は
+  型不一致の産物」以降、優先度が下がったまま止まっている
+- `firmware/patches/patch_network_manager.py`——3.x(`pioarduino-fake-sensor`env限定、
+  本番へは無関係)の`NetworkManager.cpp`に、`hasV4/hasV6/dns0/dns1`のログ・
+  `hostByName()`成否ログに加え、失敗時の`dns_table`/`dns_pcbs`生バイトダンプ
+  （nm経由で判明した固定アドレス直読み、再ビルドのたびに要再確認という前提付き）
+  まで無条件で焼き込んでいる。TCP接続タイムアウト調査（現在の最優先TODO）を
+  再開する時に使う想定で残しているが、今のところ放置されたまま
+- （今回の調査と無関係、2026-08-10からの既存debt）`src/main.cpp`の
+  `sBatchAllocFailCount`まわり（307-313行・358-367行）と`gBatchQueue full`ログ
+  （389-396行）——newBatch詰まり・キュー溢れのレート制限付き診断ログ。コード上に
+  「恒久化するなら整理すること」というXXXコメント付きで残ったまま、今回のセッション
+  以前からの積み残し
+
+## 本番envのplatformをバージョン明示pinし、DNS診断ログもビルドフラグ化した
+
+TODOに積み上がっていた2件をユーザー指示で片付けた:
+
+- `[env:esp32dev]`・`[env:piezo]`の`platform = espressif32`（バージョン無指定）を
+  `platform = platformio/espressif32@7.0.1`に変更した。`[env:adxl355]`は
+  `esp32dev`をextendsするため自動的にカバーされる。3回踏んだ「pioarduinoが
+  公式platformの既定解決先を上書きする」事故の再発防止策——iniに1行書くだけの
+  変更で、この事故の根絶が期待できる
+- `main.cpp`の`connectWifi()`末尾の`[namz-dns]`（DHCPが配ったDNSサーバを出す）
+  無条件ログを、`NAMZ_HEAP_CHECKPOINT`と同じ方式で`-DNAMZ_DNS_CHECKPOINT_ENABLED=1`
+  でのみ有効化する形に変更した。既定では`#ifdef`ごと丸ごと消える
+
+`esp32dev`・`adxl355`・`piezo`（新pinで）・`fake-sensor`・`pioarduino-fake-sensor`
+の5envでコンパイルSUCCESSを確認。`NAMZ_DNS_CHECKPOINT_ENABLED=1`を付けた状態でも
+`fake-sensor`がコンパイルSUCCESSすることを一時的な環境変数(`PLATFORMIO_BUILD_FLAGS`、
+ini本体は変更せず)で確認した。
+
+残り2件（`patches/patch_network_manager.py`の3.x限定診断一式、2026-08-10からの
+既存debtである`newBatch`詰まり/`gBatchQueue full`ログ）は今回は対象外、
+「残っている調査用コードの棚卸し」節に記載のまま。
+
 ## TODO
 
+- [x] `NetworkClientSecure::connect()`の`hostByName()`失敗判定バグを
+      `firmware/patches/patch_network_client_secure.py`で修正した → 完了、
+      上の節参照。ただし修正後の実機観察で**この経路は今回の主症状の直接
+      原因ではなかった**と判明（DNSは成功しTCP接続自体がタイムアウトする）。
+- [ ] **最優先: DNS成功後もTCP接続が一貫してタイムアウトする件を調査する。**
+      3つの別々のAWS IPで同一症状。ユーザーの見立て（ネットワーク経路では
+      なく、ヒープ破壊でlwIPのTCPスタック自体が壊れている）が
+      `dns_send()`のu16オーバーフロー調査結果と符合し有力——ただし
+      `tcp_connect()`系もプリコンパイル済みで直接の検証はできない
+      （上の節参照）。次の一手候補: ①ヒープ断片化自体を減らして(TLSプール
+      サイズ見直し・`kMaxRamBatches`再調整等)症状が緩和するか試す間接検証、
+      ②2.xでも同条件・同基板で再現するか比較する。
 - [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
       経路かを特定する。~~ → 完了。**PR#191とは別物、`NetworkManager::hostByName()`
       内の`dns_clear_cache()`起因の3.x固有バグと判明。**
 - [x] `connectWifi()`（`main.cpp`・`piezo_main.cpp`）に3.x系向けの対処
       （`WiFi.setAutoReconnect(false)`）を入れて実機で確認した——解消を確認済み。
       （3.x移行自体を保留する場合でも、この変更は2.x側にも実害が無く残して良い）
-- [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
-      するか検討する**（名前衝突事故の再発防止策。今回もこの事故を再度踏んだ
-      ——検証のたびに再発しうるので優先度を上げてよいかもしれない。3.x移行を
-      保留する場合でも、pioarduino-fake-sensor envを今後も使う限り関係が残る）。
+- [x] `dns_clear_cache()`パッチを`firmware/patches/patch_network_manager.py`
+      （`extra_scripts`でビルド時自動適用）として本実装した。DNS解決の診断ログも
+      同時に追加、実機で動作確認済み。
+- [x] ~~`netconn_gethostbyname_addrtype()`への診断専用呼び出しを取り除く。~~ →
+      完了。目的（生の`err_t`確認）を達成後に撤去し、代わりに`dns_table`等の
+      生バイトダンプ診断へ差し替えた。
+- [x] **`main.cpp`の`NAMZ_HEAP_CHECKPOINT`診断で`maxblock_8bit`崩壊の犯人を
+      特定した** → 完了、上の節参照。`Uploader::begin()`/`loadOldestSpillPath()`
+      （batch-uplink）のO(n)ディレクトリスキャンが原因で、2.x/3.xのコード自体は
+      同一——3.xのDNSバグ由来の失敗蓄積が引き金になった二次的な症状と判断。
+- [x] `main.cpp`の`NAMZ_HEAP_CHECKPOINT`を、ビルドフラグ
+      `-DNAMZ_HEAP_CHECKPOINT_ENABLED=1`で有効化する形に変更した → 完了。
+      既定(フラグ無し)では`((void)0)`に展開され本番ビルドには一切残らない。
+      取り除く必要が無くなったため恒久化した。
+- [x] ~~batch-uplink側の改善案（`loadOldestSpillPath()`のO(n)スキャン軽減）~~
+      → 完了、実装・提出済み。**[batch-uplink#29](https://github.com/nna774/batch-uplink/pull/29)**
+      （`opendir`/`readdir`への置き換え＋全件比較の撤去）。未マージ。
+- [x] batch-uplink#29の断片化改善効果を実機で確認した → 完了、上の節参照。
+      コミットハッシュ先行取り込みで確認、狙い通り効果はあった。
+- [ ] **最優先: 2.xとの公平な比較には、`hostByName()`失敗の生バイトダンプ
+      （下記）でDNS/TCP接続バグの根本原因を特定・解消し、spillが健全に0件
+      近くまで戻った状態で`NAMZ_HEAP_CHECKPOINT`を取り直す必要がある。**
+      現状は「まだ壊れている3.x」対「健全な2.x」という不公平な比較にしか
+      なっていない。理想を言えば、同じ`NAMZ_HEAP_CHECKPOINT`診断を2.x
+      （`esp32dev`env）でこの同じテスト機に焼いて直接計測するのが最も確実
+      （device2の`23540`という基準値は別の機体・別の時期の記録のため）。
+- [x] `dns0=dns1=8.8.4.4`になるタイミングを切り分けた → 完了、下記参照。
+      **`connectWifi()`直後は正しい(`8.8.8.8`/`8.8.4.4`)、`timesync::begin()`の
+      区間で壊れる。**
+- [x] ~~`err=-54`(EXFULL)が本当に「DNSリクエストテーブル満杯」を意味するか
+      裏付ける。~~ → **訂正して完了**。EXFULL説は誤りで、`err_t`(8bit)への
+      `EAI_FAIL`(202)代入による型不一致の切り詰めが原因と判明
+      （「訂正: 「err=-54」説は誤りだった」節参照）。本物の値は`ERR_VAL`(-6)。
+- [x] `timesync::begin()`区間で`dns0`が壊れる原因を追った → **`dns_send()`の
+      `overflow_return:`(u16オーバーフローガード)がERR_VAL(-6)の発生源と特定**
+      （「ERR_VALの発生源を`dns_send()`まで追った」節参照）。約66文字の
+      ホスト名で正常にこのガードへ引っかかることはあり得ず、DNSテーブル
+      エントリ(`entry->name`)自体の破損を疑う根拠になった。ただし`dns_send()`
+      は`liblwip.a`にプリコンパイル済みでこれ以上パッチできず、**今回のPoCの
+      範囲としてはここが調査の到達点**。
+- [x] coredumpから`dns_table`を直接読めるか試した → **不可と判明**（タスクの
+      スタック/TCBしか含まれない、ESP32既定のcoredump形式の制約）。代わりに
+      `hostByName()`失敗時に生バイトをSerial出力する診断へ切り替えた
+      （「coredump形式の制約で...」節参照）。まだ失敗ケースを捕まえられて
+      いない——DNSは常に失敗するわけではなく成功する時もあると判明したため。
+- [ ] 上記の生バイトダンプで実際に`hostByName()`失敗を捕まえて`dns_table`/
+      `dns_pcbs`の中身を見る計画は、DNSが決定論的に毎回失敗するわけではないと
+      判明した（後述、TCP接続タイムアウトの方が主症状）ため優先度を下げる。
+- [ ] **新規: `fopen()`内部のnewlibロック初期化失敗によるabort()を発見した**
+      （「新しいクラッシュ発見: heap枯渇によるfopen()内lock初期化失敗」節参照）。
+      `Uploader::loadOldestSpillPath()`がspill(184件溜まっていた)を
+      `openNextFile()`で辿る際、新規`FILE*`のミューテックス確保に失敗して
+      即abort()。DNS系の問題とは別の、**ヒープ全般の枯渇耐性の低さ**を示す
+      証拠——「DNS失敗→spill蓄積→ヒープ圧迫→別クラッシュ」の悪循環を疑う。
+      TLS専用プール確保後の残りヒープ配分（batchバッファプール54KB等との
+      食い合い）自体を見直す必要があるかもしれない。
+- [ ] `dns0`破損が`timesync::begin()`の**どの内部処理**(SNTPの`ntp.nict.jp`
+      解決失敗？)によって引き起こされているかは、上記の壁により未特定のまま。
+- [x] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）を
+      `firmware/patches/patch_wifi_generic.py`として実装し、本番env
+      (`esp32dev`・`adxl355`)へ`extra_scripts`で適用した → 完了、上の節参照。
+      コンパイル・リンクは確認済みだが**実機書き込み確認はまだ**。
+- [ ] 3.x側パッチ込みでの長期観察（TFT・OTA・coredump・WDT・spillまわり）は
+      まだ未実施——今回は短時間確認のみ。
+- [x] **本番env(`esp32dev`・`adxl355`とその派生・`piezo`)の`platform`行をバージョン
+      明示pinした** → 完了、上の節参照。`platform = platformio/espressif32@7.0.1`。
+- [x] `main.cpp`の`connectWifi()`末尾の`[namz-dns]`無条件ログをビルドフラグ化した
+      （`-DNAMZ_DNS_CHECKPOINT_ENABLED=1`） → 完了、上の節参照。
+- [ ] `patches/patch_network_manager.py`の診断ログ・生バイトダンプ一式（3.x限定、
+      `pioarduino-fake-sensor`envのみ）の扱いはまだ未決定——TCP接続タイムアウト
+      調査を再開する時に使う可能性があるため現状維持のまま残している。
 - [ ] LittleFSの`Unable to allocate FD`が3.x固有か、この基板の使い回し影響かは
       未切り分けのまま（優先度は下がった）。
-- [ ] POSTが`connection refused`(TLS connect failed: -1)で継続的に失敗している
-      原因も未切り分けのまま（優先度は下がった）。
 - [x] ~~`NetworkManager::hostByName()`のバグがespressif/arduino-esp32側で
       既知issueになっているか確認する。~~ → 完了、下記参照。
 
