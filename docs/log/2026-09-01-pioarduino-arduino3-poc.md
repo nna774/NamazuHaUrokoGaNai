@@ -131,13 +131,14 @@ os.PathLike object, not NoneType`でビルド失敗）。教訓: **同じグロ�
 
 ## 現時点の評価
 
-3.x移行そのものは、ここまで見た限り**大掛かりな書き直しにはならなそう**——自前コードは
-ほぼ無改造、必要な修正はbatch-uplink側の1行のみ（今のところ判明している範囲では）。
-コンパイルは2.x（公式・現行本番）・3.x（pioarduino）双方でSUCCESSを確認済み。
-ただし実機での動作（TFT_eSPI描画・OTA・coredump・WDT・パーティション境界など）は
-まだ未検証。「今すぐ3.xへ全面移行」ではなく、段階的に確認しながら進める前提——
+**「3.x移行はPR#191のlwIPクラッシュを直す・自前コードはほぼ無改造で済む」という
+当初の見立ては、実機検証の結果どちらも支持されなくなった。** 詳細は下の
+「実機で本題のバグを再現した」参照。3.x移行そのものの実現性（コンパイルは通る）は
+維持できているが、移行の主目的（クラッシュの根治）が果たされるかは現時点では
+**否定的な材料の方が多い**。「今すぐ3.xへ全面移行」を進める根拠は薄れた——
 現状の2.x起因のクラッシュは自動再起動で自己回復しており、緊急性は無い
-（[2026-08-31-device1-lwip-null-deref-coredump.md](2026-08-31-device1-lwip-null-deref-coredump.md)）。
+（[2026-08-31-device1-lwip-null-deref-coredump.md](2026-08-31-device1-lwip-null-deref-coredump.md)）ので、
+急いで乗り換える理由も無い。
 
 ## batch-uplinkにタグを切り、予備基板へ実際に書き込んだ
 
@@ -195,17 +196,66 @@ core 3.3系で発生、2.x/3.0時代には無かった）が
 LittleFSの`Unable to allocate FD`は、この基板が過去の別PoC（tls-alloc-probe等）で
 使い回されている影響の可能性が高く、3.x固有かは未切り分けのまま。
 
+## connectWifi()にWiFi.setAutoReconnect(false)を入れ、修正を確認した
+
+`main.cpp`・`piezo_main.cpp`双方の`connectWifi()`（`WiFi.begin()`の直前）に
+`WiFi.setAutoReconnect(false)`を追加。2.x（`espressif32@7.0.1`）・3.x
+（pioarduino）双方でコンパイルSUCCESSを確認した上でテスト機へ書き込み、
+60秒間の観察で`HANDSHAKE_TIMEOUT`ループが**再発しないことを確認**——WiFi再接続の
+不具合はこれで解消できたと言ってよい。
+
+（この過程で、pioarduinoのインストールが公式platformの既定解決先を再度上書きする
+同じ事故をもう一度踏んだ。復旧手順は前回と同じ。**この事故はコンパイル検証の
+たびに再発しうる**——本番envのバージョンpin化(TODO参照)を先送りするほど
+踏みやすい。）
+
+## 実機で本題のバグを再現した——3.xで直っていない可能性
+
+WiFi修正確認後、ユーザーの手元でTFTが"NAMAZU"スプラッシュのまま固まった
+（`main.cpp`の`samplingTask`作成失敗時の意図的な`for(;;) halt`——安全機構であり
+文鎮化ではない）。リセットボタンが反応しなかったため、pyserialでRTS/DTR経由の
+ソフトリセットを代行。**その再起動直後のログに以下が出た**:
+
+```
+assert failed: udp_new_ip_type /IDF/components/lwip/lwip/src/core/udp.c:1278
+(Required to lock TCPIP core functionality!)
+...
+[coredump] found hardware coredump: 24228 bytes
+[coredump] copied to /coredump/0000000041.bin (24228 bytes)
+...
+[coredump] uploaded and removed /coredump/0000000041.bin (200)
+```
+
+**これはPR#191で追ってきたのと同種のバグ**——lwIPのTCPIP専用ロックを持たずに
+UDP内部関数（DNS解決がUDP PCBを確保する時に通る`udp_new_ip_type`）を呼んでいる。
+PR#191の見立てでは「3.x系(NetworkManager化)でのみ修正済み」だったはずだが、
+**実機では起動後10〜15秒以内・2回連続の再起動でこれを踏んだ**——本番2.x機での
+発生頻度（数週間に1回程度）よりはるかに高頻度。しかもPR#191で見た「NULL参照
+（黙って壊れる）」ではなく、今回は**明示的なassert（即座にpanic→reboot）**という
+違う壊れ方をしている。
+
+coredump自動回収パイプライン自体は3.x環境でも正しく機能した（収穫）。ただし
+**「3.x移行がPR#191のクラッシュを根治する」という当初の前提は、この1回の観測
+だけでは支持できない**——むしろ逆（直っていない、あるいは別の形でより踏みやすく
+なっている）可能性がある。symbolizeして正確な発生箇所・呼び出し元スレッドを
+特定するまでは結論を出せない。1回の観測に基づいて「3.xでも直っていない」と
+断定するのも早計だが、少なくとも「移行すれば直る」と楽観視できる材料ではない。
+
 ## TODO
 
+- [ ] **最優先: 今回踏んだ`udp_new_ip_type`assertのcoredumpをsymbolizeし、
+      PR#191と同じ呼び出し経路（`hostByName()`系）かどうか、どのタスク・
+      どの操作から呼ばれたかを特定する。** これが「3.x移行の主目的（クラッシュ
+      根治）が果たされているか」の核心。
 - [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
-      するか検討する**（名前衝突事故の再発防止策。pinする/
-      `PLATFORMIO_CORE_DIR`で隔離する/様子見、のどれにするかはユーザー検討中）。
-- [ ] `connectWifi()`（`main.cpp`・`piezo_main.cpp`）に3.x系向けの対処
-      （`WiFi.setAutoReconnect(false)`または再接続前の明示`disconnect()`）を入れて
-      再度実機で確認する。
+      するか検討する**（名前衝突事故の再発防止策。今回もこの事故を再度踏んだ
+      ——検証のたびに再発しうるので優先度を上げてよいかもしれない）。
+- [x] `connectWifi()`（`main.cpp`・`piezo_main.cpp`）に3.x系向けの対処
+      （`WiFi.setAutoReconnect(false)`）を入れて実機で確認した——解消を確認済み。
 - [ ] LittleFSの`Unable to allocate FD`が3.x固有か、この基板の使い回し影響かを
       切り分ける（フォーマットし直して再試行、等）。
-- [ ] PR#191の本題であるlwIP内NULL参照crashが3.x系で本当に再発しないかは、
-      今回の短時間観察では確認できていない——長期間の稼働観察が必要。
-- [ ] 十分な期間問題が出なければ、本番2台への展開を検討する（platform行の切り替えのみで
-      済むはずだが、切り替え時は両機とも予備機同様の長期観察を経てから）。
+- [ ] POSTが`connection refused`(TLS connect failed: -1)で継続的に失敗している
+      原因を切り分ける（テスト機のdevice_id・エンドポイント設定の問題か、3.x固有か）。
+- [ ] 上記の切り分け次第では、**3.x移行そのものを見送る判断もありうる**——
+      「移行すれば直る」という前提が崩れた場合、移行コスト（batch-uplink・
+      connectWifi()の変更、pioarduino運用の複雑さ）に見合わなくなる可能性がある。
