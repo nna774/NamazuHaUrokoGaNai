@@ -219,13 +219,36 @@ VERSION・TASKS_NUM・TCB_SIZE+各タスクのTCB/スタック+チェックサ�
 `esp_app_desc_t.app_elf_sha256`（32バイト、ビルドごとに変わる自己参照ハッシュ）が
 手がかりになる——`publish_ota.sh`は公開済みバージョンを削除も再ビルドもしないため、
 S3に残る全履歴の`.bin`から**該当バイトが完全一致する版**を探せば、fw_versionラベルに
-頼らず実際にクラッシュした時のビルドを一意に特定できる:
+頼らず実際にクラッシュした時のビルドを一意に特定できる。
+
+**ただし全履歴を毎回舐めるのは非効率。** coredumpパーティションは次のパニックまで
+上書きされないだけで、`reset_reason`が直近`PANIC`かつ`uptime_s`がそのcoredumpの
+アップロード時刻と辻褄が合う（`GET /devices/<id>`で確認）なら、今回の再起動そのものが
+このcoredumpの発生源——**素直にS3キーのfw_versionラベル自身が正解であることが多い**
+（実例:
+[docs/log/2026-09-01-device1-udp-sendto-null-deref-coredump.md](../docs/log/2026-09-01-device1-udp-sendto-null-deref-coredump.md)）。
+古いcoredumpが後から掘り起こされるのは「その機で自動送信機能が入って初めて起動した回」
+くらいで、日常的な運用では稀。**まずラベル自身の版とその1つ前の公開版だけ**チェックし、
+どちらも一致しなければ初めて全履歴探索に進む:
 
 ```bash
-# coredumpが記録している自己参照ハッシュの値はesp-coredumpの警告メッセージに出る
+# 1. coredumpが記録している自己参照ハッシュの値はesp-coredumpの警告メッセージに出る
 # (SHA256不一致チェックを読み進めるための回避と合わせて、下記ログのモンキーパッチ参照)
 # 例: "coredump SHA256(6342f1ecfab0cd37) != app SHA256(...)" の前半がそれ
 
+# 2. まずラベル自身の版・1つ前の版だけ照合（該当2ファイルだけ取得すれば済む）
+aws s3 cp s3://namazu-dashboard-<account-id>/ota/<env>/<label>.bin .
+aws s3 cp s3://namazu-dashboard-<account-id>/ota/<env>/<1つ前の版>.bin .
+python3 - <<'EOF'
+target = "6342f1ecfab0cd37"  # coredumpの警告に出た値
+for path in ["<label>.bin", "<1つ前の版>.bin"]:
+    with open(path, "rb") as f:
+        f.seek(176)
+        hexval = f.read(32).hex()
+    print(path, hexval, "MATCH" if hexval.startswith(target) else "")
+EOF
+
+# 3. どちらも不一致だった場合のみ、全履歴に広げる
 aws s3 sync s3://namazu-dashboard-<account-id>/ota/<env>/ history/ --exclude "*.sha256"
 python3 - <<'EOF'
 import glob
