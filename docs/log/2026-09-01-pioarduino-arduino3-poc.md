@@ -424,6 +424,74 @@ SNTPが最初に解決しようとする`ntp.nict.jp`（`kNtpServer1`）の解�
 このゲストVLANで失敗し、それが何らかの経路で`dns0`破損・DNSテーブル占有
 （前段の`err=-54`）の連鎖の起点になっている、というのが今のところ一番有力な仮説。
 
+## 訂正: 「err=-54(EXFULL/テーブル満杯)」説は誤りだった。型不一致バグの産物
+
+ユーザーから「DNSが8.8.4.4だけになったとしても、それだけで引けなくなるのは
+おかしい」と指摘を受け、調べ直した。**「EXFULL(テーブル満杯)」説は誤りだった。**
+
+`lwip/err.h`を確認したところ`typedef s8_t err_t;`——`err_t`は符号付き**8bit**
+（-128〜127）。一方`NetworkManager::hostByName()`はこの`err_t err`に
+`lwip_getaddrinfo()`の戻り値（`EAI_FAIL=202`のような`int`範囲のgetaddrinfo系
+コード）をそのまま代入していた。**202は8bit符号付きに収まらず暗黙に切り詰め
+られる：`202 - 256 = -54`。** さらに`lwip_getaddrinfo()`自体（ESP-IDF実装、
+espressif/esp-lwip@`fd432e4`の`src/api/netdb.c:495-498`で確認）は、内部の
+`netconn_gethostbyname_addrtype()`が返す本物の`err_t`を全部`EAI_FAIL`一つに
+握りつぶして返す実装になっている。つまり「err=-54」は**DNSリクエストテーブル
+満杯を意味しない**——単にこの型不一致バグが生んだ無意味な値だった。
+
+握りつぶされる前の本物の`err_t`を見るため、`NetworkManager.cpp`のパッチに
+`netconn_gethostbyname_addrtype()`への診断専用呼び出しを追加し、実機で
+再確認した:
+
+```
+[namz-dns] hostByName('...') raw netconn_gethostbyname_addrtype err_t=-6
+```
+
+**`-6`はlwIPの`ERR_VAL`（"Illegal value"）——今度は8bitに収まる本物の値。**
+（この診断呼び出しは追加のDNS問い合わせを発生させるため、WDTを踏んで再起動を
+招いた——診断コード自体の副作用であり、本題のバグではない。本採用時は
+外すこと。）
+
+## ERR_VALの発生源を`dns_send()`まで追った——プリコンパイル済み領域が壁
+
+`ERR_VAL`を返す箇所はESP-IDF版`dns.c`（`fd432e4`）に2箇所:
+
+1. `dns_gethostbyname_addrtype()`: `dns_server_is_set()`が偽（=`dns_servers[]`
+   全部未設定）の時。**該当しない**——診断ログで`dns0=dns1=8.8.4.4`と、
+   どちらも有効な値だったことを確認済み
+2. **`dns_send()`の`overflow_return:`**（`query_idx + n + 1 > 0xFFFF`という
+   u16オーバーフローガード）。こちらが該当する可能性が高い
+
+```c
+/* convert hostname into suitable query format. */
+query_idx = SIZEOF_DNS_HDR;
+do {
+  ...
+  for (n = 0; *hostname != '.' && *hostname != 0; ++hostname) { ++n; }
+  copy_len = (u16_t)(hostname - hostname_part);
+  if (query_idx + n + 1 > 0xFFFF) {
+    /* u16_t overflow */
+    goto overflow_return;   // ← ERR_VAL(-6)
+  }
+  ...
+} while (*hostname != 0);
+```
+
+うちが解決しようとしているホスト名（`5uglpx52w3n7ktm3clomjt5rfa0nmocn.lambda-url.ap-northeast-1.on.aws`、約66文字）で
+このガードに正常に引っかかることは**あり得ない**（65535を大きく下回る）。
+`pbuf_alloc()`失敗（ヒープ枯渇）は別の`ERR_MEM`経路になるので、これも除外できる
+（コード上、`if (p != NULL) {...} else { err = ERR_MEM; }`と分岐している）。
+
+**ここが今回の調査の到達点。** このガードが正常なホスト名長で引っかかるという
+ことは、`entry->name`（DNSテーブルエントリに格納されたホスト名文字列）自体が
+壊れている・終端が壊れて読み過ぎている、というのが最も筋の通る説明——
+**ユーザーの「中身が破壊されまくってるのでは」という直感を支持する結果**に
+なった。ただし`dns_send()`・`dns_table[]`は`liblwip.a`にプリコンパイル済みの
+領域で、今のソーステキストパッチ方式（Arduinoレイヤーの`.cpp`だけを書き換える）
+ではこれ以上覗けない——完全な再検証にはESP-IDFのlwipコンポーネントを自前で
+再ビルドするか、JTAG等での実機ライブデバッグが要る。今回のPoCの範囲としては
+一旦ここで打ち止めが妥当。
+
 ## TODO
 
 - [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
@@ -435,25 +503,29 @@ SNTPが最初に解決しようとする`ntp.nict.jp`（`kNtpServer1`）の解�
 - [x] `dns_clear_cache()`パッチを`firmware/patches/patch_network_manager.py`
       （`extra_scripts`でビルド時自動適用）として本実装した。DNS解決の診断ログも
       同時に追加、実機で動作確認済み。
+- [ ] **`netconn_gethostbyname_addrtype()`への診断専用呼び出し
+      （`patch_network_manager.py`内、生の`err_t`を見るためのもの）を、本採用前に
+      取り除くこと。** 追加のDNS問い合わせを発生させるため、実機でWDTタイムアウト
+      →再起動を誘発した（診断コード自体の副作用、本題のバグではない）。
 - [x] `dns0=dns1=8.8.4.4`になるタイミングを切り分けた → 完了、下記参照。
       **`connectWifi()`直後は正しい(`8.8.8.8`/`8.8.4.4`)、`timesync::begin()`の
       区間で壊れる。**
-- [ ] `err=-54`(EXFULL)が本当に「DNSリクエストテーブル満杯」を意味するか、
-      ESP-IDF側の該当ソースで正確に裏付ける（今は状況証拠のみ）。
-- [ ] **最優先: `timesync::begin()`のどの処理が`dns0`を書き換えているか特定する。**
-      `main.cpp`の`connectWifi()`（`dns0=8.8.8.8`）と直後の
-      `timesync::begin(kNtpServer1="ntp.nict.jp", kNtpServer2="pool.ntp.org", ...)`
-      の間で発生。batch-uplinkの`TimeSync.cpp`自体はESP-IDF標準SNTP API
-      (`esp_sntp_setservername`/`esp_sntp_init`)を呼ぶだけでDNS設定を直接触る
-      コードは無い——SNTPの内部DNS解決処理(`ntp.nict.jp`の解決失敗？)が
-      引き金の可能性が高いが未確認。lwIP `dns.c`を読んだ範囲では、個々の
-      問い合わせの`server_idx`切り替えはグローバルな`dns_servers[]`配列自体を
-      書き換えないように見える——ESP-IDF側(netif/DHCP/SNTP関連)の別のコード
-      パスが`esp_netif_set_dns_info()`相当を呼んでいる可能性がある。
-- [ ] SNTPの`pool.ntp.org`問い合わせがなぜ完了しない（≒テーブルに居座り続ける）のか
-      を確認する——これが本当の根っこの可能性がある。上と関連: `ntp.nict.jp`
-      (server1)が先に解決失敗し、それが`pool.ntp.org`(server2)への切り替え・
-      DNSテーブル占有・`dns0`破損の連鎖の起点という仮説。
+- [x] ~~`err=-54`(EXFULL)が本当に「DNSリクエストテーブル満杯」を意味するか
+      裏付ける。~~ → **訂正して完了**。EXFULL説は誤りで、`err_t`(8bit)への
+      `EAI_FAIL`(202)代入による型不一致の切り詰めが原因と判明
+      （「訂正: 「err=-54」説は誤りだった」節参照）。本物の値は`ERR_VAL`(-6)。
+- [x] `timesync::begin()`区間で`dns0`が壊れる原因を追った → **`dns_send()`の
+      `overflow_return:`(u16オーバーフローガード)がERR_VAL(-6)の発生源と特定**
+      （「ERR_VALの発生源を`dns_send()`まで追った」節参照）。約66文字の
+      ホスト名で正常にこのガードへ引っかかることはあり得ず、DNSテーブル
+      エントリ(`entry->name`)自体の破損を疑う根拠になった。ただし`dns_send()`
+      は`liblwip.a`にプリコンパイル済みでこれ以上パッチできず、**今回のPoCの
+      範囲としてはここが調査の到達点**。
+- [ ] （範囲外・将来やるなら）ESP-IDFのlwipコンポーネントを自前で再ビルドする
+      か、JTAG等での実機ライブデバッグで`dns_table[]`の実際の中身を見て、
+      `entry->name`が本当に破損しているかを直接確認する。
+- [ ] `dns0`破損が`timesync::begin()`の**どの内部処理**(SNTPの`ntp.nict.jp`
+      解決失敗？)によって引き起こされているかは、上記の壁により未特定のまま。
 - [ ] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）はまだ
       `firmware/patches/`化していない・実機検証もしていない——device2で再発した
       本題はこちら。

@@ -13,6 +13,14 @@
 #    hostByName()失敗時のconnection refusedが、実際にDNS解決自体が失敗している
 #    のか、それとも別の原因かを切り分けるため。
 #
+# 3. lwip_getaddrinfo()は内部の本当のerr_t(netconn_gethostbyname_addrtype()の
+#    戻り値)を全部EAI_FAIL(202)一つに握りつぶして返す実装になっており、しかも
+#    そのEAI_FAIL(202)をNetworkManager::hostByName()側のerr_t(=符号付き8bit、
+#    -128〜127)に代入すると 202-256=-54 に暗黙変換で切り詰められる——
+#    「err=-54」はEXFULL(テーブル満杯)ではなく、単なるこの型不一致バグの産物
+#    だったと判明。本当の失敗理由を見るため、netconn_gethostbyname_addrtype()を
+#    診断用に直接呼び、握りつぶされる前の生のerr_tを出す。
+#
 # 詳細: docs/log/2026-09-01-pioarduino-arduino3-poc.md
 
 Import("env")
@@ -82,6 +90,24 @@ NEW_IPV4_SUCCESS_TAIL = (
     "}"
 )
 
+# 診断: lwip_getaddrinfo()に握りつぶされる前の、netconn_gethostbyname_addrtype()の
+# 生のerr_tを見る(EAI_FAIL(202)への丸め・err_t(8bit)への切り詰めが起きる前)。
+OLD_AF_UNSPEC_CALL = (
+    "  hints.ai_family = AF_UNSPEC;\n"
+    "  err = lwip_getaddrinfo(aHostname, servname, &hints, &res);"
+)
+NEW_AF_UNSPEC_CALL = (
+    "  {\n"
+    "    ip_addr_t namz_diag_addr;\n"
+    "    err_t namz_raw_err =\n"
+    "        netconn_gethostbyname_addrtype(aHostname, &namz_diag_addr, NETCONN_DNS_IPV4);\n"
+    "    Serial.printf(\"[namz-dns] hostByName('%s') raw netconn_gethostbyname_addrtype "
+    "err_t=%d\\n\", aHostname, (int)namz_raw_err);\n"
+    "  }\n"
+    "  hints.ai_family = AF_UNSPEC;\n"
+    "  err = lwip_getaddrinfo(aHostname, servname, &hints, &res);"
+)
+
 
 def patch_network_manager():
     framework_dir = env.PioPlatform().get_package_dir("framework-arduinoespressif32")
@@ -102,9 +128,13 @@ def patch_network_manager():
         return
 
     original = content
+    content = content.replace(
+        '#include "lwip/dns.h"', '#include "lwip/dns.h"\n#include "lwip/api.h"', 1
+    )
     content = content.replace("NetworkManager::NetworkManager() {}", DNS_CLEAR_CACHE_HELPER, 1)
     content = content.replace(OLD_DNS_CLEAR_CACHE_CALL, NEW_DNS_CLEAR_CACHE_CALL, 1)
     content = content.replace(OLD_HINTS_BLOCK, NEW_HINTS_BLOCK, 1)
+    content = content.replace(OLD_AF_UNSPEC_CALL, NEW_AF_UNSPEC_CALL, 1)
     content = content.replace(OLD_IPV4_SUCCESS_TAIL, NEW_IPV4_SUCCESS_TAIL, 1)
 
     if content == original:
