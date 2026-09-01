@@ -768,6 +768,28 @@ pioarduinoが公式platformの既定解決先を上書きする既知の事故**
   「恒久化するなら整理すること」というXXXコメント付きで残ったまま、今回のセッション
   以前からの積み残し
 
+## 本番envのplatformをバージョン明示pinし、DNS診断ログもビルドフラグ化した
+
+TODOに積み上がっていた2件をユーザー指示で片付けた:
+
+- `[env:esp32dev]`・`[env:piezo]`の`platform = espressif32`（バージョン無指定）を
+  `platform = platformio/espressif32@7.0.1`に変更した。`[env:adxl355]`は
+  `esp32dev`をextendsするため自動的にカバーされる。3回踏んだ「pioarduinoが
+  公式platformの既定解決先を上書きする」事故の再発防止策——iniに1行書くだけの
+  変更で、この事故の根絶が期待できる
+- `main.cpp`の`connectWifi()`末尾の`[namz-dns]`（DHCPが配ったDNSサーバを出す）
+  無条件ログを、`NAMZ_HEAP_CHECKPOINT`と同じ方式で`-DNAMZ_DNS_CHECKPOINT_ENABLED=1`
+  でのみ有効化する形に変更した。既定では`#ifdef`ごと丸ごと消える
+
+`esp32dev`・`adxl355`・`piezo`（新pinで）・`fake-sensor`・`pioarduino-fake-sensor`
+の5envでコンパイルSUCCESSを確認。`NAMZ_DNS_CHECKPOINT_ENABLED=1`を付けた状態でも
+`fake-sensor`がコンパイルSUCCESSすることを一時的な環境変数(`PLATFORMIO_BUILD_FLAGS`、
+ini本体は変更せず)で確認した。
+
+残り2件（`patches/patch_network_manager.py`の3.x限定診断一式、2026-08-10からの
+既存debtである`newBatch`詰まり/`gBatchQueue full`ログ）は今回は対象外、
+「残っている調査用コードの棚卸し」節に記載のまま。
+
 ## TODO
 
 - [x] `NetworkClientSecure::connect()`の`hostByName()`失敗判定バグを
@@ -852,17 +874,13 @@ pioarduinoが公式platformの既定解決先を上書きする既知の事故**
       コンパイル・リンクは確認済みだが**実機書き込み確認はまだ**。
 - [ ] 3.x側パッチ込みでの長期観察（TFT・OTA・coredump・WDT・spillまわり）は
       まだ未実施——今回は短時間確認のみ。
-- [ ] **本番env(`esp32dev`・`adxl355`とその派生・`piezo`)の`platform`行をバージョン
-      明示pinするか検討する**（名前衝突事故の再発防止策。今回3回目の再発を踏み、
-      「並行セッションが無くても単独セッション内の順序だけで高確率再発する」と
-      判明した——優先度を上げるべき状況になっている。3.x移行を保留する場合でも、
-      pioarduino-fake-sensor envを今後も使う限り関係が残る）。
-- [ ] `main.cpp`の`connectWifi()`末尾の`[namz-dns]`無条件ログ、および
-      `patches/patch_network_manager.py`の診断ログ・生バイトダンプ一式の扱いを
-      決める（「残っている調査用コードの棚卸し」節参照）。前者は本番ログに
-      恒久的に残る・後者はTCP接続タイムアウト調査を再開する時に使う可能性がある
-      ため、`NAMZ_HEAP_CHECKPOINT`と同様ビルドフラグ化するか、調査本格再開まで
-      現状維持するかは未決定
+- [x] **本番env(`esp32dev`・`adxl355`とその派生・`piezo`)の`platform`行をバージョン
+      明示pinした** → 完了、上の節参照。`platform = platformio/espressif32@7.0.1`。
+- [x] `main.cpp`の`connectWifi()`末尾の`[namz-dns]`無条件ログをビルドフラグ化した
+      （`-DNAMZ_DNS_CHECKPOINT_ENABLED=1`） → 完了、上の節参照。
+- [ ] `patches/patch_network_manager.py`の診断ログ・生バイトダンプ一式（3.x限定、
+      `pioarduino-fake-sensor`envのみ）の扱いはまだ未決定——TCP接続タイムアウト
+      調査を再開する時に使う可能性があるため現状維持のまま残している。
 - [ ] LittleFSの`Unable to allocate FD`が3.x固有か、この基板の使い回し影響かは
       未切り分けのまま（優先度は下がった）。
 - [x] ~~`NetworkManager::hostByName()`のバグがespressif/arduino-esp32側で
