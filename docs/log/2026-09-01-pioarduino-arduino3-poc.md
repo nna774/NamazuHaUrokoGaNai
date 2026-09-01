@@ -139,16 +139,54 @@ os.PathLike object, not NoneType`でビルド失敗）。教訓: **同じグロ�
 現状の2.x起因のクラッシュは自動再起動で自己回復しており、緊急性は無い
 （[2026-08-31-device1-lwip-null-deref-coredump.md](2026-08-31-device1-lwip-null-deref-coredump.md)）。
 
+## batch-uplinkにタグを切り、予備基板へ実際に書き込んだ
+
+[v3.3.1](https://github.com/nna774/batch-uplink/releases/tag/v3.3.1)を`6ec000c`に
+切って公開（このリポジトリ初のパッチバージョンタグ）。PR#28の概要欄にも2.x側の
+確認結果を追記した。`[env:pioarduino-fake-sensor]`のlib_depsをこのタグへ向けて
+テスト機（`/dev/cu.usbserial-5B320272871`、CH9102系）へ書き込み——**ビルド・書き込み
+自体はSUCCESS**。
+
+### シリアルログで見えた挙動: 起動・バッチキューは正常、WiFi再接続に問題あり
+
+起動直後はWiFi接続・TLS POST試行・RAMキュー→spill退避まで一連の動作をしており、
+**クラッシュ・パニック・WDTリセットは一切無い**（PR#191のDNS/hostByName系クラッシュは
+この観測時間内では未再現、当然だが再現には時間がかかる類のものなので「出なかった」
+だけでは無罪証明にならない）。
+
+一方で、しばらく観察していると以下が繰り返し出た:
+
+```
+[ WARN ][STA.cpp:145] _onStaArduinoEvent(): Reason: 204 - HANDSHAKE_TIMEOUT
+[wifi] FAILED
+[uplink-debug] pump: wifi not connected (status=5)
+E wifi:sta is connecting, cannot set config
+[ERROR][STA.cpp:417] connect(): STA clear config failed! 0x3006: ESP_ERR_WIFI_STATE
+E esp_littlefs: Unable to allocate FD
+[ERROR][vfs_api.cpp:312] VFSFileImpl(): fopen(/littlefs/spill/....bin, r) failed: 22 (Invalid argument)
+```
+
+`main.cpp`の`connectWifi()`（`WiFi.status() != WL_CONNECTED`を見て`WiFi.begin()`を
+呼び直すだけの単純な再接続ループ、2.x時代からある実装）が、`STA.cpp`
+（3.x系でのNetwork/WiFi分離後の新ファイル）側の「まだ接続処理中に`WiFi.begin()`を
+呼ぶとconfigをclearできない」状態にハマって再接続が詰まっている様子。
+LittleFSの`Unable to allocate FD`も同時に出ており、こちらはこの基板が過去の
+別PoC（tls-alloc-probe等）で使い回されている影響の可能性もあり、3.x固有かは未切り分け。
+
+**現時点では「環境要因（このベンチのAP電波状況）」か「3.x系での再接続ロジックの
+非互換」かを切り分けられていない。** 同じ場所・同じ基板に2.x系ファームを焼いて
+同条件で再現するかのA/Bが最も確実な切り分け方法。
+
 ## TODO
 
 - [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
-      するか検討する**（今回の名前衝突事故の再発防止策。pinする/
+      するか検討する**（名前衝突事故の再発防止策。pinする/
       `PLATFORMIO_CORE_DIR`で隔離する/様子見、のどれにするかはユーザー検討中）。
-- [ ] batch-uplinkに新タグを切る（`#28`はmasterへマージ済み(`6ec000c`)だが未タグ。
-      このリポジトリの流儀は`#master`直指定禁止・必ずタグpinのため、
-      `pioarduino-fake-sensor`envのpinを更新するには先にタグが要る）。
-- [ ] 新タグを`pioarduino-fake-sensor`envのpinへ反映し、予備基板へ実際に焼いて
-      長期間動かし、TFT_eSPI・OTA・coredump自動送信・WDT・DNS解決まわりが
-      実機で問題なく動くか確認する。
+- [ ] **WiFi再接続でのHANDSHAKE_TIMEOUTループ・LittleFS FDエラーが環境要因か
+      3.x固有の回帰かを切り分ける**（同じ基板・同じ場所で2.x系ファームとA/B比較）。
+- [ ] 上記が3.x固有と分かった場合、`connectWifi()`の再接続ロジック
+      （`WiFi.begin()`を接続処理中に呼び直さないようにする等）の対処を検討する。
+- [ ] PR#191の本題であるlwIP内NULL参照crashが3.x系で本当に再発しないかは、
+      今回の短時間観察では確認できていない——長期間の稼働観察が必要。
 - [ ] 十分な期間問題が出なければ、本番2台への展開を検討する（platform行の切り替えのみで
       済むはずだが、切り替え時は両機とも予備機同様の長期観察を経てから）。
