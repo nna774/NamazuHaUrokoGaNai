@@ -314,6 +314,34 @@ arduino-esp32本体（`NetworkManager.cpp`）側の実装に起因するため�
       未切り分けのまま（優先度は下がった）。
 - [ ] POSTが`connection refused`(TLS connect failed: -1)で継続的に失敗している
       原因も未切り分けのまま（優先度は下がった）。
-- [ ] `NetworkManager::hostByName()`のバグがespressif/arduino-esp32側で
-      既知issueになっているか確認する（未着手）。もし上流で近く修正される
-      見込みが立てば、3.x移行の再検討材料になる。
+- [x] ~~`NetworkManager::hostByName()`のバグがespressif/arduino-esp32側で
+      既知issueになっているか確認する。~~ → 完了、下記参照。
+
+### 上流issue調査: 完全一致は無いが、同カテゴリの再発バグと確認できた
+
+`gh issue list --repo espressif/arduino-esp32 --search "..."`で
+`"Required to lock TCPIP core functionality"`検索。**`NetworkManager::hostByName()`
+→`dns_clear_cache()`→SNTP再入という今回の経路そのものを報告しているissueは
+見つからなかった**（＝おそらく未報告の具体的な経路）が、「TCPIPロック無しで
+lwIP内部関数を呼んでassert」というカテゴリ自体は繰り返し報告されている既知パターン
+だった:
+
+- [#10675](https://github.com/espressif/arduino-esp32/issues/10675)
+  `assert failed: sntp_stop ...` — SNTP絡み。v3.1.0で一度
+  [PR#10725](https://github.com/espressif/arduino-esp32/pull/10725)により修正
+  （`configTzTime()`二重呼び出しのケース）
+- [#10781](https://github.com/espressif/arduino-esp32/issues/10781)
+  `assert failed: tcp_alloc ...` — 別経路（AsyncTCP）で同種
+- [#10526](https://github.com/espressif/arduino-esp32/issues/10526)
+  同エラーメッセージ、3.1.0-RC2で新規発生と報告
+- [#12769](https://github.com/espressif/arduino-esp32/issues/12769)
+  （**2026-08-06クローズ、直近**）HTTPS POST + SNTPがらみで同種のTCPIPロック
+  assertを報告。`esp_sntp_stop()`を呼んでも直らないと書かれているが、報告者は
+  最終的に「うちのタスクのメモリ確保ミスだった、core側の欠陥ではなかった」と
+  自己解決でクローズしており、core側の欠陥として確定はしていない
+
+**v3.1.0で一部（`configTzTime`二重呼びのケース）は直ったが、「TCPIPロック無しで
+lwIPに触る」というカテゴリのバグは3.3.10/3.3.11時点（うちが検証した版）でも
+根絶されていない**。うちが踏んだ`dns_clear_cache()`経由の経路は、少なくとも
+検索した範囲では未報告——上流にissueを立てる価値はあるが、今回のPoCの範囲では
+未実施。
