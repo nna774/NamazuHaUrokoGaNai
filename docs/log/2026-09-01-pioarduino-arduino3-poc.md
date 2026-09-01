@@ -64,6 +64,13 @@ Flash 55.8%・RAM 19.9%）。2.x系にも実害の無い変更のはず（既に
 （`batch-uplink.git#v3.3.0`、未パッチ）に戻してある——**現状のままではこのenvはビルドが
 通らない**。理由はコメントに残した。
 
+## batch-uplink側にPRを出した
+
+[nna774/batch-uplink#28](https://github.com/nna774/batch-uplink/pull/28)として
+`#include <WiFi.h>`を1行追加するPRを提出済み（未マージ）。Electabuzzとも共有する
+リポジトリなので、マージ判断・タグ切りはユーザー確認の上で行う。マージ後は新タグを
+切り、`platformio.ini`のpinを更新すればこのenvもビルドが通るはず（未検証）。
+
 ## 現時点の評価・次にできること
 
 - 3.x移行そのものは、ここまで見た限り**大掛かりな書き直しにはならなそう**——自前コードは
@@ -71,8 +78,8 @@ Flash 55.8%・RAM 19.9%）。2.x系にも実害の無い変更のはず（既に
   ただしこれはコンパイルが通っただけの確認であり、実機での動作（TFT_eSPI描画・OTA・
   coredump・WDT・パーティション境界など）は未検証。
 - 進めるなら次はどちらか:
-  1. batch-uplink側で`#include <WiFi.h>`を足したPR・新タグ（例: v3.3.1）を出す
-     （Electabuzzにも影響する変更なので要相談）。
+  1. [batch-uplink#28](https://github.com/nna774/batch-uplink/pull/28)をレビュー・マージし、
+     新タグ（例: v3.3.1）を切る（Electabuzzにも影響する変更なので要相談・提出済み）。
   2. それを`pioarduino-fake-sensor`env（本番envとは別のまま）に取り込み、予備基板へ
      実際に焼いて長期間動かし、TFT_eSPI・OTA・coredump自動送信・WDT・DNS解決まわりが
      実機で問題なく動くか確認する。
