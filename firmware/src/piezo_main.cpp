@@ -104,6 +104,8 @@ static void IRAM_ATTR onSampleTimer(void*) {
 static void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  // main.cppのconnectWifi()と同じ理由（docs/log/2026-09-01-pioarduino-arduino3-poc.md）。
+  WiFi.setAutoReconnect(false);
   WiFi.begin(gIdentity.wifiSsid.c_str(), gIdentity.wifiPass.c_str());
   Serial.print("[wifi] connecting");
   uint32_t t0 = millis();
