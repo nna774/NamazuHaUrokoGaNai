@@ -36,13 +36,48 @@ DNS再問い合わせのタイマー経路で、`pcb`に`0x1`という明らか�
 `exccause=0x1c`・`excvaddr=0x15`は前回のcoredump（`tcp_listen_input`、`5dab9a4`ビルド）と
 **完全に同じ値**——`pcb`(=1) + 構造体オフセット(0x14相当)ちょうど`0x15`になる計算が一致して
 おり、両者とも「pcbポインタ自体が小さい整数に化けている」同型の壊れ方をしている可能性がある。
-偶然の一致か、lwIPのPCB管理に潜む共通のバグかは未調査。
+
+## 追調査: これは自前のバグではなく既知の未解決upstreamバグだった
+
+`dns_send()`の実ソース（ESP-IDF 4.4.7が固定するlwIPフォーク、
+[espressif/esp-lwip@a45be9e](https://github.com/espressif/esp-lwip/blob/a45be9e438f6cf9c54ec150581819c3b95d5af6b/src/core/dns.c#L921)、
+`.pio`にビルド済みlibのみで同梱されソース無し・ESP-IDFの`.gitmodules`経由で
+コミットを特定して取得）を確認したところ、該当行は:
+
+```c
+pcb_idx = entry->pcb_idx;  // LWIP_DNS_SECURE_RAND_SRC_PORT有効時（既定でON）
+err = udp_sendto(dns_pcbs[pcb_idx], p, dst, dst_port);  // dns.c:921
+```
+
+`dns_pcbs[]`・`dns_table[]`はどちらも静的配列（.bss）で、coredumpには含まれない
+（フラッシュcoredumpはタスクのTCB/スタックのみでヒープ/BSSは対象外）ため、`pcb_idx`が
+不正値だったのか`dns_pcbs[]`自体が壊れていたのかはこれ以上追えない。
+
+**代わりに、レジスタダンプそのものが他者の実機と一致する既知issueを見つけた。**
+[espressif/arduino-esp32#9388](https://github.com/espressif/arduino-esp32/issues/9388)
+（2024-03-20報告）は、全く無関係なハードウェア・スケッチで同じ`udp_sendto`
+(`dns_send`→`dns_check_entry`→`dns_tmr`→`dns_timeout_cb`→`sys_check_timeouts`→
+`tcpip_thread`という同一コールチェーン)がクラッシュしており、レジスタダンプが
+**`A2(=pcb)=0x00000001`・`EXCCAUSE=0x1c`・`EXCVADDR=0x15`・`A5=0x35`(dst_port=53)・
+`A6=4`・`A7=0`まで完全一致**していた（スタックアドレスのA1/A3/A4等は当然別ハードウェアなので異なる）。
+`pcb`が別ハードウェア・別スケッチで毎回きっちり整数`1`という「本物のポインタでは
+まず有り得ない値」に揃うのは、単発の偶発的メモリ破壊ではなく**再現性のある
+ロジックバグ**であることを強く示唆する。
+
+Espressifの回答は「ヒープ枯渇で`malloc()`がNULLを返しチェック漏れではないか」という
+推測にとどまり確認は取れておらず、`Resolution: Wontfix`・`Type: Question`のまま
+2024-04-05にクローズ済み——**upstream(arduino-esp32/esp-lwip)側で根本原因は特定されず、
+修正も入っていない。** `lwip.a`はビルド済みプリコンパイル済みライブラリとして配布されて
+おり（`dns.c`はこのレポにソースが存在しない）、自前でパッチを当てる経路も無い。
 
 ## 現状の評価
 
 device1は現在`e82f81e`・`reset_reason: PANIC`・`online: true`・heap正常で稼働中——今回の
-パニックから正常に再起動できている。前回同様、実害が継続している様子はなく、根本原因
-（lwIPのDNS再送処理でpcbが破壊される経路）の追加調査は未着手。
+パニックから正常に再起動できている。**これはarduino-esp32同梱lwIPの既知・未解決の
+latentバグであり、自前のコードのバグではない。** 発生頻度は3週間で2回・両方とも
+自動復旧しており実害は無い。upstreamでwontfix済み・自前でパッチできない以上、これ以上
+追っても収穫は薄いと判断し、追加調査は行わない（再発頻度が上がる・実害が出るまでは
+経過観察のままとする）。
 
 ## 次に何が可能になったか
 
