@@ -597,6 +597,29 @@ Uploader::begin()後:     free= 70112  maxblock_8bit= 27636  (-23.5KB、まだ�
 コストは無視できる規模のはず——**今観測している深刻な断片化は、3.xの
 DNSバグ由来の失敗の蓄積が引き金になった二次的な症状**という理解に至った。
 
+## batch-uplinkに退避ファイル列挙の軽量化PRを出した
+
+犯人（`Uploader::begin()`/`loadOldestSpillPath()`のO(n)ディレクトリスキャン）
+への対処として、ユーザーと相談の上で以下の方針に決めた:
+
+1. `File`/`openNextFile()`（エントリごとに重い`std::make_shared<VFSFileImpl>`
+   を確保する）を、POSIXの`opendir`/`readdir`（軽量、ヒープ確保無し）へ置き換える
+2. `loadOldestSpillPath()`の「全件比較して厳密な最古を探す」実装自体を撤去し、
+   「`readdir()`が返す最初の非ディレクトリエントリをそのまま使う」に単純化する
+   ——この関数が実際に保証すべきなのは厳密な最古優先ではなく「新しいデータの
+   流入で古いバックログが飢餓しないこと」だけで、データ自体にタイムスタンプが
+   埋め込まれているため配送順の厳密さは下流の正しさに影響しない、という
+   ユーザーの指摘に基づく判断。`dropOldestWhenFull=true`のeviction対象も
+   同様に「既存の退避ファイル群のいずれか」になるが、捨てる対象は元々RAMキュー
+   より新しいデータより古い(spill済みの)ものに限られるため、「最新のRAMキュー
+   データを優先して残す」という本来の狙いは変わらない
+
+[nna774/batch-uplink#29](https://github.com/nna774/batch-uplink/pull/29)として
+実装・提出した（未マージ、Electabuzzは配送順に依存していないとユーザーに確認
+済み）。`esp32dev`（2.x、公式platform）・`pioarduino-fake-sensor`（3.x）双方で
+ローカルに取り込んでコンパイル成功を確認したが、**実機での断片化改善効果の
+実測はまだ行っていない**。
+
 ## TODO
 
 - [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
@@ -617,11 +640,11 @@ DNSバグ由来の失敗の蓄積が引き金になった二次的な症状**と
       同一——3.xのDNSバグ由来の失敗蓄積が引き金になった二次的な症状と判断。
 - [ ] **`main.cpp`の`NAMZ_HEAP_CHECKPOINT`診断（6箇所）を本採用前に取り除く
       こと。** 調査用途のみ。
-- [ ] （任意・batch-uplink側の改善案）`loadOldestSpillPath()`をO(n)スキャン
-      からO(1)相当（ファイル名でソートされたリストのキャッシュ、または
-      LittleFSのタイムスタンプ順走査等）に変える余地がある——spillが健全に
-      0件付近を保つ限り優先度は低いが、大量滞留時の悪循環を弱める効果は
-      ある。Electabuzzとも共有するコードなので変更する場合は要相談。
+- [x] ~~batch-uplink側の改善案（`loadOldestSpillPath()`のO(n)スキャン軽減）~~
+      → 完了、実装・提出済み。**[batch-uplink#29](https://github.com/nna774/batch-uplink/pull/29)**
+      （`opendir`/`readdir`への置き換え＋全件比較の撤去）。未マージ。
+- [ ] batch-uplink#29マージ後、実機（大量のspill滞留状態）で断片化改善効果を
+      実測する——今はコンパイル確認のみ。
 - [x] `dns0=dns1=8.8.4.4`になるタイミングを切り分けた → 完了、下記参照。
       **`connectWifi()`直後は正しい(`8.8.8.8`/`8.8.4.4`)、`timesync::begin()`の
       区間で壊れる。**
