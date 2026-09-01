@@ -351,6 +351,53 @@ PR#8672と同じ手法の1行パッチを当てれば3.x側も直せる見込み
 段階に留まり、ビルド時パッチとしての本実装・長期観察・2.x側パッチの同等検証は
 未着手。
 
+## 事故: 並行セッションと`~/.platformio`の取り合いになった
+
+`dns_clear_cache()`パッチの動作確認を続けていたところ、`espressif32`の既定解決先が
+platform=pioarduino(55.3.311)・framework=公式2.0.17という**壊れた組み合わせ**に
+なっているのを発見した。このPoCセッションはこの間読み取り専用の操作しかしておらず、
+**このマシン上で並行して動いている別セッションが同じグローバルキャッシュを
+触っていた**と判断（[PR#193](https://github.com/nna774/NamazuHaUrokoGaNai/pull/193)の
+概要欄に「別セッションの`~/.platformio`キャッシュ変更の影響で完全一致が取れなかった」
+と書かれていたのは、まさにこちらの過去の作業が向こうを巻き込んでいた証拠）。
+
+これを受け、**グローバルキャッシュへの直接編集による検証はもう安全に続けられない**
+と判断し、以降は`firmware/patches/patch_network_manager.py`
+（`extra_scripts`でビルド時に自動適用、プロジェクト内で完結・他セッションの状態に
+非依存）へ切り替えた。内容は検証済みの`dns_clear_cache()`パッチに加え、DNS解決の
+成否・使用中DNSサーバを無条件で出す診断ログを追加したもの。`[env:pioarduino-fake-sensor]`
+の`extra_scripts`に追加し、`pioarduino-fake-sensor`env限定（対象ファイルが存在する
+時だけ動くので2.x系envには無害）。
+
+## 診断ログでPOST失敗の直接証拠を得た: DNS解決自体が失敗している
+
+```
+[namz-dns] hostByName('...lambda-url...') hasV4=1 hasV6=0 dns0=8.8.4.4 dns1=8.8.4.4
+[namz-dns] hostByName('...') FAILED err=-54
+[NetworkManager.cpp:159] hostByName(): DNS Failed for '...' with error '-54'
+```
+
+- **DNS解決は確かに失敗している**（ネットワーク自体というより解決処理側の問題という
+  当初の直感が支持された）
+- `54`は`lwip/errno.h`上`EXFULL`（"Exchange full"）。lwIPのDNS文脈では典型的に
+  **DNSリクエストテーブルが埋まっていて新規登録できない**時に出るコード
+  （lwIP本家`netdb.c`の`lwip_getaddrinfo()`はEAI_*系(200番台)しか返さないため、
+  ESP-IDF側の実装がこの生のerrno値を返している可能性が高いが、該当ソースの
+  正確な特定はできていない）
+- これは前段のcoredump symbolizeで見つけた「SNTPの`pool.ntp.org`問い合わせが
+  完了せず`dns_clear_cache()`から再入された」という話と直接つながる——この
+  問い合わせがずっと片付かずテーブルの枠を専有し続けていれば、後続の
+  `hostByName()`が軒並み「テーブル満杯」で即失敗する、という筋が通る
+- `dns0=dns1=8.8.4.4`という**両方とも同じGoogle Public DNS**という構成は、
+  ユーザーによるとルータのDHCPは`8.8.8.8`/`8.8.4.4`の2つを配っているはずとのことで、
+  **期待値と食い違っている**——自前コードにハードコードは無いので、DHCP応答の
+  読み取り・保存のどこかでprimary/secondaryの扱いが狂っている可能性がある
+- このプロジェクト自体に前例あり（`firmware/src/config.h`のコメント）:
+  device2で`maxblock_8bit`が1300〜2000台まで落ちると`DNS Failed`が繰り返し
+  起きていた実績（`kMaxRamBatches`を3→2に下げて解消）。今回の観測はそれより
+  さらに低い(900〜2500)水準で高止まりしている——ただし`kMaxRamBatches`は
+  既に2に設定済みで、この対策だけでは足りていない
+
 ## TODO
 
 - [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
@@ -359,25 +406,28 @@ PR#8672と同じ手法の1行パッチを当てれば3.x側も直せる見込み
 - [x] `connectWifi()`（`main.cpp`・`piezo_main.cpp`）に3.x系向けの対処
       （`WiFi.setAutoReconnect(false)`）を入れて実機で確認した——解消を確認済み。
       （3.x移行自体を保留する場合でも、この変更は2.x側にも実害が無く残して良い）
-- [x] ~~`dns_clear_cache()`をPR#8672と同じ手法でパッチできるか、ローカル編集で
-      検証する。~~ → 完了。45秒間の実機観察でクラッシュ再発なしを確認した。
-- [ ] **最優先: 上記のローカル編集を`firmware/patches/`の`.patch`ファイル＋
-      `extra_scripts`によるビルド時適用として本実装する**（2.x側の
-      `WiFiGeneric.cpp`(PR#8672バックポート)・3.x側の`NetworkManager.cpp`
-      (`dns_clear_cache()`委譲)の両方）。現状は`~/.platformio`への使い捨て編集
-      でしかなく、リポジトリには何も反映されていない。
-- [ ] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）の実機検証はまだ
-      行っていない——device2で再発した本題はこちら。
+- [x] `dns_clear_cache()`パッチを`firmware/patches/patch_network_manager.py`
+      （`extra_scripts`でビルド時自動適用）として本実装した。DNS解決の診断ログも
+      同時に追加、実機で動作確認済み。
+- [ ] **最優先: `dns0=dns1=8.8.4.4`（期待値は`8.8.8.8`/`8.8.4.4`の2種）になる原因を
+      特定する。** `connectWifi()`直後（WiFi接続直後、DHCP完了直後）の時点でも
+      同じ値になっているか、それとも再接続を経るうちにこうなるのかを切り分ける
+      診断ログを追加して確認する。
+- [ ] `err=-54`(EXFULL)が本当に「DNSリクエストテーブル満杯」を意味するか、
+      ESP-IDF側の該当ソースで正確に裏付ける（今は状況証拠のみ）。
+- [ ] SNTPの`pool.ntp.org`問い合わせがなぜ完了しない（≒テーブルに居座り続ける）のか
+      を確認する——これが本当の根っこの可能性がある。
+- [ ] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）はまだ
+      `firmware/patches/`化していない・実機検証もしていない——device2で再発した
+      本題はこちら。
 - [ ] 3.x側パッチ込みでの長期観察（TFT・OTA・coredump・WDT・spillまわり）は
-      まだ未実施——今回は45秒の短時間確認のみ。
+      まだ未実施——今回は短時間確認のみ。
 - [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
       するか検討する**（名前衝突事故の再発防止策。今回もこの事故を再度踏んだ
       ——検証のたびに再発しうるので優先度を上げてよいかもしれない。3.x移行を
       保留する場合でも、pioarduino-fake-sensor envを今後も使う限り関係が残る）。
 - [ ] LittleFSの`Unable to allocate FD`が3.x固有か、この基板の使い回し影響かは
       未切り分けのまま（優先度は下がった）。
-- [ ] POSTが`connection refused`(TLS connect failed: -1)で継続的に失敗している
-      原因も未切り分けのまま（優先度は下がった）。
 - [x] ~~`NetworkManager::hostByName()`のバグがespressif/arduino-esp32側で
       既知issueになっているか確認する。~~ → 完了、下記参照。
 
