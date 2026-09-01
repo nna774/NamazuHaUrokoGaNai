@@ -726,13 +726,18 @@ static void uploaderTask(void*) {
 }
 #endif
 
-// NamazuHaUrokoGaNai診断: 2.x/3.xのmaxblock_8bit差の犯人捜し用に、setup()の
-// 要所でヒープ断片化状況を打点する(docs/log/2026-09-01-pioarduino-arduino3-poc.md)。
-// 調査後に取り除くこと。
+// NamazuHaUrokoGaNai診断: setup()の要所でヒープ断片化状況を打点する
+// (docs/log/2026-09-01-pioarduino-arduino3-poc.md、maxblock_8bit崩壊の犯人捜しで
+// 導入)。普段は無効(何もしない)、ビルドフラグ-DNAMZ_HEAP_CHECKPOINT_ENABLED=1で
+// 有効化する。
+#ifdef NAMZ_HEAP_CHECKPOINT_ENABLED
 #define NAMZ_HEAP_CHECKPOINT(label)                                                     \
   Serial.printf("[namz-heap] %-24s free=%u maxblock_8bit=%u\n", label,                  \
                 (unsigned)ESP.getFreeHeap(),                                            \
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
+#else
+#define NAMZ_HEAP_CHECKPOINT(label) ((void)0)
+#endif
 
 void setup() {
   Serial.begin(kSerialBaud);

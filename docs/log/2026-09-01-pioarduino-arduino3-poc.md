@@ -709,6 +709,65 @@ SYNパケットの構築（`tcp_connect()`/`tcp_output()`、これも`dns_send()
 SUCCESSを確認——`esp_netif_tcpip_exec`はESP-IDF 4.4.7(2.x系)にも存在し
 問題なく解決された。**実機への書き込み確認はまだ行っていない。**
 
+## batch-uplinkにv3.4.0タグを切り、pioarduino-fake-sensor・本番envとも揃えた
+
+[batch-uplink#29](https://github.com/nna774/batch-uplink/pull/29)がユーザー判断で
+マージされたのを受け、`master`(`b3350d8`)に[v3.4.0](https://github.com/nna774/batch-uplink/releases/tag/v3.4.0)
+を切った（`loadOldestSpillPath()`の全件比較撤去は動作の意味が変わる変更のため
+パッチではなくマイナー版を上げた）。`pioarduino-fake-sensor`env（PR#29プレマージの
+コミットハッシュpinをしていた）はタグpinに差し替え、さらに本番env
+(`esp32dev`・`adxl355`・`piezo`)の`v3.3.0`pinもユーザー判断で`v3.4.0`へ揃えて
+更新した——spillスキャン軽量化は2.x/3.x共通のコードパスで2.x本番機にも
+有効なはずという分析結果に基づく判断。`pioarduino-fake-sensor`は本番と
+同一のlib_depsになったため、env独自のlib_deps上書きを撤去し継承に一本化した。
+
+更新後、`esp32dev`・`adxl355`・`piezo`・`pioarduino-fake-sensor`の4env全てで
+コンパイル・リンクSUCCESSを確認した。
+
+### 事故再発: pioarduino-fake-sensorをビルドした直後、esp32devが再び汚染された
+
+上の確認作業中、`pioarduino-fake-sensor`をビルドした直後に`esp32dev`を再ビルド
+したところ、`esptool v5.3.0`・`PLATFORM: Espressif 32 (55.3.311)`と、**またしても
+pioarduinoが公式platformの既定解決先を上書きする既知の事故**が再発した
+（前述「事故: pioarduinoのインストールが公式platformの既定解決先を上書きしていた」
+と同一パターン）。今回は単独セッション内・順番のズレだけで踏んだ——並行セッションは
+無関係。`~/.platformio/platforms/espressif32`と`framework-arduinoespressif32*`を
+削除し公式7.0.1を再インストールして復旧、`esp32dev`・`adxl355`・`piezo`を
+再ビルドし直して正しいplatformでのSUCCESSを再確認した。**この事故はもはや
+「まれに起きる」ではなく「pioarduino-fake-sensorを本番envと同じセッションで
+ビルドするたび、順序に関わらず高確率で起きる」と考えるべき**——本番envの
+`platform`行のバージョン明示pin化(下記TODO)の優先度を上げる根拠が積み上がった。
+
+## NAMZ_HEAP_CHECKPOINTをビルドフラグで恒久的にトグルできるようにした
+
+「調査後に取り除く」前提のディスエーブルされていない診断だったが、
+`-DNAMZ_HEAP_CHECKPOINT_ENABLED=1`が定義されている時だけ`Serial.printf`に
+展開され、未定義（既定）では`((void)0)`に展開されるよう変更した。本番ビルドの
+バイナリに一切残らない一方、次に同種の断片化調査が必要になった時はビルドフラグ
+1行を足すだけで再利用できる——取り除く必要が無くなったため恒久化した。
+
+## 残っている調査用コードの棚卸し
+
+今回の一連の調査でコードに残った診断コードを洗い出した。上記2件（`NAMZ_HEAP_CHECKPOINT`）
+は対応済み、残りは未対応（要判断）:
+
+- `src/main.cpp`の`connectWifi()`末尾（458-466行付近）——`[namz-dns] connectWifi()
+  done: dns0=... dns1=...`を**ビルドフラグ無しで無条件に**出す。WiFi接続成功のたびに
+  1回だけなのでコスト自体は小さいが、本番機のシリアルログに恒久的に残る。
+  DNSサーバ破損の切り分け用に入れたもので、その調査自体は「訂正: err=-54は
+  型不一致の産物」以降、優先度が下がったまま止まっている
+- `firmware/patches/patch_network_manager.py`——3.x(`pioarduino-fake-sensor`env限定、
+  本番へは無関係)の`NetworkManager.cpp`に、`hasV4/hasV6/dns0/dns1`のログ・
+  `hostByName()`成否ログに加え、失敗時の`dns_table`/`dns_pcbs`生バイトダンプ
+  （nm経由で判明した固定アドレス直読み、再ビルドのたびに要再確認という前提付き）
+  まで無条件で焼き込んでいる。TCP接続タイムアウト調査（現在の最優先TODO）を
+  再開する時に使う想定で残しているが、今のところ放置されたまま
+- （今回の調査と無関係、2026-08-10からの既存debt）`src/main.cpp`の
+  `sBatchAllocFailCount`まわり（307-313行・358-367行）と`gBatchQueue full`ログ
+  （389-396行）——newBatch詰まり・キュー溢れのレート制限付き診断ログ。コード上に
+  「恒久化するなら整理すること」というXXXコメント付きで残ったまま、今回のセッション
+  以前からの積み残し
+
 ## TODO
 
 - [x] `NetworkClientSecure::connect()`の`hostByName()`失敗判定バグを
@@ -739,8 +798,10 @@ SUCCESSを確認——`esp_netif_tcpip_exec`はESP-IDF 4.4.7(2.x系)にも存在
       特定した** → 完了、上の節参照。`Uploader::begin()`/`loadOldestSpillPath()`
       （batch-uplink）のO(n)ディレクトリスキャンが原因で、2.x/3.xのコード自体は
       同一——3.xのDNSバグ由来の失敗蓄積が引き金になった二次的な症状と判断。
-- [ ] **`main.cpp`の`NAMZ_HEAP_CHECKPOINT`診断（6箇所）を本採用前に取り除く
-      こと。** 調査用途のみ。
+- [x] `main.cpp`の`NAMZ_HEAP_CHECKPOINT`を、ビルドフラグ
+      `-DNAMZ_HEAP_CHECKPOINT_ENABLED=1`で有効化する形に変更した → 完了。
+      既定(フラグ無し)では`((void)0)`に展開され本番ビルドには一切残らない。
+      取り除く必要が無くなったため恒久化した。
 - [x] ~~batch-uplink側の改善案（`loadOldestSpillPath()`のO(n)スキャン軽減）~~
       → 完了、実装・提出済み。**[batch-uplink#29](https://github.com/nna774/batch-uplink/pull/29)**
       （`opendir`/`readdir`への置き換え＋全件比較の撤去）。未マージ。
@@ -791,10 +852,17 @@ SUCCESSを確認——`esp_netif_tcpip_exec`はESP-IDF 4.4.7(2.x系)にも存在
       コンパイル・リンクは確認済みだが**実機書き込み確認はまだ**。
 - [ ] 3.x側パッチ込みでの長期観察（TFT・OTA・coredump・WDT・spillまわり）は
       まだ未実施——今回は短時間確認のみ。
-- [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
-      するか検討する**（名前衝突事故の再発防止策。今回もこの事故を再度踏んだ
-      ——検証のたびに再発しうるので優先度を上げてよいかもしれない。3.x移行を
-      保留する場合でも、pioarduino-fake-sensor envを今後も使う限り関係が残る）。
+- [ ] **本番env(`esp32dev`・`adxl355`とその派生・`piezo`)の`platform`行をバージョン
+      明示pinするか検討する**（名前衝突事故の再発防止策。今回3回目の再発を踏み、
+      「並行セッションが無くても単独セッション内の順序だけで高確率再発する」と
+      判明した——優先度を上げるべき状況になっている。3.x移行を保留する場合でも、
+      pioarduino-fake-sensor envを今後も使う限り関係が残る）。
+- [ ] `main.cpp`の`connectWifi()`末尾の`[namz-dns]`無条件ログ、および
+      `patches/patch_network_manager.py`の診断ログ・生バイトダンプ一式の扱いを
+      決める（「残っている調査用コードの棚卸し」節参照）。前者は本番ログに
+      恒久的に残る・後者はTCP接続タイムアウト調査を再開する時に使う可能性がある
+      ため、`NAMZ_HEAP_CHECKPOINT`と同様ビルドフラグ化するか、調査本格再開まで
+      現状維持するかは未決定
 - [ ] LittleFSの`Unable to allocate FD`が3.x固有か、この基板の使い回し影響かは
       未切り分けのまま（優先度は下がった）。
 - [x] ~~`NetworkManager::hostByName()`のバグがespressif/arduino-esp32側で
