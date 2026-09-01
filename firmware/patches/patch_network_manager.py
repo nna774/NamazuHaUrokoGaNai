@@ -18,8 +18,14 @@
 #    そのEAI_FAIL(202)をNetworkManager::hostByName()側のerr_t(=符号付き8bit、
 #    -128〜127)に代入すると 202-256=-54 に暗黙変換で切り詰められる——
 #    「err=-54」はEXFULL(テーブル満杯)ではなく、単なるこの型不一致バグの産物
-#    だったと判明。本当の失敗理由を見るため、netconn_gethostbyname_addrtype()を
-#    診断用に直接呼び、握りつぶされる前の生のerr_tを出す。
+#    だったと判明。診断用にnetconn_gethostbyname_addrtype()を直接呼び本物の
+#    err_t(=ERR_VAL(-6))を確認済み（この診断呼び出し自体はDNS問い合わせを
+#    追加発生させ実機WDTを誘発したため、確認後にパッチから取り除いた）。
+# 4. hostByName()失敗の瞬間、dns_table[]/dns_pcbs[]（nmで判明した固定アドレス、
+#    ビルドのたびに要再確認）の生バイトをダンプする。coredumpにはタスクスタック
+#    しか含まれずグローバル変数(BSS/DRAM)の検証ができないと判明したため
+#    （ESP32既定のcoredump形式の制約。JTAGでのライブデバッグが理想だが手元に
+#    無い）、実機で直接読む。
 #
 # 詳細: docs/log/2026-09-01-pioarduino-arduino3-poc.md
 
@@ -85,29 +91,40 @@ NEW_IPV4_SUCCESS_TAIL = (
     "  }\n"
     "\n"
     "  Serial.printf(\"[namz-dns] hostByName('%s') FAILED err=%d\\n\", aHostname, err);\n"
+    "  {\n"
+    "    // 診断: dns_table[]/dns_pcbs[]の生バイトをダンプする(nm経由で判明した\n"
+    "    // 固定アドレス。coredumpにはタスクスタックしか含まれずグローバル変数の\n"
+    "    // 検証ができないと判明したため、失敗の瞬間に直接読む。\n"
+    "    // docs/log/2026-09-01-pioarduino-arduino3-poc.md参照。アドレスは\n"
+    "    // ビルドのたびにnmで再確認すること(リンク順で変わりうる)。\n"
+    "    const uint8_t *namz_dns_table = (const uint8_t *)0x3ffc9310;\n"
+    "    Serial.printf(\"[namz-dns] dns_table raw @0x3ffc9310:\\n\");\n"
+    "    for (int i = 0; i < 512; i += 16) {\n"
+    "      Serial.printf(\"  +%03d:\", i);\n"
+    "      for (int j = 0; j < 16; j++) {\n"
+    "        Serial.printf(\" %02x\", namz_dns_table[i + j]);\n"
+    "      }\n"
+    "      Serial.printf(\"  |\");\n"
+    "      for (int j = 0; j < 16; j++) {\n"
+    "        uint8_t c = namz_dns_table[i + j];\n"
+    "        Serial.printf(\"%c\", (c >= 0x20 && c < 0x7f) ? c : '.');\n"
+    "      }\n"
+    "      Serial.printf(\"|\\n\");\n"
+    "    }\n"
+    "    const uint8_t *namz_dns_pcbs = (const uint8_t *)0x3ffc97b4;\n"
+    "    Serial.printf(\"[namz-dns] dns_pcbs raw @0x3ffc97b4:\\n\");\n"
+    "    for (int i = 0; i < 32; i += 16) {\n"
+    "      Serial.printf(\"  +%03d:\", i);\n"
+    "      for (int j = 0; j < 16; j++) {\n"
+    "        Serial.printf(\" %02x\", namz_dns_pcbs[i + j]);\n"
+    "      }\n"
+    "      Serial.printf(\"\\n\");\n"
+    "    }\n"
+    "  }\n"
     "  log_e(\"DNS Failed for '%s' with error '%d'\", aHostname, err);\n"
     "  return err;\n"
     "}"
 )
-
-# 診断: lwip_getaddrinfo()に握りつぶされる前の、netconn_gethostbyname_addrtype()の
-# 生のerr_tを見る(EAI_FAIL(202)への丸め・err_t(8bit)への切り詰めが起きる前)。
-OLD_AF_UNSPEC_CALL = (
-    "  hints.ai_family = AF_UNSPEC;\n"
-    "  err = lwip_getaddrinfo(aHostname, servname, &hints, &res);"
-)
-NEW_AF_UNSPEC_CALL = (
-    "  {\n"
-    "    ip_addr_t namz_diag_addr;\n"
-    "    err_t namz_raw_err =\n"
-    "        netconn_gethostbyname_addrtype(aHostname, &namz_diag_addr, NETCONN_DNS_IPV4);\n"
-    "    Serial.printf(\"[namz-dns] hostByName('%s') raw netconn_gethostbyname_addrtype "
-    "err_t=%d\\n\", aHostname, (int)namz_raw_err);\n"
-    "  }\n"
-    "  hints.ai_family = AF_UNSPEC;\n"
-    "  err = lwip_getaddrinfo(aHostname, servname, &hints, &res);"
-)
-
 
 def patch_network_manager():
     framework_dir = env.PioPlatform().get_package_dir("framework-arduinoespressif32")
@@ -134,7 +151,6 @@ def patch_network_manager():
     content = content.replace("NetworkManager::NetworkManager() {}", DNS_CLEAR_CACHE_HELPER, 1)
     content = content.replace(OLD_DNS_CLEAR_CACHE_CALL, NEW_DNS_CLEAR_CACHE_CALL, 1)
     content = content.replace(OLD_HINTS_BLOCK, NEW_HINTS_BLOCK, 1)
-    content = content.replace(OLD_AF_UNSPEC_CALL, NEW_AF_UNSPEC_CALL, 1)
     content = content.replace(OLD_IPV4_SUCCESS_TAIL, NEW_IPV4_SUCCESS_TAIL, 1)
 
     if content == original:

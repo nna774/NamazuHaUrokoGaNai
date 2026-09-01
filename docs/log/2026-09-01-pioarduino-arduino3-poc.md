@@ -492,6 +492,61 @@ do {
 再ビルドするか、JTAG等での実機ライブデバッグが要る。今回のPoCの範囲としては
 一旦ここで打ち止めが妥当。
 
+## coredump形式の制約でdns_table[]は読めないと判明、生メモリダンプ診断へ切り替え
+
+前段のcoredump（symbolize済み、実は`netconn_gethostbyname_addrtype`診断呼び出し
+自体がWDTを誘発したもの）で`dns_table`（nmで判明したアドレス`0x3ffc9310`）を
+GDBで直接覗こうとしたところ、**そもそもESP32既定のcoredump形式には各タスクの
+スタック/TCBしか含まれず、`dns_table`のようなグローバル変数(BSS/DRAM)は
+対象外**と判明した（`.coredump.tasks.data`セグメント一覧に該当アドレスが
+無いことで確認）。JTAGでのライブデバッグなら生メモリを直接読めるが手元に無い。
+
+代わりに、`hostByName()`失敗の瞬間に`dns_table`/`dns_pcbs`の生バイトを
+`Serial.printf`で直接ダンプする診断コードを`patch_network_manager.py`に追加した
+（シンボルではなく既知の固定アドレスへの直接キャストで読む、リビルドの
+たびにnmで再確認が必要）。危険な`netconn_gethostbyname_addrtype`診断呼び出し
+（WDT誘発の原因、目的は達成済み）はここで撤去した。
+
+なお`esp-coredump`のSHA256不一致チェックは今回も再発した（ビルドごとに
+`app_elf_sha256`フィールドだけが変わる既知の癖、PR#191の時と同じ）。
+`.venv`本体を書き換える権限は無かった（worktree保護）ため、job tmpへ
+`esp_coredump`パッケージをコピーしてその場でモンキーパッチし、
+`PYTHONPATH`で差し替えて実行する方式で回避した——`.venv`は無傷のまま。
+
+## 新しいクラッシュ発見: heap枯渇によるfopen()内lock初期化失敗
+
+上記の診断コードを仕込んで再度実機確認したところ、**今回は`hostByName()`が
+2回とも成功した**（`54.168.221.225`→再起動後`52.69.247.194`）——DNSは常に
+失敗するわけではなく、`dns0=dns1=8.8.4.4`のままでも解決できる時はできる
+（ユーザーの「それだけで引けなくなるのはおかしい」という指摘とも整合する）。
+ただしDNS成功後もTCP接続が`select()`タイムアウトで失敗する場合があった。
+
+さらに直後、**DNSとは無関係の新種のクラッシュ**が発生し、自動アップロード
+済みのcoredumpをsymbolizeして特定した:
+
+```
+Uploader::oldestQueuedStartUs → Uploader::loadOldestSpillPath
+  (batch-uplink Uploader.cpp、spillの中で一番古いファイルを探す)
+→ fs::File::openNextFile → VFSFileImpl::openNextFile → fopen()
+→ _fopen_r() → __sfp()（newlib、新しいFILE構造体確保）
+→ __retarget_lock_init_recursive() → lock_init_generic()
+→ abort()（newlib locks.c:77、ロック用mutexの確保に失敗すると即abort()する実装）
+```
+
+このタイミングで**spillファイルが184個**溜まっていた（`spill files on boot: 184`）
+——POSTが継続的に失敗し続けているせいで送れなかったバッチが延々と積み上がって
+いる状態。`loadOldestSpillPath()`はLittleFSのディレクトリを`openNextFile()`で
+辿るが、その内部で新しい`FILE*`用のロックをFreeRTOSミューテックスとして確保
+しようとして、**ヒープが確保に足りず即abort()**——DNSの一連の問題とは別に、
+**このビルド構成では一般的なヒープ枯渇に対する耐性自体が低い**ことを示す
+新しい証拠。`maxblock_8bit`がずっと900〜2500byte台で高止まりしている状態と
+符合する。
+
+「DNS失敗→spill蓄積→ヒープ圧迫→別のクラッシュ」という悪循環になっている
+可能性が高い——DNS/dns_table自体の破損を追うだけでなく、根本のヒープ余裕
+（TLS専用プール確保後の残り約90KB強で、そこからさらにbatchバッファプール
+54KB・spillの都度確保が食い合っている構図）自体を見直す必要があるかもしれない。
+
 ## TODO
 
 - [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
@@ -521,9 +576,23 @@ do {
       エントリ(`entry->name`)自体の破損を疑う根拠になった。ただし`dns_send()`
       は`liblwip.a`にプリコンパイル済みでこれ以上パッチできず、**今回のPoCの
       範囲としてはここが調査の到達点**。
-- [ ] （範囲外・将来やるなら）ESP-IDFのlwipコンポーネントを自前で再ビルドする
-      か、JTAG等での実機ライブデバッグで`dns_table[]`の実際の中身を見て、
-      `entry->name`が本当に破損しているかを直接確認する。
+- [x] coredumpから`dns_table`を直接読めるか試した → **不可と判明**（タスクの
+      スタック/TCBしか含まれない、ESP32既定のcoredump形式の制約）。代わりに
+      `hostByName()`失敗時に生バイトをSerial出力する診断へ切り替えた
+      （「coredump形式の制約で...」節参照）。まだ失敗ケースを捕まえられて
+      いない——DNSは常に失敗するわけではなく成功する時もあると判明したため。
+- [ ] **最優先: 上記の生バイトダンプで実際に`hostByName()`失敗を捕まえて
+      `dns_table`/`dns_pcbs`の中身を見る。** DNSは決定論的に毎回失敗する
+      わけではないと分かった（今回はconnectWifi後2回とも成功）——再現条件が
+      当初の想定より曖昧になっている。
+- [ ] **新規: `fopen()`内部のnewlibロック初期化失敗によるabort()を発見した**
+      （「新しいクラッシュ発見: heap枯渇によるfopen()内lock初期化失敗」節参照）。
+      `Uploader::loadOldestSpillPath()`がspill(184件溜まっていた)を
+      `openNextFile()`で辿る際、新規`FILE*`のミューテックス確保に失敗して
+      即abort()。DNS系の問題とは別の、**ヒープ全般の枯渇耐性の低さ**を示す
+      証拠——「DNS失敗→spill蓄積→ヒープ圧迫→別クラッシュ」の悪循環を疑う。
+      TLS専用プール確保後の残りヒープ配分（batchバッファプール54KB等との
+      食い合い）自体を見直す必要があるかもしれない。
 - [ ] `dns0`破損が`timesync::begin()`の**どの内部処理**(SNTPの`ntp.nict.jp`
       解決失敗？)によって引き起こされているかは、上記の壁により未特定のまま。
 - [ ] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）はまだ
