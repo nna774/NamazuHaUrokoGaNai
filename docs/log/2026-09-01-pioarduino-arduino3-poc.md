@@ -285,7 +285,7 @@ libraries/Network/src/NetworkManager.cpp:84`）自身が、IPv4/IPv6のグロー
 issueに同種の報告が無いか確認する価値はあるが、今回のPoCではそこまで手を
 広げていない。
 
-## 結論
+## 結論（初版）
 
 **「arduino-esp32 3.xへ移行すればPR#191のクラッシュが根治する」という当初の
 前提は、実機検証の結果誤りだったと判断できる。** 3.x系は別の、しかもより
@@ -298,6 +298,59 @@ arduino-esp32本体（`NetworkManager.cpp`）側の実装に起因するため�
 含め、**このPoCはここでいったん打ち止めとし、3.x移行は保留にするのが妥当**
 という評価に至った。
 
+**（後日追記）上記は`dns_clear_cache()`をローカルパッチで直すまでの暫定結論。
+実際に直したところ再現しなくなったため、下の「ローカルパッチで実機検証:
+再発しないことを確認」を経て評価を更新した——「結論（更新版）」参照。**
+
+## ローカルパッチで実機検証: 再発しないことを確認
+
+並行して[PR#193](https://github.com/nna774/NamazuHaUrokoGaNai/pull/193)で、
+2.x系device2でも`WiFiGenericClass::hostByName()`の同種バグ（[PR#191](https://github.com/nna774/NamazuHaUrokoGaNai/pull/191)参照）が再発していたと判明。
+2.x側には既にupstreamの修正が存在すると分かった:
+[espressif/arduino-esp32#8672](https://github.com/espressif/arduino-esp32/pull/8672)
+（2023-12-05マージ、`dns_gethostbyname()`を`esp_netif_tcpip_exec()`経由で
+TCPIPスレッド上に委譲する、1ファイル23行追加の小さな修正）——ただし`release/v2.x`
+ブランチには未バックポート。現在インストールされている実際の2.0.17の
+`WiFiGeneric.cpp`を確認したところ、この修正がほぼそのまま当たる構造（行番号
+まで一致）だった。
+
+ここから「3.x側の`dns_clear_cache()`にも同じ手法（`esp_netif_tcpip_exec()`で
+包む）を適用すれば直せるのでは」という発想に至り、`~/.platformio`上の
+`framework-arduinoespressif32`(3.3.11)の`NetworkManager.cpp`を直接パッチして
+検証した:
+
+```cpp
+// hostByName()内、80行目付近
+- dns_clear_cache();
++ esp_netif_tcpip_exec(namz_dns_clear_cache_tcpip_ctx, nullptr);
+  // namz_dns_clear_cache_tcpip_ctx()はdns_clear_cache()を呼ぶだけのラッパー
+  // (esp_netif_tcpip_execが要求するesp_err_t(*)(void*)シグネチャに合わせるため)
+```
+
+`pioarduino-fake-sensor`envでビルド・テスト機へ書き込み、**45秒間の観察で
+複数回のPOSTリトライ（＝複数回の`hostByName()`呼び出し）を経ても、
+`udp_new_ip_type`assert・パニック・再起動が一切発生しないことを確認した**。
+POSTが`connection refused`で失敗し続ける件は残っているが、これはクラッシュとは
+無関係の別問題（TODO参照、未着手のまま）。
+
+なおこのパッチは`~/.platformio`（プロジェクト外のグローバルパッケージキャッシュ）
+への直接編集による**使い捨ての検証**であり、リポジトリには反映されていない。
+本採用する場合は`firmware/patches/`への`.patch`ファイル化＋`extra_scripts`での
+ビルド時適用（`get_fw_version.py`と同じ仕組み）が必要——次のステップとして
+TODOに追加した。
+
+## 結論（更新版）
+
+**「3.xへ移行すればPR#191のクラッシュが根治する」という前提は、`hostByName()`
+関数をそのまま使う限りでは誤りだったが、`dns_clear_cache()`呼び出しに
+PR#8672と同じ手法の1行パッチを当てれば3.x側も直せる見込みが立った。**
+2.x側（`WiFiGeneric.cpp`、PR#8672のバックポート）・3.x側
+（`NetworkManager.cpp`、`dns_clear_cache()`の委譲）双方に同種のローカルパッチが
+必要になる——**3.x移行を「保留」から「パッチ込みで再検討」に格上げできる状態**。
+ただし今回の検証はまだ「使い捨てのローカル編集で45秒間クラッシュしなかった」
+段階に留まり、ビルド時パッチとしての本実装・長期観察・2.x側パッチの同等検証は
+未着手。
+
 ## TODO
 
 - [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
@@ -306,6 +359,17 @@ arduino-esp32本体（`NetworkManager.cpp`）側の実装に起因するため�
 - [x] `connectWifi()`（`main.cpp`・`piezo_main.cpp`）に3.x系向けの対処
       （`WiFi.setAutoReconnect(false)`）を入れて実機で確認した——解消を確認済み。
       （3.x移行自体を保留する場合でも、この変更は2.x側にも実害が無く残して良い）
+- [x] ~~`dns_clear_cache()`をPR#8672と同じ手法でパッチできるか、ローカル編集で
+      検証する。~~ → 完了。45秒間の実機観察でクラッシュ再発なしを確認した。
+- [ ] **最優先: 上記のローカル編集を`firmware/patches/`の`.patch`ファイル＋
+      `extra_scripts`によるビルド時適用として本実装する**（2.x側の
+      `WiFiGeneric.cpp`(PR#8672バックポート)・3.x側の`NetworkManager.cpp`
+      (`dns_clear_cache()`委譲)の両方）。現状は`~/.platformio`への使い捨て編集
+      でしかなく、リポジトリには何も反映されていない。
+- [ ] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）の実機検証はまだ
+      行っていない——device2で再発した本題はこちら。
+- [ ] 3.x側パッチ込みでの長期観察（TFT・OTA・coredump・WDT・spillまわり）は
+      まだ未実施——今回は45秒の短時間確認のみ。
 - [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
       するか検討する**（名前衝突事故の再発防止策。今回もこの事故を再度踏んだ
       ——検証のたびに再発しうるので優先度を上げてよいかもしれない。3.x移行を
