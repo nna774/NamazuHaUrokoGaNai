@@ -241,21 +241,79 @@ coredump自動回収パイプライン自体は3.x環境でも正しく機能し
 特定するまでは結論を出せない。1回の観測に基づいて「3.xでも直っていない」と
 断定するのも早計だが、少なくとも「移行すれば直る」と楽観視できる材料ではない。
 
+## symbolize結果: 3.x固有の新種バグと特定できた（PR#191とは別物）
+
+`coredump/4294967295/fd1b81a-dirty-00001788251351517137.bin`をS3
+（`namazu-data-486414336274`バケット。firmware/README.mdが指すのは
+`namazu-dashboard-...`だが、coredump自動送信の実際の保存先はdataバケット側
+——READMEの例示が古い可能性、要確認）から取得し、この時ちょうど手元に残っていた
+実体の`.pio/build/pioarduino-fake-sensor/firmware.elf`（再ビルドではなく実際に
+焼いたのと同一バイナリ）で`esp-coredump info_corefile --core-format raw`
+（pioarduinoの`xtensa-esp-elf-gdb`使用）を実行——フレーム破壊のない綺麗な
+バックトレースが取れた。
+
+```
+uploaderTask [main.cpp:657]
+→ Uploader::pump → Uploader::postBatch [batch-uplink Uploader.cpp]
+→ HTTPClient::POST → HTTPClient::sendRequest → HTTPClient::connect
+→ NetworkClientSecure::connect
+→ NetworkManager::hostByName() [NetworkManager.cpp:84] ★ここ
+→ dns_clear_cache()
+→ （保留中だったSNTPの"pool.ntp.org"問い合わせの完了コールバックへ再入）
+→ sntp_dns_found → sntp_try_next_server → sntp_request
+→ dns_gethostbyname → dns_enqueue → dns_alloc_pcb → dns_alloc_random_port
+→ udp_new_ip_type → assert（TCPIPスレッドロックが無い）
+```
+
+`NetworkManager::hostByName()`（arduino-esp32 3.x、`framework-arduinoespressif32/
+libraries/Network/src/NetworkManager.cpp:84`）自身が、IPv4/IPv6のグローバル
+アドレス有無が前回呼び出しから変化した時に`dns_clear_cache()`というlwIP内部
+関数を**TCPIPスレッドへ委譲せず直接呼んでいる**。この関数は単なるキャッシュ
+クリアではなく、保留中の全DNS問い合わせのコールバックをその場で同期的に叩く
+実装で、今回はたまたま裏で進行中だったSNTPの"pool.ntp.org"問い合わせの完了処理に
+再入し、そこが新規UDP確保をしようとしてassertに落ちた。
+
+`hasGlobalV4`/`hasGlobalV6`はstatic変数で初期値`false`なので、**WiFi接続後に
+`hostByName()`が最初に呼ばれた瞬間、ほぼ確実にこの分岐へ入る**——起動後10〜15秒
+・2回連続で踏んだ理由はこれで説明がつく。
+
+**PR#191（2.x系）の`WiFiGeneric::hostByName()`が`dns_gethostbyname()`を直接
+呼ぶ問題とは別物の、3.x系の`NetworkManager::hostByName()`固有の新しいバグ。**
+2.x側は「稀にしか起きないスレッド競合レース」だったのに対し、こちらは条件が
+揃えば起動直後にほぼ決定論的に踏む——**3.x系の方がむしろ踏みやすい、別種の
+同カテゴリ(lwIP thread-safety違反)バグ**。espressif/arduino-esp32のGitHub
+issueに同種の報告が無いか確認する価値はあるが、今回のPoCではそこまで手を
+広げていない。
+
+## 結論
+
+**「arduino-esp32 3.xへ移行すればPR#191のクラッシュが根治する」という当初の
+前提は、実機検証の結果誤りだったと判断できる。** 3.x系は別の、しかもより
+高頻度で踏みやすいlwIP thread-safety違反を新たに抱えている。この特定のバグは
+arduino-esp32本体（`NetworkManager.cpp`）側の実装に起因するため、自前コードの
+修正では直せない——上流の修正を待つか、`hostByName()`を呼ぶ経路自体を避ける
+（例: 起動直後に安全な文脈で一度だけhostByNameを済ませておく、等）ような
+回避策が要る。**この状態で3.x移行を進める積極的な理由は無くなった**——
+現状の2.x起因のクラッシュは自動再起動で自己回復しており緊急性が無いことも
+含め、**このPoCはここでいったん打ち止めとし、3.x移行は保留にするのが妥当**
+という評価に至った。
+
 ## TODO
 
-- [ ] **最優先: 今回踏んだ`udp_new_ip_type`assertのcoredumpをsymbolizeし、
-      PR#191と同じ呼び出し経路（`hostByName()`系）かどうか、どのタスク・
-      どの操作から呼ばれたかを特定する。** これが「3.x移行の主目的（クラッシュ
-      根治）が果たされているか」の核心。
-- [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
-      するか検討する**（名前衝突事故の再発防止策。今回もこの事故を再度踏んだ
-      ——検証のたびに再発しうるので優先度を上げてよいかもしれない）。
+- [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
+      経路かを特定する。~~ → 完了。**PR#191とは別物、`NetworkManager::hostByName()`
+      内の`dns_clear_cache()`起因の3.x固有バグと判明。**
 - [x] `connectWifi()`（`main.cpp`・`piezo_main.cpp`）に3.x系向けの対処
       （`WiFi.setAutoReconnect(false)`）を入れて実機で確認した——解消を確認済み。
-- [ ] LittleFSの`Unable to allocate FD`が3.x固有か、この基板の使い回し影響かを
-      切り分ける（フォーマットし直して再試行、等）。
+      （3.x移行自体を保留する場合でも、この変更は2.x側にも実害が無く残して良い）
+- [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
+      するか検討する**（名前衝突事故の再発防止策。今回もこの事故を再度踏んだ
+      ——検証のたびに再発しうるので優先度を上げてよいかもしれない。3.x移行を
+      保留する場合でも、pioarduino-fake-sensor envを今後も使う限り関係が残る）。
+- [ ] LittleFSの`Unable to allocate FD`が3.x固有か、この基板の使い回し影響かは
+      未切り分けのまま（優先度は下がった）。
 - [ ] POSTが`connection refused`(TLS connect failed: -1)で継続的に失敗している
-      原因を切り分ける（テスト機のdevice_id・エンドポイント設定の問題か、3.x固有か）。
-- [ ] 上記の切り分け次第では、**3.x移行そのものを見送る判断もありうる**——
-      「移行すれば直る」という前提が崩れた場合、移行コスト（batch-uplink・
-      connectWifi()の変更、pioarduino運用の複雑さ）に見合わなくなる可能性がある。
+      原因も未切り分けのまま（優先度は下がった）。
+- [ ] `NetworkManager::hostByName()`のバグがespressif/arduino-esp32側で
+      既知issueになっているか確認する（未着手）。もし上流で近く修正される
+      見込みが立てば、3.x移行の再検討材料になる。
