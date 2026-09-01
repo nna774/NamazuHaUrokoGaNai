@@ -173,19 +173,38 @@ E esp_littlefs: Unable to allocate FD
 LittleFSの`Unable to allocate FD`も同時に出ており、こちらはこの基板が過去の
 別PoC（tls-alloc-probe等）で使い回されている影響の可能性もあり、3.x固有かは未切り分け。
 
-**現時点では「環境要因（このベンチのAP電波状況）」か「3.x系での再接続ロジックの
-非互換」かを切り分けられていない。** 同じ場所・同じ基板に2.x系ファームを焼いて
-同条件で再現するかのA/Bが最も確実な切り分け方法。
+**環境要因ではない**——ユーザーから、同じ場所・同じ基板構成で2.x系ファームは
+問題なく動いていたと確認が取れたため、ベンチのAP電波状況が原因という線は消えた。
+
+### 既知のarduino-esp32 3.x系バグと判明
+
+Web検索したところ、まったく同じ症状（`wifi:sta is connecting, cannot set config`、
+core 3.3系で発生、2.x/3.0時代には無かった）が
+[HomeSpan#1148](https://github.com/HomeSpan/HomeSpan/discussions/1148)で報告されて
+いた。原因はarduino-esp32 3.x系で**WiFiの自動再接続(auto-reconnect)がバックグラウンド
+で有効になっている**こと——`connectWifi()`（`WiFi.status()`を見て自分で`WiFi.begin()`
+を呼び直すだけの2.x時代からの実装）が、自動再接続が接続試行中のところへ重ねて
+`WiFi.begin()`を呼んでしまい、`STA.cpp`側の状態管理と衝突して二度と繋がらなくなる。
+回避策として`WiFi.setAutoReconnect(false)`を`begin()`前に呼ぶ、または再接続前に
+明示`WiFi.disconnect()`を挟む、が報告されている。
+
+**「3.x移行は自前コードほぼ無改造で済みそう」という当初の評価は訂正が要る**——
+少なくとも`connectWifi()`（`main.cpp`・`piezo_main.cpp`双方にある同型の実装）は
+3.x系向けに手を入れる必要がある。
+
+LittleFSの`Unable to allocate FD`は、この基板が過去の別PoC（tls-alloc-probe等）で
+使い回されている影響の可能性が高く、3.x固有かは未切り分けのまま。
 
 ## TODO
 
 - [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
       するか検討する**（名前衝突事故の再発防止策。pinする/
       `PLATFORMIO_CORE_DIR`で隔離する/様子見、のどれにするかはユーザー検討中）。
-- [ ] **WiFi再接続でのHANDSHAKE_TIMEOUTループ・LittleFS FDエラーが環境要因か
-      3.x固有の回帰かを切り分ける**（同じ基板・同じ場所で2.x系ファームとA/B比較）。
-- [ ] 上記が3.x固有と分かった場合、`connectWifi()`の再接続ロジック
-      （`WiFi.begin()`を接続処理中に呼び直さないようにする等）の対処を検討する。
+- [ ] `connectWifi()`（`main.cpp`・`piezo_main.cpp`）に3.x系向けの対処
+      （`WiFi.setAutoReconnect(false)`または再接続前の明示`disconnect()`）を入れて
+      再度実機で確認する。
+- [ ] LittleFSの`Unable to allocate FD`が3.x固有か、この基板の使い回し影響かを
+      切り分ける（フォーマットし直して再試行、等）。
 - [ ] PR#191の本題であるlwIP内NULL参照crashが3.x系で本当に再発しないかは、
       今回の短時間観察では確認できていない——長期間の稼働観察が必要。
 - [ ] 十分な期間問題が出なければ、本番2台への展開を検討する（platform行の切り替えのみで
