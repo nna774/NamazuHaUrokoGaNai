@@ -125,23 +125,30 @@ os.PathLike object, not NoneType`でビルド失敗）。教訓: **同じグロ�
 - または`pioarduino-fake-sensor`のビルドだけ`PLATFORMIO_CORE_DIR`で
   別のホームディレクトリに隔離する。
 
-このPoCの範囲では前者（本番envのバージョンpin化）を実施していない
-（`platformio.ini`本体への変更提案はユーザー確認してから）。
+このPoCの範囲では前者（本番envのバージョンpin化）を実施していない。
+**どうするか(pinするか/PLATFORMIO_CORE_DIRで隔離するか)はユーザーが検討中——
+下のTODOに置く。**
 
-## 現時点の評価・次にできること
+## 現時点の評価
 
-- 3.x移行そのものは、ここまで見た限り**大掛かりな書き直しにはならなそう**——自前コードは
-  ほぼ無改造、必要な修正はbatch-uplink側の1行のみ（今のところ判明している範囲では）。
-  ただしこれはコンパイルが通っただけの確認であり、実機での動作（TFT_eSPI描画・OTA・
-  coredump・WDT・パーティション境界など）は未検証。
-- 進めるなら次はどちらか:
-  1. [batch-uplink#28](https://github.com/nna774/batch-uplink/pull/28)をレビュー・マージし、
-     新タグ（例: v3.3.1）を切る（Electabuzzにも影響する変更なので要相談・提出済み）。
-  2. それを`pioarduino-fake-sensor`env（本番envとは別のまま）に取り込み、予備基板へ
-     実際に焼いて長期間動かし、TFT_eSPI・OTA・coredump自動送信・WDT・DNS解決まわりが
-     実機で問題なく動くか確認する。
-  3. 十分な期間問題が出なければ、本番2台への展開を検討する（platform行の切り替えのみで
-     済むはずだが、切り替え時は両機とも予備機同様の長期観察を経てから）。
-- 「今すぐ3.xへ全面移行」ではなく、段階的に確認しながら進める前提——現状の2.x起因の
-  クラッシュは自動再起動で自己回復しており、緊急性は無い
-  （[2026-08-31-device1-lwip-null-deref-coredump.md](2026-08-31-device1-lwip-null-deref-coredump.md)）。
+3.x移行そのものは、ここまで見た限り**大掛かりな書き直しにはならなそう**——自前コードは
+ほぼ無改造、必要な修正はbatch-uplink側の1行のみ（今のところ判明している範囲では）。
+コンパイルは2.x（公式・現行本番）・3.x（pioarduino）双方でSUCCESSを確認済み。
+ただし実機での動作（TFT_eSPI描画・OTA・coredump・WDT・パーティション境界など）は
+まだ未検証。「今すぐ3.xへ全面移行」ではなく、段階的に確認しながら進める前提——
+現状の2.x起因のクラッシュは自動再起動で自己回復しており、緊急性は無い
+（[2026-08-31-device1-lwip-null-deref-coredump.md](2026-08-31-device1-lwip-null-deref-coredump.md)）。
+
+## TODO
+
+- [ ] **本番env(`esp32dev`・`adxl355`とその派生)の`platform`行をバージョン明示pin
+      するか検討する**（今回の名前衝突事故の再発防止策。pinする/
+      `PLATFORMIO_CORE_DIR`で隔離する/様子見、のどれにするかはユーザー検討中）。
+- [ ] batch-uplinkに新タグを切る（`#28`はmasterへマージ済み(`6ec000c`)だが未タグ。
+      このリポジトリの流儀は`#master`直指定禁止・必ずタグpinのため、
+      `pioarduino-fake-sensor`envのpinを更新するには先にタグが要る）。
+- [ ] 新タグを`pioarduino-fake-sensor`envのpinへ反映し、予備基板へ実際に焼いて
+      長期間動かし、TFT_eSPI・OTA・coredump自動送信・WDT・DNS解決まわりが
+      実機で問題なく動くか確認する。
+- [ ] 十分な期間問題が出なければ、本番2台への展開を検討する（platform行の切り替えのみで
+      済むはずだが、切り替え時は両機とも予備機同様の長期観察を経てから）。
