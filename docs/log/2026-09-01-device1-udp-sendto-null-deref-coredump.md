@@ -80,14 +80,72 @@ buffer overflow修正・キャッシュクリアdeadlock対策)は`git compare`�
 ままで、**ESP-IDFを上げても直る保証はない**。`entry->pcb_idx`と`dns_pcbs[]`の
 どちらが壊れているかはupstream側でも未解明。
 
+## さらに深掘り: 「値がどこから来るか」の入口が特定できた
+
+3週間で2回という頻度をどう見るか確認するため、`pcb`(=1)という不正値がどの経路で
+紛れ込みうるかをさらに追った。
+
+**`dns.c`冒頭のドキュメントコメントに明記されていた**:
+
+> All functions must be called from TCPIP thread.
+> @see @ref netconn_common for thread-safe access.
+
+つまりlwIPの生API(`dns_gethostbyname()`等)は**tcpip_threadからしか呼んではいけない**
+契約になっている。ところがarduino-esp32の`WiFiGenericClass::hostByName()`
+(`WiFiGeneric.cpp:1574`)は、この生APIを**呼び出し元タスクからそのまま直接呼ぶ**:
+
+```cpp
+err_t err = dns_gethostbyname(aHostname, &addr, &wifi_dns_found_callback, &aResult);
+```
+
+スレッドセーフな`netconn_gethostbyname()`（tcpip_threadへメッセージ経由で処理を
+委譲する版）を使わず、生APIを直接呼んでいる——**これ自体がlwIPの契約違反**。
+
+このビルドは`LWIP_TCPIP_CORE_LOCKING`が無効
+(`sdkconfig`: `# CONFIG_LWIP_TCPIP_CORE_LOCKING is not set`)なため、アプリ側から
+`LOCK_TCPIP_CORE()`で握って回避する手段も無い（ロック自体が意味を持たない設定）。
+
+**さらにタスクの割り当てを確認したところ、両者は同じCPUコア(core0)で衝突しうる
+配置だった**（`firmware/src/main.cpp`）:
+
+- `tiT`(tcpip_thread): core0固定・優先度18(`CONFIG_LWIP_TCPIP_TASK_PRIO=18`、
+  `CONFIG_TCPIP_TASK_AFFINITY_CPU0=y`)
+- `uploaderTask`: core0固定・優先度**1**(`main.cpp:852`、`WiFiClientSecure::connect()`
+  →`hostByName()`を呼ぶのはこのタスク)
+
+同じcore0上で、優先度18の`tiT`はいつでも優先度1の`uploaderTask`を横取り(preempt)できる。
+`dns_enqueue()`/`dns_gethostbyname_addrtype()`は`dns_table[]`・`dns_pcbs[]`
+（どちらも非atomicなグローバル静的配列）を複数ステップで読み書きするため、
+**`uploaderTask`がその途中でpreemptされ、`tiT`が`dns_tmr()`で同じ構造体を触ると、
+中途半端に書きかけの状態を読んでしまう**——これが`pcb`に整数`1`のような
+「本物のポインタでは有り得ない値」が入る具体的な入口だと考えられる。真のSMP競合
+（2コア同時書き込み）ではなく、**同一コア上の優先度によるpreemptionレース**。
+
+この機構であれば、無関係な他ハードウェア(arduino-esp32#9388)でも再現する理由に
+説明がつく——`hostByName()`とタスク優先度18のtcpip_threadという構成はarduino-esp32を
+使う限りほぼ誰でも同じだからだ。発生頻度が低いのは、この競合が起きるには
+「DNSキャッシュが切れて`dns_enqueue()`の再割り当て経路(`dns_alloc_pcb()`)まで
+実際に踏む」かつ「その数命令の隙間にちょうど`tiT`が割り込む」という2条件が
+同時に揃う必要があるため——3週間に2回という頻度は、狙って再現するには稀だが
+運用上は無視できない程度、という理解で辻褄が合う。
+
 ## 現状の評価
 
 device1は現在`e82f81e`・`reset_reason: PANIC`・`online: true`・heap正常で稼働中——今回の
-パニックから正常に再起動できている。**これはarduino-esp32同梱lwIPの既知・未解決の
-latentバグであり、自前のコードのバグではない。** 発生頻度は3週間で2回・両方とも
-自動復旧しており実害は無い。upstreamでwontfix済み・自前でパッチできない以上、これ以上
-追っても収穫は薄いと判断し、追加調査は行わない（再発頻度が上がる・実害が出るまでは
-経過観察のままとする）。
+パニックから正常に再起動できている。**upstream(lwIP/arduino-esp32)側にピンポイントの
+fixは無いが、機構自体は「`hostByName()`がlwIPのスレッド契約(tcpip_threadからしか
+呼ぶな)を破っている」という具体的な設計上の問題として説明がついた。** `lwip.a`は
+プリコンパイル済みで直接パッチは当てられないが、**自前のファーム側での回避策は
+理論上ありうる**（今回は調査止まりで実装はしていない）:
+
+- `uploaderTask`の優先度(現在1)を`tiT`(優先度18)以上に上げ、preemptされる窓自体を
+  無くす——ただしtcpip_thread側の処理を遅らせる副作用がある変更で、影響範囲の検討が要る
+- 自前でDNS解決結果をキャッシュし、`WiFiClientSecure::connect(hostname, ...)`が
+  毎回`hostByName()`（＝`dns_enqueue()`の再割り当て経路）を踏む頻度自体を下げる
+- 固定IPで接続し、DNS解決そのものを経路から外す（IP変更時の追従は別途必要）
+
+どれも本筋への影響やトレードオフがあるためユーザー判断待ちとし、今回は追加調査を
+ここで区切る。発生頻度(3週間で2回・両方自動復旧)を踏まえ、経過観察を継続する。
 
 ## 次に何が可能になったか
 
