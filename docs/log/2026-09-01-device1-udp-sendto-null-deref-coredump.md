@@ -129,14 +129,45 @@ err_t err = dns_gethostbyname(aHostname, &addr, &wifi_dns_found_callback, &aResu
 同時に揃う必要があるため——3週間に2回という頻度は、狙って再現するには稀だが
 運用上は無視できない程度、という理解で辻褄が合う。
 
+## `hostByName()`のスレッド契約違反そのものについて: 報告済み・3.x系列でのみ修正済み
+
+arduino-esp32のissue検索で確定した。**[espressif/arduino-esp32#8672](https://github.com/espressif/arduino-esp32/pull/8672)
+「Fix race condition in WiFiGenericClass::hostByName」(2023-12-05マージ)がまさに
+この問題を報告・修正したPR**——本文に「`dns_gethostbyname`はlwIPのTCP/IPコンテキストで
+実行される必要がある(`LWIP_CHECK_THREAD_SAFETY`で確認できる)。Arduinoタスクから呼ぶと
+lwIP内部やより下位レイヤでレース条件を引き起こし得る」と明記されている。原因になった
+症状の一例として挙げているのは「Ethernetバッファの破損で送信不能になり続ける」——今回の
+`pcb=1`とは別の壊れ方だが、同じ根本原因(生APIをtcpip_thread外から呼ぶ)から症状が
+枝分かれることを裏付ける。修正は`esp_netif_tcpip_exec()`で`dns_gethostbyname()`本体を
+tcpip_thread側で実行し、呼び出し側タスクだけをブロックさせる方式。
+
+**ただしこの修正は`WiFiGeneric.cpp`(2.xのAPI)に対するもので、うちが使っている
+`release/v2.x`ブランチには今も反映されていない**（今回`raw.githubusercontent.com`で
+直接確認、`dns_gethostbyname()`呼び出しのまま）。arduino-esp32は2023年に
+「Network Refactoring」([PR #8760](https://github.com/espressif/arduino-esp32/pull/8760))
+で`WiFiGeneric.cpp`の実装を新設の`NetworkManager.cpp`に置き換えており、**3.x系列
+(`3.0.0`以降)の`NetworkManager::hostByName()`は生API`dns_gethostbyname()`ではなく
+POSIX風の`lwip_getaddrinfo()`（netconn経由でスレッドセーフ）を使うよう完全に
+書き直されている**——結果的にこの手のレースは3.x系列では構造的に起きない。
+
+つまり**うちのビルド(arduino-esp32 2.0.x系列、ESP-IDF 4.4.7)はこの問題が直る前の
+系列に留まっており、2.xがEOLである以上バックポートも期待できない。実質的な修正手段は
+arduino-esp32 3.x(ESP-IDF 5.x)への移行のみ**——ただしこれはビルドシステム・ライブラリ
+API・batch-uplinkとの整合性を含む大きな移行で、今回の調査の範囲を超える。関連の
+[#8221](https://github.com/espressif/arduino-esp32/issues/8221)（DNSサーバIPが
+実行中に化ける別症状の報告）も同じ生API直呼びの周辺で起きたと見られる先行報告として
+参考になる。
+
 ## 現状の評価
 
 device1は現在`e82f81e`・`reset_reason: PANIC`・`online: true`・heap正常で稼働中——今回の
-パニックから正常に再起動できている。**upstream(lwIP/arduino-esp32)側にピンポイントの
-fixは無いが、機構自体は「`hostByName()`がlwIPのスレッド契約(tcpip_threadからしか
-呼ぶな)を破っている」という具体的な設計上の問題として説明がついた。** `lwip.a`は
-プリコンパイル済みで直接パッチは当てられないが、**自前のファーム側での回避策は
-理論上ありうる**（今回は調査止まりで実装はしていない）:
+パニックから正常に再起動できている。**「`hostByName()`がlwIPのスレッド契約
+(tcpip_threadからしか呼ぶな)を破っている」ことは`espressif/arduino-esp32#8672`で
+報告・修正済みだが、その修正はarduino-esp32 3.x系列(NetworkManager書き直し)に
+限られ、うちが使う2.x系列(`release/v2.x`)には反映されていない、EOL済みの系列。**
+`lwip.a`はプリコンパイル済みで直接パッチは当てられず、実質的な根治策は
+arduino-esp32 3.x/ESP-IDF 5.xへの移行のみ。自前ファームでの部分的な回避策は
+理論上ありうる（今回は調査止まりで実装はしていない）:
 
 - `uploaderTask`の優先度(現在1)を`tiT`(優先度18)以上に上げ、preemptされる窓自体を
   無くす——ただしtcpip_thread側の処理を遅らせる副作用がある変更で、影響範囲の検討が要る
@@ -144,8 +175,9 @@ fixは無いが、機構自体は「`hostByName()`がlwIPのスレッド契約(t
   毎回`hostByName()`（＝`dns_enqueue()`の再割り当て経路）を踏む頻度自体を下げる
 - 固定IPで接続し、DNS解決そのものを経路から外す（IP変更時の追従は別途必要）
 
-どれも本筋への影響やトレードオフがあるためユーザー判断待ちとし、今回は追加調査を
-ここで区切る。発生頻度(3週間で2回・両方自動復旧)を踏まえ、経過観察を継続する。
+どれも本筋への影響やトレードオフ、あるいは大規模移行を伴うためユーザー判断待ちとし、
+今回は追加調査をここで区切る。発生頻度(3週間で2回・両方自動復旧)を踏まえ、経過観察を
+継続する。
 
 ## 次に何が可能になったか
 
