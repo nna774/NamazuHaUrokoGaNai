@@ -457,6 +457,13 @@ static void connectWifi() {
   }
   Serial.printf("\n[wifi] %s\n",
                 WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "FAILED");
+  // NamazuHaUrokoGaNai診断: DHCPが配ったDNSサーバがconnectWifi()直後の時点で
+  // 何になっているかを見る(docs/log/2026-09-01-pioarduino-arduino3-poc.md、
+  // hostByName()失敗時にdns0=dns1=8.8.4.4という期待値とズレた値が出た件の切り分け)。
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[namz-dns] connectWifi() done: dns0=%s dns1=%s\n",
+                  WiFi.dnsIP(0).toString().c_str(), WiFi.dnsIP(1).toString().c_str());
+  }
 }
 
 // --- OTA更新の安全な停止・再開（docs/ota.md）---

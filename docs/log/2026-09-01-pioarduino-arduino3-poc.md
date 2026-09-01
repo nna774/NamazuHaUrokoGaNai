@@ -398,6 +398,32 @@ platform=pioarduino(55.3.311)・framework=公式2.0.17という**壊れた組み
   さらに低い(900〜2500)水準で高止まりしている——ただし`kMaxRamBatches`は
   既に2に設定済みで、この対策だけでは足りていない
 
+## dns0破損のタイミングを特定: connectWifi()直後は正常、timesync::begin()区間で壊れる
+
+`main.cpp`の`connectWifi()`末尾にも診断ログを追加し、リセット直後から捕捉した:
+
+```
+[namz-dns] connectWifi() done: dns0=8.8.8.8 dns1=8.8.4.4   ← WiFi接続直後は正しい
+...(約5秒後、最初のhostByName呼び出し時)...
+[namz-dns] hostByName(...) dns0=8.8.4.4 dns1=8.8.4.4        ← dns0がdns1と同じ値に
+```
+
+**DHCPは正しく`8.8.8.8`/`8.8.4.4`を配っている（ユーザーの認識通り）。
+`connectWifi()`が返った直後の時点ではまだ正しい値が入っている。** その後
+`main.cpp`が呼ぶ`timesync::begin(kNtpServer1="ntp.nict.jp",
+kNtpServer2="pool.ntp.org", ...)`（`main.cpp:810`、ESP-IDF標準SNTPクライアント
+`esp_sntp_setservername`/`esp_sntp_init`を叩くだけ、DNS設定を直接触るコードは
+batch-uplinkの`TimeSync.cpp`には無い）の区間で`dns0`が壊れる。
+
+lwIP本家`dns.c`を読んだ範囲では、個々のDNS問い合わせが失敗時に`server_idx`を
+進めてサーバを切り替える仕組みはあるが、グローバルな`dns_servers[]`配列自体を
+書き換えるコードは見当たらなかった——つまり内部フォールバックの副作用ではなく、
+**ESP-IDF側の別のコードパス（netif/DHCP/SNTP関連のどこか）が
+`esp_netif_set_dns_info()`相当を明示的に呼んで上書きしている**可能性が高い。
+SNTPが最初に解決しようとする`ntp.nict.jp`（`kNtpServer1`）の解決自体が
+このゲストVLANで失敗し、それが何らかの経路で`dns0`破損・DNSテーブル占有
+（前段の`err=-54`）の連鎖の起点になっている、というのが今のところ一番有力な仮説。
+
 ## TODO
 
 - [x] ~~`udp_new_ip_type`assertのcoredumpをsymbolizeし、PR#191と同じ呼び出し
@@ -409,14 +435,25 @@ platform=pioarduino(55.3.311)・framework=公式2.0.17という**壊れた組み
 - [x] `dns_clear_cache()`パッチを`firmware/patches/patch_network_manager.py`
       （`extra_scripts`でビルド時自動適用）として本実装した。DNS解決の診断ログも
       同時に追加、実機で動作確認済み。
-- [ ] **最優先: `dns0=dns1=8.8.4.4`（期待値は`8.8.8.8`/`8.8.4.4`の2種）になる原因を
-      特定する。** `connectWifi()`直後（WiFi接続直後、DHCP完了直後）の時点でも
-      同じ値になっているか、それとも再接続を経るうちにこうなるのかを切り分ける
-      診断ログを追加して確認する。
+- [x] `dns0=dns1=8.8.4.4`になるタイミングを切り分けた → 完了、下記参照。
+      **`connectWifi()`直後は正しい(`8.8.8.8`/`8.8.4.4`)、`timesync::begin()`の
+      区間で壊れる。**
 - [ ] `err=-54`(EXFULL)が本当に「DNSリクエストテーブル満杯」を意味するか、
       ESP-IDF側の該当ソースで正確に裏付ける（今は状況証拠のみ）。
+- [ ] **最優先: `timesync::begin()`のどの処理が`dns0`を書き換えているか特定する。**
+      `main.cpp`の`connectWifi()`（`dns0=8.8.8.8`）と直後の
+      `timesync::begin(kNtpServer1="ntp.nict.jp", kNtpServer2="pool.ntp.org", ...)`
+      の間で発生。batch-uplinkの`TimeSync.cpp`自体はESP-IDF標準SNTP API
+      (`esp_sntp_setservername`/`esp_sntp_init`)を呼ぶだけでDNS設定を直接触る
+      コードは無い——SNTPの内部DNS解決処理(`ntp.nict.jp`の解決失敗？)が
+      引き金の可能性が高いが未確認。lwIP `dns.c`を読んだ範囲では、個々の
+      問い合わせの`server_idx`切り替えはグローバルな`dns_servers[]`配列自体を
+      書き換えないように見える——ESP-IDF側(netif/DHCP/SNTP関連)の別のコード
+      パスが`esp_netif_set_dns_info()`相当を呼んでいる可能性がある。
 - [ ] SNTPの`pool.ntp.org`問い合わせがなぜ完了しない（≒テーブルに居座り続ける）のか
-      を確認する——これが本当の根っこの可能性がある。
+      を確認する——これが本当の根っこの可能性がある。上と関連: `ntp.nict.jp`
+      (server1)が先に解決失敗し、それが`pool.ntp.org`(server2)への切り替え・
+      DNSテーブル占有・`dns0`破損の連鎖の起点という仮説。
 - [ ] 2.x側パッチ（`WiFiGeneric.cpp`、PR#8672バックポート）はまだ
       `firmware/patches/`化していない・実機検証もしていない——device2で再発した
       本題はこちら。
