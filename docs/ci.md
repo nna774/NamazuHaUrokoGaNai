@@ -1,7 +1,7 @@
 # CI（GitHub Actions）
 
-このリポジトリで動いているワークフローは `doc-link-check` と `firmware-host-test` の2本
-（`.github/workflows/`）。どちらもPR作成時とmasterへのpushで走る。
+このリポジトリで動いているワークフローは `doc-link-check`・`firmware-host-test`・
+`firmware-build` の3本（`.github/workflows/`）。いずれもPR作成時とmasterへのpushで走る。
 
 ## doc-link-check
 
@@ -54,11 +54,31 @@ PlatformIOを介さず`[env:esp32dev]`がpinしているタグを直接`git clon
 pinバージョンの単一の真実は`firmware/platformio.ini`のまま——ワークフロー側に
 バージョン文字列を重複して持たない。
 
-ファーム本体（`main.cpp`・実機向けビルド）自体のコンパイル可否はまだCIで見ていない。
-ESP32ツールチェーン一式のダウンロードが要り実行時間の桁が変わるため、見送っている
-（要る場面が増えたら`actions/cache`で`~/.platformio`をキャッシュする方向で検討）。
+ファーム本体（`main.cpp`・実機向けビルド）自体のコンパイル可否は`firmware-build`が見る。
 
 落ちた場合は`firmware/test/run.sh`を手元でそのまま実行すれば再現する
 （`batch-uplink`は`.pio/libdeps`に展開済みが必要。無ければ
 `cd firmware && ../.venv/bin/pio run -e esp32dev`で一度ビルドするか、
 上記と同じくpinされたタグを直接cloneして`.pio/libdeps/esp32dev/batch-uplink`に置く）。
+
+## firmware-build
+
+**何を検査しているか**: `firmware/platformio.ini`の主要envを実際に`pio run -e <env>`で
+ビルドし、コンパイル・リンクが通ることを見る（実機書き込みはしない）。対象は
+
+- 本番3系統: `esp32dev`・`adxl355`・`piezo`
+- `fake-sensor`・`fake-sensor-device2-profile`（実センサ無しでWiFi接続〜バッチ送信の
+  結合試験を再現する検証用env。秘密不要でそのまま焼ける）
+
+`sensortest`系（WiFi/送信なしのセンサ検証専用、実機無しでは価値が薄い）・
+`provision`系（`secrets_provision.h`が要る。gitignore対象でCIには無い）・
+`tls-alloc-probe`/`panic-test`/`psram-probe`/`pool-probe`系・`pioarduino-fake-sensor`
+（いずれも使い捨てのPoC/実機計測用）は対象外。
+
+ESP32ツールチェーン/フレームワーク一式（数百MB）は`actions/cache`で`~/.platformio`を
+`firmware/platformio.ini`のハッシュキーでキャッシュしている。`platform`バージョンや
+`lib_deps`を変える編集をすると初回のみキャッシュミスして数分伸びる（手元の実測では
+キャッシュ済み状態からのクリーンビルドで1env あたり30〜60秒程度）。PlatformIO自体は
+手元(`.venv`)と揃えたバージョンで`.github/workflows/firmware-build.yml`内にpinしてある。
+
+落ちた場合は該当envを手元でそのままビルドすれば再現する: `cd firmware && ../.venv/bin/pio run -e <env>`。
