@@ -1,7 +1,7 @@
 # CI（GitHub Actions）
 
-このリポジトリで動いているワークフローは現状 `doc-link-check` 1本のみ
-（`.github/workflows/doc-link-check.yml`）。PR作成時とmasterへのpushで走る。
+このリポジトリで動いているワークフローは `doc-link-check` と `firmware-host-test` の2本
+（`.github/workflows/`）。どちらもPR作成時とmasterへのpushで走る。
 
 ## doc-link-check
 
@@ -43,3 +43,22 @@ doc-link-check --root CLAUDE.md --root AGENTS.md --root README.md --ignore-missi
 ```
 
 （経緯: [docs/log/2026-08-28-doc-link-check-fixes.md](log/2026-08-28-doc-link-check-fixes.md)）
+
+## firmware-host-test
+
+**何を検査しているか**: `firmware/test/run.sh`（`Batch`/`NamzWire`/`TlsMemPoolCore`の
+ホスト側テスト、[firmware/README.md](../firmware/README.md#テストtest)参照）をそのまま走らせる。
+実機もPlatformIOもESP32ツールチェーンも不要——`run.sh`が要る`batch-uplink`の実体は、
+PlatformIOを介さず`[env:esp32dev]`がpinしているタグを直接`git clone`して用意する
+（`firmware/.pio/libdeps/esp32dev/batch-uplink`に展開、run.shの探索パスに合わせている）。
+pinバージョンの単一の真実は`firmware/platformio.ini`のまま——ワークフロー側に
+バージョン文字列を重複して持たない。
+
+ファーム本体（`main.cpp`・実機向けビルド）自体のコンパイル可否はまだCIで見ていない。
+ESP32ツールチェーン一式のダウンロードが要り実行時間の桁が変わるため、見送っている
+（要る場面が増えたら`actions/cache`で`~/.platformio`をキャッシュする方向で検討）。
+
+落ちた場合は`firmware/test/run.sh`を手元でそのまま実行すれば再現する
+（`batch-uplink`は`.pio/libdeps`に展開済みが必要。無ければ
+`cd firmware && ../.venv/bin/pio run -e esp32dev`で一度ビルドするか、
+上記と同じくpinされたタグを直接cloneして`.pio/libdeps/esp32dev/batch-uplink`に置く）。
