@@ -168,7 +168,7 @@ def main() -> int:
     with open(polar_path, "w", encoding="utf-8") as f:
         f.write(build_polar_svg(events, a, b) + "\n")
 
-    table_path = os.path.join(args.out_dir, "detection-map-table.md")
+    table_path = os.path.join(args.out_dir, "detection-map-table.html")
     n_good = sum(1 for e in events if e.verdict == "good")
     n_warn = sum(1 for e in events if e.verdict == "warning")
     n_crit = sum(1 for e in events if e.verdict == "critical")
