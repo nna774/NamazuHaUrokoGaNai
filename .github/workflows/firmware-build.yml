@@ -1,0 +1,49 @@
+name: firmware-build
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 本番3系統(esp32dev/adxl355/piezo)と、実センサ無しで通しの結合試験を再現する
+        # fake-sensor系(WiFi/送信あり、秘密不要)。sensortest系(WiFi/送信なしのセンサ
+        # 検証専用)・provisionやprobe系(secrets_provision.h・実機計測前提)は対象外
+        # （docs/ci.mdのfirmware-buildの節参照）。
+        env:
+          - esp32dev
+          - adxl355
+          - piezo
+          - fake-sensor
+          - fake-sensor-device2-profile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # PlatformIOが展開するESP32ツールチェーン/フレームワーク一式(数百MB)をキャッシュする。
+      # platformio.ini(platformバージョン・lib_deps)が変わらない限り2回目以降は
+      # 再ダウンロードしない。プロジェクト側のlib_deps(ArduinoJson等)は
+      # .pio/libdeps配下でここには含まれないが小さいので毎回取得しても軽い。
+      - name: cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      # 手元(.venv)と揃えたバージョンでpin。
+      - name: install PlatformIO
+        run: pip install platformio==6.1.19
+
+      - name: build firmware (${{ matrix.env }})
+        working-directory: firmware
+        run: pio run -e ${{ matrix.env }}
