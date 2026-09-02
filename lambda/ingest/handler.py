@@ -10,6 +10,7 @@ Lambda Function URL (payload v2.0) 前提。
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import json
 import os
 import time
@@ -32,6 +33,8 @@ NOTIFY_PROMPT_MIN = float(os.environ.get("NAMZ_NOTIFY_PROMPT_MIN", "3.0"))
 # watchdog(lambda/watchdog/handler.py)と同じメンション先。coredumpは再起動原因の
 # 調査を促す通知なので、欠測アラートと同じ人に飛ばす。
 SLACK_MENTION = "<@U0323ESK6> "
+
+JST = dt.timezone(dt.timedelta(hours=9))
 
 
 def _resp(code: int, msg: str, extra_headers: dict[str, str] | None = None):
@@ -114,15 +117,19 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
         except Exception as e:  # noqa: BLE001
             print(f"device_temp.record failed: {e!r}")
 
-    # ヒープ空き容量ヘッダ(X-Namz-Heap-Free/-Maxblock、docs/design.md「送信の
-    # 信頼性」未定事項4)をCloudWatchカスタムメトリクスへ送る。TLS接続使い回し
-    # (v1.7.0)がバックフィル中の断片化にどう効くか、実機のシリアルログ無しでも
-    # 事後に推移で追えるようにするための可観測性。
+    # ヒープ空き容量ヘッダ(X-Namz-Heap-Free/-Maxblock/-Minfree、docs/design.md
+    # 「送信の信頼性」未定事項4)をCloudWatchカスタムメトリクスへ送る。TLS接続
+    # 使い回し(v1.7.0)がバックフィル中の断片化にどう効くか、実機のシリアルログ
+    # 無しでも事後に推移で追えるようにするための可観測性。
     heap_free_raw = headers.get("x-namz-heap-free", "")
     heap_maxblock_raw = headers.get("x-namz-heap-maxblock", "")
+    # X-Namz-Heap-Minfree(ESP.getMinFreeHeap())は後から追加したヘッダなので旧
+    # ファームは送ってこない。無ければNoneのままrecord_heapへ渡す(そちらが省く)。
+    heap_minfree_raw = headers.get("x-namz-heap-minfree", "")
     if heap_free_raw and heap_maxblock_raw:
         try:
-            metrics.record_heap(b.meta.device_id, int(heap_free_raw), int(heap_maxblock_raw))
+            metrics.record_heap(b.meta.device_id, int(heap_free_raw), int(heap_maxblock_raw),
+                                 int(heap_minfree_raw) if heap_minfree_raw else None)
         except Exception as e:  # noqa: BLE001
             print(f"metrics.record_heap failed: {e!r}")
 
@@ -223,6 +230,10 @@ def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
     key = s3util.coredump_key(device_id, fw_version, uploaded_at_us)
     s3.put_object(Bucket=BUCKET, Key=key, Body=raw, ContentType="application/octet-stream")
 
+    # ファームは起動直後・WiFi接続後すぐアップロードするので、回収時刻は
+    # 再起動（≒クラッシュ発生）時刻とほぼ同一とみなせる。
+    collected_at = dt.datetime.fromtimestamp(uploaded_at_us / 1e6, JST).strftime("%Y-%m-%d %H:%M:%S JST")
+
     # 通知は主経路ではないので、S3保存が済んでいれば失敗してもACK(200)は返す
     # （_handle_batchのdevices.get_device失敗時と同じ扱い）。
     try:
@@ -230,7 +241,7 @@ def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
             "コアダンプを回収した",
             f"{SLACK_MENTION}device *{device_id:04d}* (fw={fw_version}) の起動時にコアダンプが"
             "見つかり、S3へ保存した。再起動原因の調査に使える。",
-            {"S3キー": key},
+            {"回収時刻": collected_at, "S3キー": key},
         )
     except Exception as e:  # noqa: BLE001
         print(f"coredump notify failed: {e!r}")

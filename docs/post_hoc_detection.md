@@ -272,6 +272,26 @@ worktreeには`.venv`が無く`terraform output`も通らないことがある�
 - 新しい知見があれば`docs/noise.md`にも追記し、その旨をログに書く
 - `docs/progress.md`に1〜3文の要約+ログへのリンクを1行追記する
 
+## 3.5. detection_events.csvに追記する
+
+判定（good/warning/critical）が出たら、忘れずに`tools/detection_events.csv`に1行追加し、
+`python tools/detection_range.py --out-md ../docs/detection_range.md`で回帰・目安表を
+再生成する。**2026-08-21〜08-30に解析した4件（八丈島東方沖M5.5・岩手県沖M4.3・
+群馬県北部M3.2・千葉県東方沖M4.9）が、この手順が無かったため長期間追記されずに
+埋もれていた**（[2026-09-02のログ](log/2026-09-02-backfill-detection-events-csv.md)で
+発覚・まとめて追記）。ログを書いたら間を置かずこの手順を実行すること。
+
+verdictの割り当て方（このリポジトリでの3値運用）:
+- **good**: 確定検知(`cloud_confirmed`)、またはdetectlab解析でprobable detection
+- **warning**: 微妙／要検討、境界線上（弱いprobable含む）
+- **critical**: 完全埋没
+
+回帰(`fit_good`)は`verdict=good`の事例だけを使うため、warning/criticalを追加しても
+回帰式・「投げる価値ありレンジ」の数値自体は変わらない。それでも追加する理由は、
+[docs/detection_range.md](detection_range.md)にある通り**境界帯・埋没側の実例を優先して
+集める価値がある**ため——完全埋没の事例こそ、追記を怠ると「捕れなかった実例」の
+データが手薄なまま残ってしまう。
+
 ## 4. 正式イベントが無ければ手動イベント化し、複数デバイスなら相互リンクする
 
 この手順は**前半（無ければ手動イベント化）と後半（相互リンク）が独立した作業**である。

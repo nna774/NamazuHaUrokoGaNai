@@ -173,38 +173,96 @@ pio device monitor -b 115200
 シリアルに張り付いてクラッシュの瞬間に立ち会う必要はなく、**後日USBを挿すだけで
 過去に起きたクラッシュの中身を読める**（次に別のクラッシュが起きて上書きされるまで）。
 
-読み出しにはシンボル解決用の`firmware.elf`が要る。`.elf`自体はS3に置いていない
-（`tools/publish_ota.sh`が上げるのはフラッシュ用の`.bin`だけ）ので、**実機の
-`fw_version`(=gitの短縮hash)と同じコミットで手元で再ビルドし、S3のOTA配布物と
-バイト比較して検証してから使う**のを基本手順にする——rebuildが本当に実機と
-一致するかは自明ではない（ビルド環境が変わっていれば当然ズレる）ため、いきなり
-再ビルドしたelfを信用せず、必ず突き合わせる。
+読み出しにはシンボル解決用の`firmware.elf`が要る。OTAで配信した版なら
+`tools/publish_ota.sh`が`.bin`と同時に本物の`.elf`もS3へ上げている
+（`ota/<env>/<version>.elf`）ので、それをそのまま使う——手元での再ビルドは不要。
+再ビルドしたelfは`esp_app_desc_t.app_elf_sha256`フィールド自体がビルドのたびに
+違う値で焼き直されるため、実機のcoredumpとは原理的に一致しない
+（コードがビット一致していてもSHA256照合には引っかかる）。本物のelfならこの
+問題自体が起きない。
 
 ```bash
 pip install esp-coredump   # .venv等へ
 
-# 1. 実機のfw_versionと同じコミットでelfを用意する
-git worktree add --detach /tmp/coredump-elf <fw_version>
-(cd /tmp/coredump-elf/firmware && pio run -e <env>)
+# 1. 実機のfw_versionに対応するelfをS3から取得する
+aws s3 cp s3://namazu-dashboard-<account-id>/ota/<env>/<fw_version>.elf firmware.elf
 
-# 2. OTAで配信した版なら、実際に焼かれたバイナリがS3にそのまま残っている
-#    （namazu-dashboard-*バケット。publish_ota.shはアップロードするだけで消さない）
-aws s3 cp s3://namazu-dashboard-<account-id>/ota/<env>/<fw_version>.bin deployed.bin
-
-# 3. 再ビルド版とバイト比較する。差分はesp_app_desc_t.app_elf_sha256フィールド
-#    自体(32バイト、自己参照ハッシュなのでビルドのたびに変わりうる)と、それに伴う
-#    末尾の全体チェックサムだけのはず——それ以外に差分があればrebuildが実機と
-#    一致していない(ビルド環境がズレている)ということなので、シンボル解決を
-#    信用してはいけない
-cmp -l deployed.bin /tmp/coredump-elf/firmware/.pio/build/<env>/firmware.bin
-
-# 4. 読み出し（parttool.py・SHA256チェックまわりの回避が要る場合の詳細は下記ログ）
+# 2. 読み出し（parttool.py周りの回避が要る場合の詳細は下記ログ）
 esp-coredump --chip esp32 --port <port> --baud 115200 info_corefile \
   --gdb <toolchain-xtensa-esp32-elf-gdb> --off 0xFF0000 \
-  /tmp/coredump-elf/firmware/.pio/build/<env>/firmware.elf
+  firmware.elf
 ```
 
-OTAで一度も配信していない版（USB書き込みのみ）だと3の照合ができない——その場合は
-rebuildをそのまま信用するしかない点に注意。初回は`esp-coredump`がESP-IDF本体
-（`parttool.py`）を前提にしていて素直には動かなかった。回避手順・実例は
-[docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](../docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)。
+OTAで一度も配信していない版（USB書き込みのみ、または`.elf`保存より前に配信した版）
+だと`.elf`がS3に無い——その場合のみ、実機の`fw_version`と同じコミットで手元で
+再ビルドし、S3の`.bin`とバイト比較して検証してから使う（差分は
+`app_elf_sha256`フィールド自体と末尾チェックサムのみのはず。それ以外に差分が
+あればビルド環境がズレているのでシンボル解決を信用してはいけない）。
+初回は`esp-coredump`がESP-IDF本体（`parttool.py`）を前提にしていて素直には
+動かなかった。回避手順・実例は
+[docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](../docs/log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)、
+`.elf`保存に至った経緯は
+[docs/log/2026-08-31-store-ota-elf-artifact.md](../docs/log/2026-08-31-store-ota-elf-artifact.md)。
+
+### 自動送信されたcoredumpの場合: fw_versionラベルを鵜呑みにしない
+
+coredump自動送信（`X-Namz-Fw-Version`ヘッダ・S3キー`coredump/<device>/<fw_version>-...bin`)の
+`fw_version`は「アップロード時点で動いているfirmware」であって、**実際にクラッシュした
+瞬間のfirmwareとは限らない**。coredumpパーティションは単一image・次のパニックまで
+上書きされない仕様のため、特にその機で初めて拾えたcoredumpは何ヶ月も前の古いクラッシュの
+可能性がある（実例:
+[docs/log/2026-08-31-device1-lwip-null-deref-coredump.md](../docs/log/2026-08-31-device1-lwip-null-deref-coredump.md)、
+S3キーは`e82f81e`(当日公開)だが実際は20日前の`5dab9a4`で発生していた）。
+
+**coredump自体にRTC/壁時計のタイムスタンプは無い**（ESP-IDFのフォーマットはTOTAL_LEN・
+VERSION・TASKS_NUM・TCB_SIZE+各タスクのTCB/スタック+チェックサムのみ）。代わりに
+`esp_app_desc_t.app_elf_sha256`（32バイト、ビルドごとに変わる自己参照ハッシュ）が
+手がかりになる——`publish_ota.sh`は公開済みバージョンを削除も再ビルドもしないため、
+S3に残る全履歴の`.bin`から**該当バイトが完全一致する版**を探せば、fw_versionラベルに
+頼らず実際にクラッシュした時のビルドを一意に特定できる。
+
+**ただし全履歴を毎回舐めるのは非効率。** coredumpパーティションは次のパニックまで
+上書きされないだけで、`reset_reason`が直近`PANIC`かつ`uptime_s`がそのcoredumpの
+アップロード時刻と辻褄が合う（`GET /devices/<id>`で確認）なら、今回の再起動そのものが
+このcoredumpの発生源——**素直にS3キーのfw_versionラベル自身が正解であることが多い**
+（実例:
+[docs/log/2026-09-01-device1-udp-sendto-null-deref-coredump.md](../docs/log/2026-09-01-device1-udp-sendto-null-deref-coredump.md)）。
+古いcoredumpが後から掘り起こされるのは「その機で自動送信機能が入って初めて起動した回」
+くらいで、日常的な運用では稀。**まずラベル自身の版とその1つ前の公開版だけ**チェックし、
+どちらも一致しなければ初めて全履歴探索に進む:
+
+```bash
+# 1. coredumpが記録している自己参照ハッシュの値はesp-coredumpの警告メッセージに出る
+# (SHA256不一致チェックを読み進めるための回避と合わせて、下記ログのモンキーパッチ参照)
+# 例: "coredump SHA256(6342f1ecfab0cd37) != app SHA256(...)" の前半がそれ
+
+# 2. まずラベル自身の版・1つ前の版だけ照合（該当2ファイルだけ取得すれば済む）
+aws s3 cp s3://namazu-dashboard-<account-id>/ota/<env>/<label>.bin .
+aws s3 cp s3://namazu-dashboard-<account-id>/ota/<env>/<1つ前の版>.bin .
+python3 - <<'EOF'
+target = "6342f1ecfab0cd37"  # coredumpの警告に出た値
+for path in ["<label>.bin", "<1つ前の版>.bin"]:
+    with open(path, "rb") as f:
+        f.seek(176)
+        hexval = f.read(32).hex()
+    print(path, hexval, "MATCH" if hexval.startswith(target) else "")
+EOF
+
+# 3. どちらも不一致だった場合のみ、全履歴に広げる
+aws s3 sync s3://namazu-dashboard-<account-id>/ota/<env>/ history/ --exclude "*.sha256"
+python3 - <<'EOF'
+import glob
+target = "6342f1ecfab0cd37"  # coredumpの警告に出た値
+for path in sorted(glob.glob("history/*.bin")):
+    with open(path, "rb") as f:
+        f.seek(176)
+        hexval = f.read(32).hex()
+    if hexval.startswith(target):
+        print("MATCH", path, hexval)
+EOF
+```
+
+一致したファイル名(=git短縮hash)が実際にクラッシュした時のfw_version。以降は
+`ota/<env>/<その版>.elf`がS3にあればそのまま使い（`.elf`保存より前の古い版なら
+無いので、上記の「再ビルドしてバイト比較」に切り替える）、S3キーの`fw_version`
+（＝アップロード時点のfirmware）は無視する。

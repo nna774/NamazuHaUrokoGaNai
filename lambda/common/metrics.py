@@ -23,22 +23,28 @@ def _client():
     return _client_cache
 
 
-def record_heap(device_id: int, heap_free: int, heap_maxblock: int) -> None:
+def record_heap(device_id: int, heap_free: int, heap_maxblock: int,
+                 heap_minfree: int | None = None) -> None:
     """毎バッチのヒープ空き容量をカスタムメトリクスとして送る（呼んでよい頻度は毎バッチ）。
 
     maxblockは空き合計より断片化の兆候を直接示す（TLSハンドシェイクは大きな
     連続ブロックを要求するため、バックフィル中の連続POSTでここが先に痩せる）。
+    minfree（ESP.getMinFreeHeap()、起動後の生涯最小値）はfreeと違い瞬間値では
+    ないので、free_heapの推移だけでは見逃しうるスローリークも必ず反映される
+    （docs/log/2026-08-30-esp32-hidden-features-survey.md）。旧ファーム(ヘッダ
+    未送信)との互換のためNone許容、その場合はこのメトリクスだけ送らない。
     """
     dims = [{"Name": "DeviceId", "Value": str(device_id)}]
-    _client().put_metric_data(
-        Namespace=NAMESPACE,
-        MetricData=[
-            {"MetricName": "HeapFreeBytes", "Dimensions": dims,
-             "Value": float(heap_free), "Unit": "Bytes"},
-            {"MetricName": "HeapMaxAllocBytes", "Dimensions": dims,
-             "Value": float(heap_maxblock), "Unit": "Bytes"},
-        ],
-    )
+    data = [
+        {"MetricName": "HeapFreeBytes", "Dimensions": dims,
+         "Value": float(heap_free), "Unit": "Bytes"},
+        {"MetricName": "HeapMaxAllocBytes", "Dimensions": dims,
+         "Value": float(heap_maxblock), "Unit": "Bytes"},
+    ]
+    if heap_minfree is not None:
+        data.append({"MetricName": "HeapMinFreeBytes", "Dimensions": dims,
+                      "Value": float(heap_minfree), "Unit": "Bytes"})
+    _client().put_metric_data(Namespace=NAMESPACE, MetricData=data)
 
 
 def record_backlog(device_id: int, spill_count: int, ram_queued: int) -> None:
@@ -88,11 +94,16 @@ def latest_heap(device_id: int) -> dict | None:
     maxblock = _latest_point("HeapMaxAllocBytes", device_id)
     if free is None or maxblock is None:
         return None
-    return {
+    result = {
         "heap_free_bytes": round(free["Average"]),
         "heap_maxblock_bytes": round(maxblock["Average"]),
         "heap_measured_at_us": int(free["Timestamp"].timestamp() * 1e6),
     }
+    # 旧ファーム(未送信)・データがまだ無い期間はキー自体を省く。
+    minfree = _latest_point("HeapMinFreeBytes", device_id)
+    if minfree is not None:
+        result["heap_minfree_bytes"] = round(minfree["Average"])
+    return result
 
 
 def latest_backlog(device_id: int) -> dict | None:
