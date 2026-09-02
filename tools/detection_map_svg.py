@@ -9,8 +9,12 @@ Claude Design Artifact「検出限界マップ」（M×震源距離の散布図�
 単体では色が付かない。Artifact側で定義済みの同名クラス（ライト/ダーク両対応の
 CSS変数を参照）と組み合わせて使う前提。
 
-    # 散布図・方位図のSVG本体＋テーブル行＋回帰サマリを書き出す
-    python detection_map_svg.py --out-dir ../docs/log/img
+**出力はリポジトリにコミットしない。** Artifactに貼り込んだ後は不要になる使い捨ての
+中間生成物（`docs/log/img/detection-map-*`は`.gitignore`済み）。`--out-dir`には
+一時ディレクトリを指定し、貼り込んだら消してよい。
+
+    # 散布図・方位図のSVG本体＋テーブル行＋回帰サマリを一時ディレクトリに書き出す
+    python detection_map_svg.py --out-dir /tmp/detection-map
 """
 from __future__ import annotations
 
@@ -148,7 +152,9 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--csv", default=CSV_PATH, help="学習データCSV（既定: tools/detection_events.csv）")
     p.add_argument("--station", help='観測点座標 "lat,lon"（既定はdetectlab.pyと同じ湯沢町）')
-    p.add_argument("--out-dir", required=True, help="scatter/polar SVGとテーブル行・サマリをこのディレクトリに書き出す")
+    p.add_argument("--out-dir", required=True,
+                   help="scatter/polar SVGとテーブル行・サマリをこのディレクトリに書き出す"
+                        "（Artifactに貼り込んだら不要になる使い捨て生成物なので一時ディレクトリ推奨）")
     args = p.parse_args()
 
     station = parse_station(args.station)
