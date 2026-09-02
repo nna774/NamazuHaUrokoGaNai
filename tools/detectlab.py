@@ -309,6 +309,18 @@ def hypocentral_km(eq_lat, eq_lon, depth_km, st_lat, st_lon) -> tuple[float, flo
     return math.hypot(epi, depth_km), epi
 
 
+def bearing_deg(eq_lat, eq_lon, st_lat, st_lon) -> float:
+    """観測点から見た震源の方位角[度]（真北=0、時計回り）を返す。
+
+    hypocentral_km()と同じ緯度経度の平面近似（大円ではない）を使う——
+    観測点から震源までの距離を求めるのと同じ近似モデルで、日本国内スケール
+    （〜1000km）では方位角の誤差も実用上問題にならない。
+    """
+    dlat = (eq_lat - st_lat) * 111.0
+    dlon = (eq_lon - st_lon) * 111.0 * math.cos(math.radians((eq_lat + st_lat) / 2))
+    return math.degrees(math.atan2(dlon, dlat)) % 360
+
+
 def arrival_window(dist_km: float, origin_us: int, vrange: tuple[float, float]) -> tuple[int, int]:
     """速度範囲(速い端,遅い端)から到達予測窓(早い端us, 遅い端us)を返す。"""
     vmax, vmin = vrange
