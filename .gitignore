@@ -31,6 +31,9 @@ terraform/builds/
 lambda/**/build/
 lambda/**/*.zip
 
+# 検出限界マップArtifact用の生成物（tools/detection_map_svg.pyで再生成可能・貼り込み後は不要）
+docs/log/img/detection-map-*
+
 # Node / dashboard
 dashboard/node_modules/
 dashboard/dist/
