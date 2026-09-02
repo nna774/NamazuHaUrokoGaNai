@@ -1,0 +1,33 @@
+name: firmware-host-test
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # firmware/test/run.sh はPlatformIOが展開したbatch-uplinkの実体を使う
+      # （pinしているタグの中身をそのまま試し、「手元は通るが焼かれる版は違う」を防ぐため）。
+      # ホスト側テストが要るのはBatch/NamzWire/TlsMemPoolCoreのソースだけなので、
+      # PlatformIO・ESP32ツールチェーンは持ち込まず、[env:esp32dev]がpinしているタグを
+      # そのままgit cloneする（platformio.ini側のバージョンだけを単一の真実にする）。
+      - name: fetch pinned batch-uplink
+        run: |
+          ref="$(awk '/^\[env:esp32dev\]/{f=1;next}/^\[/{f=0}f' firmware/platformio.ini \
+            | grep -oP 'batch-uplink\.git#\K\S+')"
+          if [ -z "$ref" ]; then
+            echo "firmware/platformio.iniの[env:esp32dev]からbatch-uplinkのタグ指定を読めなかった" >&2
+            exit 1
+          fi
+          echo "pinned batch-uplink ref: $ref"
+          mkdir -p firmware/.pio/libdeps/esp32dev
+          git clone --depth 1 --branch "$ref" https://github.com/nna774/batch-uplink.git \
+            firmware/.pio/libdeps/esp32dev/batch-uplink
+
+      - name: run host test
+        run: firmware/test/run.sh
