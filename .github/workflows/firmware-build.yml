@@ -1,9 +1,17 @@
 name: firmware-build
 
+# firmware/配下(と本ワークフロー自身)の変更でのみ走る。docのみの更新でESP32
+# ツールチェーン込みのビルドが毎回走るのを避けるため（docs/ci.md参照）。
 on:
   pull_request:
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware-build.yml"
   push:
     branches: [master]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware-build.yml"
 
 jobs:
   build:
