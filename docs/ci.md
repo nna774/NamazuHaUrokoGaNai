@@ -3,6 +3,14 @@
 このリポジトリで動いているワークフローは `doc-link-check`・`firmware-host-test`・
 `firmware-build` の3本（`.github/workflows/`）。いずれもPR作成時とmasterへのpushで走る。
 
+**`firmware-host-test`・`firmware-build`は`firmware/**`（と自分自身のワークフロー
+ファイル）の変更があった時だけ走る**（`on.pull_request.paths`/`on.push.paths`）。
+両方とも見ているのは`firmware/`配下のソース・`platformio.ini`だけなので、docsや
+lambda/dashboard/terraform/tools側だけの変更ではスキップする設計。`doc-link-check`は
+逆に全ファイル変更で常に走る（doc側の変更こそ検査対象のため）。masterにはbranch
+protectionが無く必須チェック指定も無いので、スキップされてもマージがブロックされる
+ことはない（`gh api repos/<owner>/<repo>/branches/master/protection`で確認可能）。
+
 ## doc-link-check
 
 **何を検査しているか**: `CLAUDE.md`・`AGENTS.md`・`README.md`を起点に
