@@ -747,6 +747,9 @@ function updateLiveIntensityMulti(waveforms) {
 // 選択の真実は liveDeviceId 側に置く。<select> の選択肢は /devices を引くまで
 // 空なので、DOM を真実にすると URL 復元と埋め込みの順序に依存してしまう。
 let liveDeviceId = null;
+// URL に d= も無く手動選択もされていない(=liveDeviceId未設定)時の既定機。
+// 実在しなければ最若番へ倒す(下のfillLiveDevices参照)。
+const DEFAULT_LIVE_DEVICE_ID = '2';
 let liveDevices = [];
 // device_id -> calibrated(bool)。/devices の "calibrated" を写した鏡（gal校正済みか、
 // wire.is_calibrated()が単一の真実。ピエゾ等はfalse）。未取得時は校正扱いで安全側に倒す。
@@ -801,9 +804,12 @@ async function fillLiveDevices() {
       sel.innerHTML = ids.map(id =>
         `<option value="${id}">${String(id).padStart(4, '0')}</option>`).join('');
     }
-    // URL 由来の選択が実在しなければ最若番へ倒す（デバイスを外した後のURL対策）。
+    // URL由来の選択が実在しなければ倒す（デバイスを外した後のURL対策）。
+    // 未選択（URLにdも無く手動選択も無い）時は既定機、それも無ければ最若番へ。
     if (!ids.map(String).includes(String(liveDeviceId))) {
-      liveDeviceId = ids.length ? String(ids[0]) : null;
+      liveDeviceId = liveDeviceId == null && ids.map(String).includes(DEFAULT_LIVE_DEVICE_ID)
+        ? DEFAULT_LIVE_DEVICE_ID
+        : (ids.length ? String(ids[0]) : null);
     }
     if (liveDeviceId) sel.value = liveDeviceId;
 
