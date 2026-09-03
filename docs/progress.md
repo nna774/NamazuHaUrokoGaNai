@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-09-04 | **宮城県沖M3.8(震源距離281km)の事後解析で完全埋没と判定した。** 標準・低帯域(0.5-2Hz水平2軸)どちらもSTA/LTAが一度も閾値を超えず、P窓/S窓/コーダ想定域いずれもSNR・直線性がノイズと分離できなかった。目安レンジ103〜205kmに対し明確に遠く、検出限界を下回った参考例 | [log/2026-09-04-miyagi-oki-m3.8-post-hoc-detection.md](log/2026-09-04-miyagi-oki-m3.8-post-hoc-detection.md) |
 | 2026-09-04 | **ダッシュボードをURLハッシュ無しで開いた時の既定表示機を、実在デバイスの最若番(実質1号機)から2号機へ変更した。** URLに`d`指定・手動選択のどちらも無い「未選択」時だけ新設の既定機に倒し、無効な`d`指定からの復帰など既存のフォールバックは最若番のまま維持した | [log/2026-09-04-dashboard-default-device-2.md](log/2026-09-04-dashboard-default-device-2.md) |
 | 2026-09-04 | **`firmware-build`・`firmware-host-test`に`paths`フィルタを追加し、`firmware/**`(と自ワークフローファイル)の変更時のみ走るようにした。** docs等firmwareと無関係な変更でのESP32ツールチェーン込みフルビルドを避けるため。「docだからスキップ」ではなく「firmwareに無関係だからスキップ」というallowlist方式を採用（ignoreリストだと新形式ファイル追加のたび追記が要るため）。masterはbranch protection未設定・必須チェック指定無しと確認済みで、スキップされてもマージはブロックされない | [log/2026-09-04-skip-firmware-ci-on-docs.md](log/2026-09-04-skip-firmware-ci-on-docs.md) |
 | 2026-09-04 | **新PC用IAMユーザー`A.R.O.N.A`を作成し、`sts:AssumeRole`のみに絞ってIAMロール`namazu-admin`をassumeさせる運用にした。** さらに`namazu-admin`自体の権限も、S3/Lambda/DynamoDB/EventBridge(classic)/IAM/CloudFront/ACMを名前・IDベースでnamazuのリソースだけに絞り込んだ（このAWSアカウントがelectabuzz等複数プロジェクトと同居していると判明したため）。`er`本体の権限・ログイン方式は未変更のまま持ち越し | [log/2026-09-04-arona-user-namazu-scoped-admin-role.md](log/2026-09-04-arona-user-namazu-scoped-admin-role.md) |
