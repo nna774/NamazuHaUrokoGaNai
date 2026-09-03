@@ -17,3 +17,4 @@ iwate-oki-m4.3,岩手県沖,2026-08-28,40.2,142.3,40,,4.3,critical,完全埋没(
 gunma-kitabu-m3.2,群馬県北部,2026-08-29,36.9,139.3,5,,3.2,warning,要検討寄りのprobable(2機onsetがほぼ同時・STA/LTA大きく超過だがS窓直線性が0.6にわずかに届かず。JMA計測震度換算では自動確定閾値未達),log/2026-08-29-gunma-kitabu-m3.2-post-hoc-detection.md
 chiba-oki-m4.9,千葉県東方沖,2026-08-30,35.8,140.9,40,,4.9,good,確定検知(cloud_confirmed I=1/1)+detectlab probable(S波・コーダ帯で2機直線性一致),log/2026-08-30-chiba-oki-m4.9-post-hoc-detection.md
 fukushima-aizu-m3.5,福島県会津,2026-09-03,37.2,139.3,10,,3.5,good,probable(コーダ想定域内で両機ほぼ同時0.25秒差・STA/LTA大幅超過7.20/10.31・直線性0.68/0.71一致・機間相関ほぼ1.0。JMA計測震度換算ではI=-0.2で震度0相当),log/2026-09-03-fukushima-aizu-m3.5-post-hoc-detection.md
+miyagi-oki-m3.8,宮城県沖,2026-09-04,37.7,141.8,50,,3.8,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・P窓/S窓/コーダ想定域が背景と分離できず。記録全体が一様なノイズ),log/2026-09-04-miyagi-oki-m3.8-post-hoc-detection.md
