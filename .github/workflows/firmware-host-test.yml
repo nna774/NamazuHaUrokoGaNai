@@ -1,9 +1,16 @@
 name: firmware-host-test
 
+# firmware/配下(と本ワークフロー自身)の変更でのみ走る（docs/ci.md参照）。
 on:
   pull_request:
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware-host-test.yml"
   push:
     branches: [master]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware-host-test.yml"
 
 jobs:
   test:
