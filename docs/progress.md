@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-09-04 | **ダッシュボードをURLハッシュ無しで開いた時の既定表示機を、実在デバイスの最若番(実質1号機)から2号機へ変更した。** URLに`d`指定・手動選択のどちらも無い「未選択」時だけ新設の既定機に倒し、無効な`d`指定からの復帰など既存のフォールバックは最若番のまま維持した | [log/2026-09-04-dashboard-default-device-2.md](log/2026-09-04-dashboard-default-device-2.md) |
 | 2026-09-04 | **`firmware-build`・`firmware-host-test`に`paths`フィルタを追加し、`firmware/**`(と自ワークフローファイル)の変更時のみ走るようにした。** docs等firmwareと無関係な変更でのESP32ツールチェーン込みフルビルドを避けるため。「docだからスキップ」ではなく「firmwareに無関係だからスキップ」というallowlist方式を採用（ignoreリストだと新形式ファイル追加のたび追記が要るため）。masterはbranch protection未設定・必須チェック指定無しと確認済みで、スキップされてもマージはブロックされない | [log/2026-09-04-skip-firmware-ci-on-docs.md](log/2026-09-04-skip-firmware-ci-on-docs.md) |
 | 2026-09-04 | **新PC用IAMユーザー`A.R.O.N.A`を作成し、`sts:AssumeRole`のみに絞ってIAMロール`namazu-admin`をassumeさせる運用にした。** さらに`namazu-admin`自体の権限も、S3/Lambda/DynamoDB/EventBridge(classic)/IAM/CloudFront/ACMを名前・IDベースでnamazuのリソースだけに絞り込んだ（このAWSアカウントがelectabuzz等複数プロジェクトと同居していると判明したため）。`er`本体の権限・ログイン方式は未変更のまま持ち越し | [log/2026-09-04-arona-user-namazu-scoped-admin-role.md](log/2026-09-04-arona-user-namazu-scoped-admin-role.md) |
 | 2026-09-03 | **福島県会津M3.5(震源距離53km)の事後解析でprobable detectionと判定、手動イベント化・相互リンクした。** 標準設定のP窓/S窓単体では微妙だったが、コーダ想定域内(発生+69秒)で両機ほぼ同時(0.25秒差)にSTA/LTA大幅超過・直線性0.68/0.71・機間相関ほぼ1.0が揃った(JMA計測震度換算ではI=-0.2で震度0相当)。作業中、この実行環境にAWS認証情報が一切無い状態から始まり、ユーザーが`namazu-admin`プロファイルを用意→DynamoDB権限不足が判明→追加、という手順を踏んだ | [log/2026-09-03-fukushima-aizu-m3.5-post-hoc-detection.md](log/2026-09-03-fukushima-aizu-m3.5-post-hoc-detection.md) |
