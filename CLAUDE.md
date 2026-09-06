@@ -77,6 +77,10 @@
   - `device_prompt` … デバイス速報が来た / `cloud_confirmed` … クラウドFFTで確定
   - `checked` … detectが評価済み（未確定なら一覧の既定で隠れる=非該当）
   - `artificial` … 人工地震(テスト等)フラグ。立てると一覧の既定で隠れ、`all=1` でのみ薄く出る
+  - `verdict` … 事後解析の判定(`good`/`warning`/`critical`、`tools/detection_events.csv`と
+    同じ語彙)。`verdict_source` は `human`/`auto`。**一覧の既定フィルタはこれを見ない**
+    ——埋没と判定したイベントも既定で出す（「調べたが見えなかった」と「まだ調べていない」を
+    区別するため）。付けるのは `flag_event.py verdict` か `promote_event.py --verdict`
   - 一覧の既定フィルタは「(確定 or 未評価) かつ 非artificial」。表示震度は `effective_intensity`。
   - **`api`の`/event`はCloudFrontで長期キャッシュしている**（確定済みは1年相当、速報のみは
     無効化。`terraform/custom_domain.tf`の`aws_cloudfront_cache_policy.api_event`、
@@ -150,6 +154,17 @@ aws cloudfront create-invalidation \
 側が付与している。S3とCloudFrontで混ぜるとエッジ↔S3間の再検証が毎回発生する
 （試した順序・実測・元の不具合の経緯は`terraform/dashboard.tf`のコメントと
 [docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md](docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md)参照）。
+
+## ローカル環境（direnv・AWSプロファイル・.venv）
+
+このリポジトリでのAWS操作は`namazu-admin`プロファイルを使う。direnvで自動化してある。
+
+- `.envrc`・`.venv`は`.gitignore`対象で本体（`git worktree list`の先頭に出る非worktreeの
+  チェックアウト）にしかない。実体（`AWS_PROFILE`設定・`.venv`のactivate）は本体の`.envrc`
+  にだけ書く。
+- worktree側の`.envrc`は**`source_up`の1行だけ**でよい。direnvが親ディレクトリを遡って
+  本体の`.envrc`を見つけて読む——中身を複製しないので本体の設定を変えれば全worktreeに
+  自動で伝播する。書いたら`direnv allow <worktreeのパス>`を忘れずに。
 
 ## 開発の約束（グローバル設定に加えて）
 

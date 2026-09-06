@@ -39,16 +39,33 @@
       /* 累計バッチ・版数は個別ページ(#device/<id>)で確認できるので、
          狭い画面では隠して横スクロールなしに収める。 */
       #devices-table .col-batches, #devices-table .col-fw { display: none; }
+      /* イベント一覧も同じ考え方で、判定列を足したぶん「継続」を落とす
+         （イベント詳細で確認できる。手動昇格イベントは常に0sで情報量も薄い）。 */
+      #events-table .col-dur { display: none; }
+      /* 発生時刻は日付/時刻を明示的に2段にして列幅を詰める。ブラウザ任せの
+         折り返しだと列幅が「2026/9/6 14:17:28」1行ぶんで見積もられ、右側に
+         使わない余白が残る（余った幅は震度セルへ回り、バッジが2段になりにくい）。 */
+      #events-table .col-time { white-space: nowrap; }
+      #events-table .col-time .hms { display: block; }
     }
     /* 上のブレークポイントで想定より狭い実効幅（さらなる縮小表示等）に当たっても、
        ページ全体ではなくテーブル内だけが横スクロールするようにする安全策。 */
     .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     tr[data-id] { cursor: pointer; }
     tr[data-id]:hover { background: rgba(192,57,43,.08); }
-    .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 12px; }
+    /* バッジは語の途中で折り返さない（狭い画面で「人工地/震」のように割れるのを防ぐ）。 */
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 12px; white-space: nowrap; }
     .badge-art { background: transparent; color: #888; border: 1px solid #888; margin-left: 4px; }
     .badge-manual { background: transparent; color: #2a9d8f; border: 1px solid #2a9d8f; margin-left: 4px; }
     .badge-restart { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    /* 事後解析の判定(verdict)。色は震度バッジと衝突しないよう彩度を抑えてある
+       （検出=手動タグと同じteal、微妙=amber、埋没=人工地震タグと同じグレー）。 */
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    .d-good { background: #2a9d8f; }
+    .d-warning { background: #d08b2c; }
+    .d-critical { background: #888; }
+    /* 「検出」「埋没」が1文字ずつ縦に割れると読めないので折り返さない。 */
+    #events-table .col-verdict { white-space: nowrap; }
     .status-ok { color: #2e9b57; font-weight: 600; }
     .status-ng { color: var(--accent); font-weight: 600; }
     .status-muted { color: #888; font-weight: 600; }
@@ -153,7 +170,7 @@
         </div>
         <div id="events-status" class="muted status-line"></div>
         <table id="events-table">
-          <thead><tr><th>発生時刻</th><th>機</th><th>震度</th><th>計測震度</th><th>ピーク[gal]</th><th>継続</th><th>速報</th><th>確定</th></tr></thead>
+          <thead><tr><th class="col-time">発生時刻</th><th>機</th><th class="col-verdict">判定</th><th>震度</th><th>計測震度</th><th>ピーク[gal]</th><th class="col-dur">継続</th><th>速報</th><th>確定</th></tr></thead>
           <tbody></tbody>
         </table>
         <div class="row" id="events-pager">

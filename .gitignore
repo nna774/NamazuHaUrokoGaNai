@@ -56,3 +56,6 @@ data/
 
 # OS
 .DS_Store
+
+# direnv（ローカルのAWS_PROFILE切り替え等、マシン依存の設定）
+.envrc

@@ -237,11 +237,15 @@ def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
     # 通知は主経路ではないので、S3保存が済んでいれば失敗してもACK(200)は返す
     # （_handle_batchのdevices.get_device失敗時と同じ扱い）。
     try:
+        # 回収時刻・S3キーは fields(横並びグリッド)ではなく本文に直接埋め込む。
+        # iOSのSlackは長押しコピーで fields ブロックを拾わないため、S3キーを
+        # そのままコピペして aws s3 cp 等に使いたい場合に困る。
         notify.from_env().notify(
             "コアダンプを回収した",
             f"{SLACK_MENTION}device *{device_id:04d}* (fw={fw_version}) の起動時にコアダンプが"
-            "見つかり、S3へ保存した。再起動原因の調査に使える。",
-            {"回収時刻": collected_at, "S3キー": key},
+            "見つかり、S3へ保存した。再起動原因の調査に使える。\n"
+            f"*回収時刻*: {collected_at}\n"
+            f"*S3キー*: {key}",
         )
     except Exception as e:  # noqa: BLE001
         print(f"coredump notify failed: {e!r}")

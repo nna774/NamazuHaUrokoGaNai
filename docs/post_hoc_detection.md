@@ -191,6 +191,20 @@ z軸の低周波ノイズを避けて水平2軸だけを見ることで、遠地
 - **微妙／要検討**: SNR・直線性がノイズと明確には分離できない。
 - **完全埋没**: 標準・低帯域どちらでも背景と区別できない。
 
+**device2(ADXL355)はdevice1(IIS3DHHC)より高感度である。「device2だけが閾値を超えた」ことを
+それ自体で減点材料にするな。** ノイズ密度は25 vs 45µg/√Hz（実測の背景RMSでも約1.5〜2倍の差。
+[docs/noise.md](noise.md#他機との比較同一地震ほぼ同距離)）で、低周波特性もdevice2が良い。
+つまり検出限界ぎりぎりの揺れは**device2が先に閾値を超え、device1は閾値下の上昇に留まるのが
+期待される姿**であり、「2機とも閾値超過」を必須条件にすると実質「劣る方のセンサで検出できるか」を
+基準にしてしまう。**device1に求めるのは同じ窓での同時・同特徴の上昇（SNR/直線性が上がる、
+STA/LTAが背景より高い山を作る）までで十分**——閾値超過そのものではない。
+
+ただしこれは「device2単独ピークを無条件に信じてよい」という意味ではない。device2固有ノイズと
+区別する道具は`--corr-bin`の機間相関で、**到達窓に対応するbinが背景水準を明確に上回っているか**を
+見る（上回らなければdevice2固有ノイズ。2026-08-26の福島県沖M4.5/茨城県南部M3.4で実際に踏んだ）。
+判定を上げる根拠は「device2の閾値超過 + device1の同時刻の上昇 + 機間相関の上昇」の3点セットで、
+device2の閾値超過だけでは足りない。
+
 ### P窓・S窓が示すのは「到達"瞬間"の幅」であって「揺れの続く長さ」ではない
 
 `arrival_window()`（震源距離÷速度レンジ）が出すP窓・S窓は、その相の**先頭がいつ着くか**の
@@ -272,9 +286,20 @@ worktreeには`.venv`が無く`terraform output`も通らないことがある�
 - 新しい知見があれば`docs/noise.md`にも追記し、その旨をログに書く
 - `docs/progress.md`に1〜3文の要約+ログへのリンクを1行追記する
 
-## 3.5. detection_events.csvに追記する
+## 3.5. detection_events.csvに追記し、イベントにも同じ判定を付ける
 
-判定（good/warning/critical）が出たら、忘れずに`tools/detection_events.csv`に1行追加し、
+判定（good/warning/critical）が出たら、**同じ値を2箇所に書く**。
+
+1. `tools/detection_events.csv`（回帰の学習データ）
+2. **イベント自身の`verdict`**（`flag_event.py verdict <値> <event_id...>`、または手順4で
+   昇格する時に`promote_event.py --verdict <値>`）。APIが返すのでダッシュボードから
+   「調べた結果どうだったか」が読める。手順4で複数デバイスぶんのevent_idができるので、
+   まとめて渡すこと。
+
+**一覧の既定フィルタは`verdict`を見ていない。** 埋没と判定したイベントも既定で出る——
+「調べたが何も見えなかった」は「まだ調べていない」と区別されるべき記録だからだ。
+
+忘れずに`tools/detection_events.csv`に1行追加し、
 `python tools/detection_range.py --out-md ../docs/detection_range.md`で回帰・目安表を
 再生成する。**2026-08-21〜08-30に解析した4件（八丈島東方沖M5.5・岩手県沖M4.3・
 群馬県北部M3.2・千葉県東方沖M4.9）が、この手順が無かったため長期間追記されずに
@@ -301,17 +326,25 @@ verdictの割り当て方（このリポジトリでの3値運用）:
 「手動イベント化しなかったからrelateもしなくていい」という話にはならない。まず両方の
 event_idを`curl .../event?id=<eid>`で見て`related_events`が空かどうか確認すること。
 
-### 前半: イベントが無ければ手動イベント化する
+### 前半: イベントが無ければ手動イベント化する（判定に関わらず**必ず**やる）
 
 手順1で該当イベントが無かった場合、raw の保持期限（90日）で消える前に
 `tools/promote_event.py`で永久保存する。
+
+**完全埋没でも保存する。** 判定を見てから決めるな——「保存するか」を毎回判断するコスト自体が
+取りこぼしの原因で、実際に[2026-09-02のバックフィル](log/2026-09-02-backfill-detection-events-csv.md)で
+4件が埋もれていたのが見つかっている。解析はいつでもやり直せるが、rawは90日で消える。
+**取り返しがつかないのは保存しなかったことだけだ。** 埋没側の実例は
+[docs/detection_range.md](detection_range.md)が「優先して集める価値がある」と書いている通り
+それ自体に価値がある。
 
 ```bash
 export NAMZ_BUCKET=namazu-data-486414336274   # rawバケット名。変わらないので固定値でよい
 export NAMZ_EVENTS_TABLE=namazu-events
 export AWS_REGION=ap-northeast-1
 python tools/promote_event.py --onset "<発生時刻 or 検知した立ち上がり時刻>" \
-  --pre 180 --post 600 --device 1 --note "<地震の要約。詳細ログへのパスも書く>" --dry-run
+  --pre 180 --post 600 --device 1 --verdict <good|warning|critical> \
+  --note "<地震の要約。詳細ログへのパスも書く>" --dry-run
 ```
 
 `--dry-run`で内容（event_id・バッチ数・計測震度）を確認してから`--yes`を付けて実行する。
