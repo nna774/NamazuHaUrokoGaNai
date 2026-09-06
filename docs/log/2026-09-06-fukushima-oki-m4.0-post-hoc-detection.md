@@ -80,5 +80,7 @@ M4.0でも震源距離273kmの`fukushima-oki-m4.0-1`はgood判定だったので
 
 - `tools/detection_events.csv`に1行追記（verdict=critical）、`docs/detection_range.md`を再生成した
   （回帰は`verdict=good`のみでフィットするため回帰式の数値自体は変わらない）。
-- 手動イベント化（`tools/promote_event.py`）は過去の完全埋没事例と同様、実施していない
-  （raw保持90日＝2026-12-03頃まではいつでも取り直せる）。
+- ユーザー指示で`0001-59616930`・`0002-59616930`として手動保存し、相互リンクも張った
+  （onset=発生時刻16:45:00、`--pre 180 --post 600`、計測震度 I=-0.4/-0.7＝震度0相当）。
+  青森県東方沖M4.6・岩手県沖M4.3と同じく、**埋没側の実例をrawの90日保持を超えて残す**目的。
+  新規発行のevent_idなのでCloudFront invalidationは不要（誰もまだ取得していない）。
