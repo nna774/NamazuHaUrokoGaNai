@@ -273,6 +273,17 @@ TlsMemPool導入と静的RAM削減を経て小さいスロット数で再挑戦�
 `postBatch()`/`sendAlert()`はどちらもボディを読まないため実際には到達しない
 コードパスと判明し、対処不要と分かった。
 
+**pull型OTA取得(`performPullOta()`)にも同じ形の穴があった。** `WiFiClientSecure`の
+既定値(read/write=30秒、TLSハンドシェイク=**120秒**)のまま`httpUpdate.update()`を
+呼んでおり、`onProgress()`によるWDT給餌は「進捗があった時」にしか効かないため、
+接続・ハンドシェイク・単発の読み取りいずれかがWDT(20秒)より長く詰まると
+`onProgress()`が一度も呼ばれないままパニックする（[log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md)
+で発見、[log/2026-09-06-device1-hostbyname-patch-rollout.md](log/2026-09-06-device1-hostbyname-patch-rollout.md)
+でesp32dev環境でも再現)。`performPullOta()`は`HTTP_UPDATE_FAILED`を60秒バックオフで
+再試行する穏当な失敗パスを既に持っていたため、対処は`client.setHandshakeTimeout(4)`・
+`client.setTimeout(4)`(秒、`Uploader`と同じ値)を`httpUpdate.update()`より前に
+呼ぶだけで済んだ——単発の遅延をハードパニックではなくその失敗パスに変える。
+
 **既知の未解決問題**: 接続を使い回す(`setReuse(true)`)実装のため、前回
 レスポンスのボディを読み残したまま次のヘッダ読み取りに入ると誤読しうる。
 誤読時は`client_.stop()`で次回強制的に繋ぎ直され自己修復するため実害は
