@@ -58,3 +58,24 @@ Rosetta未導入)でビルド自体が失敗したが、変更箇所は本線と
   収まるようになった（実機でのOTA配信時の再起動回数低減を期待）
 - `esp32dev`・`adxl355`への実機OTA配信・長期観察はまだ。`piezo`のビルド確認と、
   このマシンのriscv32ツールチェーン問題の解消も持ち越し
+
+## 追記: `client.setTimeout(4)`はdeadコードだったと判明、削除した
+
+PRを立てて`/code-review`を回したところ、`client.setTimeout(4)`は
+`httpUpdate.update()`内部で必ず上書きされ何の効果も持たないと指摘された。
+`HTTPClient::connect()`が`_client->connect(host, port, _connectTimeout)`
+(既定5000ms、`HTTPCLIENT_DEFAULT_TCP_TIMEOUT`)を呼んで一旦5秒に、続けて
+`_client->setTimeout((_tcpTimeout+500)/1000)`(`_tcpTimeout`は`HTTPUpdate`が
+呼ぶ`http.setTimeout(_httpClientTimeout)`の既定値8000msに由来)で8秒に、
+それぞれ問答無用で上書きする。グローバル`httpUpdate`インスタンスにこの既定値を
+変える公開APIは無い。`HTTPClient`/`HTTPUpdate`の実ソース(`~/.platformio/packages/
+framework-arduinoespressif32/libraries/{HTTPClient,HTTPUpdate}/src/`)を読んで
+裏を取った。
+
+一方`setHandshakeTimeout()`はどちらのクラスからも一切触られず、本当に効いている
+——真の危険因子だった120秒の無制限待ちはこれで確実に塞げている。接続5秒・
+read/write8秒はどちらも既にWDT(20秒)に十分収まる値のため、`client.setTimeout(4)`
+を削除するだけで実害は無いと判断した。`main.cpp`・`piezo_main.cpp`とも
+`client.setTimeout(4);`の行を削除し、コメント・`design.md`を実態(効くのは
+`setHandshakeTimeout()`のみ)に合わせて訂正した。`esp32dev`・`adxl355`で
+再ビルド確認済み。

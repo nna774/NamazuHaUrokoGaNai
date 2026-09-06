@@ -201,10 +201,10 @@ static bool performPullOta(const String& targetVersion) {
 
   WiFiClientSecure client;
   client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
-  // 本線(main.cpp)と同じ理由。docs/log/2026-08-31-device2-ota-pull-wdt-panic.md・
-  // 2026-09-06-device1-hostbyname-patch-rollout.md参照。
+  // 本線(main.cpp)と同じ理由・同じ制約(read/writeはclient.setTimeout()では
+  // 変えられずhttpUpdate内部の既定値のまま)。docs/log/
+  // 2026-08-31-device2-ota-pull-wdt-panic.md・2026-09-06-device1-hostbyname-patch-rollout.md参照。
   client.setHandshakeTimeout(4);
-  client.setTimeout(4);
   httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
   httpUpdate.onProgress([](int, int) {
     esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う

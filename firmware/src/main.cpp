@@ -542,14 +542,17 @@ static bool performPullOta(const String& targetVersion) {
 
   WiFiClientSecure client;
   client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
-  // 締切なしで既定30秒(read/write)・120秒(TLSハンドシェイク)残っており、
-  // onProgress()が一度も呼ばれないままWDT(20秒)が先に発火してパニックする
-  // 実機不具合を踏んだ(batch-uplinkのUploaderと同じ形の穴。docs/log/
-  // 2026-08-31-device2-ota-pull-wdt-panic.md、2026-09-06-device1-hostbyname-patch-rollout.md)。
-  // Uploaderと同じ4秒に揃える——単発の遅延をHTTP_UPDATE_FAILED
-  // (既存の穏当な失敗パス、60秒バックオフで再試行)に変える。
+  // TLSハンドシェイクの締切が既定120秒のまま残っており、onProgress()が一度も
+  // 呼ばれないままWDT(20秒)が先に発火してパニックする実機不具合を踏んだ
+  // (docs/log/2026-08-31-device2-ota-pull-wdt-panic.md、
+  // 2026-09-06-device1-hostbyname-patch-rollout.md)。Uploaderと同じ4秒に縮める
+  // ——単発の遅延をHTTP_UPDATE_FAILED(既存の穏当な失敗パス、60秒バックオフで
+  // 再試行)に変える。read/writeの締切は`client.setTimeout()`では変えられない
+  // ——httpUpdate.update()の内部でHTTPClient::connect()が独自の既定値(接続
+  // 5000ms、以後8000ms=HTTPUpdateの_httpClientTimeout既定値)で必ず上書きする
+  // ため(グローバルhttpUpdateにこれを変える公開APIは無い)。どちらもWDTには
+  // 十分収まる値なので対処不要と判断した
   client.setHandshakeTimeout(4);
-  client.setTimeout(4);
   httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
   httpUpdate.onProgress([](int, int) {
     esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う(otaOnProgressと同じ理由)

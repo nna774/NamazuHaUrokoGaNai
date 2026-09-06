@@ -38,10 +38,13 @@ stop_ssl_socket (ssl_client.cpp:343) → WiFiClientSecure::read/connect
 → ... → HTTPUpdate::runUpdate/handleUpdate (pull型OTA取得経路)
 ```
 
-`performPullOta()`が使う生の`WiFiClientSecure`に`setTimeout()`を一度も呼んでおらず、
-既定のソケット読み取りタイムアウト(30秒)がWDT(20秒)より長く残っている——
-`onProgress`によるWDT給餌はチャンク間でしか効かないため、1チャンクの読み取り自体が
-20秒を超えるとすり抜けてパニックする、という2026-08-31時点の分析がそのまま当てはまる。
+`performPullOta()`が使う生の`WiFiClientSecure`に`setHandshakeTimeout()`を一度も
+呼んでおらず、TLSハンドシェイクの締切が既定**120秒**のままWDT(20秒)より長く残って
+いる——`onProgress`によるWDT給餌は進捗があった時にしか効かないため、ハンドシェイクの
+内部リトライループが20秒を超えるとすり抜けてパニックする、という2026-08-31時点の
+分析がそのまま当てはまる（[後日の`/code-review`](2026-09-06-ota-pull-timeout-budget-fix.md)で、
+read/write側の30秒という当初の見立ては誤りで、実際は`HTTPUpdate`が内部で強制的に
+8秒へ揃えており最初から危険域ではなかったと判明した）。
 pull型OTAは`pending_ota_version`をサーバ側に立てっぱなしにする設計のため、パニック後の
 再起動でも許可が残り、次の巡回で自然に再試行されて着地した（今回も実害はパニック1回のみ）。
 
