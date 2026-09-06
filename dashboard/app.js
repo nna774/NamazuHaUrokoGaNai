@@ -48,6 +48,17 @@ const SCALE_STYLE = {
   '7':  ['#b40068', '#fff'],
 };
 const ART_STYLE = ['#888', '#fff'];  // 人工地震はグレー
+// 事後解析の判定(verdict)の表示名。値は tools/detection_events.csv と共有の語彙。
+const VERDICT_LABEL = { good: '検出', warning: '微妙', critical: '埋没' };
+
+// 一覧の判定セル。未判定（まだ調べていない/自動確定のみ）は「—」。
+// 「調べたが埋没だった」と「まだ調べていない」を一覧で区別するための列なので、
+// verdict では行を隠さない（隠すと区別が消える。docs/log/2026-09-06-event-verdict.md）。
+function verdictCell(verdict) {
+  if (!verdict) return '<td class="col-verdict muted">—</td>';
+  const label = VERDICT_LABEL[verdict] || verdict;
+  return `<td class="col-verdict"><span class="dot d-${verdict}"></span>${label}</td>`;
+}
 
 // 震度バッジのHTML。階級で色分けし、人工地震はグレーにする。
 function scaleBadge(scale, artificial) {
@@ -1042,8 +1053,9 @@ async function reloadEvents(pageNum = 1) {
       const manualTag = ev.manual ? ' <span class="badge badge-manual">手動</span>' : '';
       // どの機のイベントかは常に出す。多点では震度の意味が機ごとに違う。
       const dev = ev.device_id != null ? String(ev.device_id).padStart(4, '0') : '—';
-      tr.innerHTML = `<td>${t}</td><td>${dev}</td><td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
-        + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
+      tr.innerHTML = `<td>${t}</td><td>${dev}</td>${verdictCell(ev.verdict)}`
+        + `<td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
+        + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td class="col-dur">${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
       // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）。
       // 手動保存(manual)は意図して残したものなので薄くしない。
