@@ -18,6 +18,7 @@
 #include <time.h>
 
 #include "Batch.h"
+#include "CoredumpQueue.h"
 #include "DeviceIdentity.h"
 #include "Display.h"
 #include "NamzWire.h"
@@ -126,6 +127,11 @@ static constexpr const char* kHeapFreeHeader = "X-Namz-Heap-Free";
 static constexpr const char* kHeapMaxblockHeader = "X-Namz-Heap-Maxblock";
 static char sHeapFreeBuf[16];
 static char sHeapMaxblockBuf[16];
+// 起動してから今までの最小空きヒープ(ESP.getMinFreeHeap())。free_heapは瞬間値
+// なので、一時的にしか出ないスローリークの兆候を見逃す。生涯最小値ならリーク
+// があれば必ず反映される（docs/log/2026-08-30-esp32-hidden-features-survey.md）。
+static constexpr const char* kHeapMinfreeHeader = "X-Namz-Heap-Minfree";
+static char sHeapMinfreeBuf[16];
 
 // 未送信バックログ件数(spill=LittleFS退避済み・ram=RAMキュー内)。OLED表示・
 // backlogAgeS計算(下のgUploader->spillCount()/ramQueued()呼び出し箇所参照)では
@@ -171,10 +177,12 @@ static const char* resetReasonToString(esp_reset_reason_t reason) {
 // （ループはnamesの終端で止まる）。
 static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader,
                                                   kHeapFreeHeader, kHeapMaxblockHeader,
+                                                  kHeapMinfreeHeader,
                                                   kResetReasonHeader, kSpillCountHeader,
                                                   kRamQueuedHeader, nullptr};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
                                                    sHeapFreeBuf, sHeapMaxblockBuf,
+                                                   sHeapMinfreeBuf,
                                                    sResetReasonBuf, sSpillCountBuf,
                                                    sRamQueuedBuf};
 
@@ -430,6 +438,12 @@ static void samplingTask(void*) {
 static void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  // 再接続はこの関数(WiFi.status()を見てループから呼び直す)が一手に引き受ける。
+  // フレームワーク組み込みのauto-reconnectを有効なままにすると、こちらの
+  // WiFi.begin()呼び直しと競合し、arduino-esp32 3.x系では
+  // "sta is connecting, cannot set config"で再接続不能になったまま固まる
+  // （docs/log/2026-09-01-pioarduino-arduino3-poc.md）。
+  WiFi.setAutoReconnect(false);
   WiFi.begin(gIdentity.wifiSsid.c_str(), gIdentity.wifiPass.c_str());
   Serial.print("[wifi] connecting");
   uint32_t t0 = millis();
@@ -443,6 +457,16 @@ static void connectWifi() {
   }
   Serial.printf("\n[wifi] %s\n",
                 WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "FAILED");
+#ifdef NAMZ_DNS_CHECKPOINT_ENABLED
+  // NamazuHaUrokoGaNai診断: DHCPが配ったDNSサーバがconnectWifi()直後の時点で
+  // 何になっているかを見る(docs/log/2026-09-01-pioarduino-arduino3-poc.md、
+  // hostByName()失敗時にdns0=dns1=8.8.4.4という期待値とズレた値が出た件の切り分け)。
+  // 普段は無効、ビルドフラグ-DNAMZ_DNS_CHECKPOINT_ENABLED=1で有効化する。
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[namz-dns] connectWifi() done: dns0=%s dns1=%s\n",
+                  WiFi.dnsIP(0).toString().c_str(), WiFi.dnsIP(1).toString().c_str());
+  }
+#endif
 }
 
 // --- OTA更新の安全な停止・再開（docs/ota.md）---
@@ -518,6 +542,17 @@ static bool performPullOta(const String& targetVersion) {
 
   WiFiClientSecure client;
   client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
+  // TLSハンドシェイクの締切が既定120秒のまま残っており、onProgress()が一度も
+  // 呼ばれないままWDT(20秒)が先に発火してパニックする実機不具合を踏んだ
+  // (docs/log/2026-08-31-device2-ota-pull-wdt-panic.md、
+  // 2026-09-06-device1-hostbyname-patch-rollout.md)。Uploaderと同じ4秒に縮める
+  // ——単発の遅延をHTTP_UPDATE_FAILED(既存の穏当な失敗パス、60秒バックオフで
+  // 再試行)に変える。read/writeの締切は`client.setTimeout()`では変えられない
+  // ——httpUpdate.update()の内部でHTTPClient::connect()が独自の既定値(接続
+  // 5000ms、以後8000ms=HTTPUpdateの_httpClientTimeout既定値)で必ず上書きする
+  // ため(グローバルhttpUpdateにこれを変える公開APIは無い)。どちらもWDTには
+  // 十分収まる値なので対処不要と判断した
+  client.setHandshakeTimeout(4);
   httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
   httpUpdate.onProgress([](int, int) {
     esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う(otaOnProgressと同じ理由)
@@ -637,6 +672,7 @@ static void uploaderTask(void*) {
     snprintf(sUptimeBuf, sizeof(sUptimeBuf), "%lld", (long long)esp_timer_get_time());
     snprintf(sHeapFreeBuf, sizeof(sHeapFreeBuf), "%u", (unsigned)ESP.getFreeHeap());
     snprintf(sHeapMaxblockBuf, sizeof(sHeapMaxblockBuf), "%u", (unsigned)ESP.getMaxAllocHeap());
+    snprintf(sHeapMinfreeBuf, sizeof(sHeapMinfreeBuf), "%u", (unsigned)ESP.getMinFreeHeap());
     snprintf(sSpillCountBuf, sizeof(sSpillCountBuf), "%u", (unsigned)gUploader->spillCount());
     snprintf(sRamQueuedBuf, sizeof(sRamQueuedBuf), "%u", (unsigned)gUploader->ramQueued());
     gUploader->pump();
@@ -704,10 +740,24 @@ static void uploaderTask(void*) {
 }
 #endif
 
+// NamazuHaUrokoGaNai診断: setup()の要所でヒープ断片化状況を打点する
+// (docs/log/2026-09-01-pioarduino-arduino3-poc.md、maxblock_8bit崩壊の犯人捜しで
+// 導入)。普段は無効(何もしない)、ビルドフラグ-DNAMZ_HEAP_CHECKPOINT_ENABLED=1で
+// 有効化する。
+#ifdef NAMZ_HEAP_CHECKPOINT_ENABLED
+#define NAMZ_HEAP_CHECKPOINT(label)                                                     \
+  Serial.printf("[namz-heap] %-24s free=%u maxblock_8bit=%u\n", label,                  \
+                (unsigned)ESP.getFreeHeap(),                                            \
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
+#else
+#define NAMZ_HEAP_CHECKPOINT(label) ((void)0)
+#endif
+
 void setup() {
   Serial.begin(kSerialBaud);
   delay(200);
   Serial.printf("\n[boot] NamazuHaUrokoGaNai fw=%s env=%s\n", kFwVersion, kOtaEnv);
+  NAMZ_HEAP_CHECKPOINT("setup start");
   // WiFi/Uploaderより前、mbedTLSが一度も呼ばれていないうちにフックする
   // （後から差し替えても、既にそれ以前の呼び出しで確保済みの分は追えない）。
   // mbedtls_platform_set_calloc_free()はグローバルフック1系統しか持てないため、
@@ -718,11 +768,19 @@ void setup() {
 #else
   tlsmempool::install();
 #endif
+  NAMZ_HEAP_CHECKPOINT("after tlsmempool");
 #ifndef NAMZ_SENSOR_TEST
+  // WiFi/identity未ロードでも動く、ネットワーク非依存のローカルflash操作のみ。
+  // coredumpパーティションは単一image・次のパニックで上書きされる仕様なので、
+  // 何よりも先にLittleFSへ退避してから空ける
+  // (docs/log/2026-08-29-coredump-auto-upload-plan.md)。
+  coredumpqueue::captureIfPresent(kCoredumpQueueDir, kMaxCoredumpFiles);
+
   // Display/SPI/センサ初期化(フォント読み込み等でヒープを消費する)より前、
   // 起動直後の最も断片化していない時点で確保する。理由はsetupBatchPool()の
   // コメント参照。
   setupBatchPool();
+  NAMZ_HEAP_CHECKPOINT("after setupBatchPool");
   // resetReasonToString/sResetReasonBufはUploaderへ送るヘッダ用で、ネットワーク
   // 送信の無いsensortestビルドには存在しない（上のkExtraRequestHeaderNames等と
   // 同じ#ifndefで囲まれている）。
@@ -779,8 +837,26 @@ void setup() {
   gBatchQueue = xQueueCreate(4, sizeof(Batch*));
   gAlertQueue = xQueueCreate(4, sizeof(AlertMsg));
   connectWifi();
+  NAMZ_HEAP_CHECKPOINT("after connectWifi");
   timesync::begin(kNtpServer1, kNtpServer2,
                   static_cast<uint64_t>(kNtpStepThresholdSeconds) * 1000000ULL);
+  NAMZ_HEAP_CHECKPOINT("after timesync::begin");
+
+  // coredumpキューのアップロードは、Uploader/task起動より前のこの時点で行う。
+  // main.cppがsetup()冒頭でinstallしたTlsMemPool(mbedTLS用固定プール)は
+  // 「単一TLS接続前提」で見積もっており(OTAがgUploader->closeConnection()して
+  // からCloudFrontへ張り直すのと同じ制約)、gUploader生成前ならcoredump送信用の
+  // TLS接続だけが存在する状態を保てる。新しいtaskは作らず同期呼び出しにする
+  // (docs/log/2026-08-29-coredump-auto-upload-plan.md)。WiFi接続に失敗していれば
+  // 何もせず、次回起動での再試行に委ねる。
+  if (WiFi.status() == WL_CONNECTED) {
+    coredumpqueue::drainToCloud(kCoredumpQueueDir, gIdentity.ingestUrl.c_str(),
+                                gIdentity.hmacSecret.c_str(), gIdentity.deviceId, kFwVersion,
+                                reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
+                                kCoredumpPerFileTimeoutMs, kCoredumpTotalBudgetMs);
+  }
+  NAMZ_HEAP_CHECKPOINT("after coredump drain");
+
   // ingest/alert先はLambda Function URL直（*.lambda-url.ap-northeast-1.on.aws、
   // CloudFrontを介さない）。openssl s_clientで実機のチェーンを確認したところ
   // leaf -> Amazon RSA 2048 M01 -> Amazon Root CA 1 で、OTA用に埋め込み済みの
@@ -804,6 +880,7 @@ void setup() {
                            reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
                            kBatchBufferBytes, /*discardSpillOn400=*/true);
   gUploader->begin();
+  NAMZ_HEAP_CHECKPOINT("after Uploader begin");
 
   // batchDrainTaskは送信タスクより優先度を上げておく——新しいバッチが来た瞬間に
   // 確実に先へ進めることを保証するため（送信タスクは大半ネットワーク待ちで
@@ -862,6 +939,23 @@ void loop() {
   static uint32_t sessStart = 0;
   static bool active = false;
   static int tick = 0;
+
+#ifdef NAMZ_PANIC_TEST_MS
+  // coredump自動送信の実機動作確認用(docs/log/2026-08-30-
+  // coredump-auto-upload-implementation-wrapup.md「未了」)。起動から
+  // NAMZ_PANIC_TEST_MSミリ秒経過したら意図的にabort()し、ESP-IDFの
+  // coredump-to-flashへ書かせる。予備基板専用のビルドフラグで、通常の
+  // env(esp32dev/adxl355等)には効かない——本番機に混入させないこと。
+  {
+    static bool triggered = false;
+    if (!triggered && millis() > (NAMZ_PANIC_TEST_MS)) {
+      triggered = true;
+      Serial.println("[panic-test] triggering deliberate abort() now");
+      Serial.flush();
+      abort();
+    }
+  }
+#endif
 
 #ifndef NAMZ_SENSOR_TEST
   // ボタン長押しでの緊急手動再起動（config.hのkRebootHoldConfirmMs/

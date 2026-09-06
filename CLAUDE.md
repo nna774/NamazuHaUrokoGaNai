@@ -16,9 +16,11 @@
 | いま何がどこまで動いているか・実機の検証結果・ハード配線 | [docs/STATUS.md](docs/STATUS.md) |
 | 実機のノイズ特性・検出限界・センサ選定の知見 | [docs/noise.md](docs/noise.md) |
 | 「〇〇地震、捉えてた？」と聞かれた時にやる事後解析の標準手順 | [docs/post_hoc_detection.md](docs/post_hoc_detection.md) |
+| マグニチュード別「投げる価値があるか」の目安距離表（自動生成・要事例追加時再生成） | [docs/detection_range.md](docs/detection_range.md) |
 | 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
 | ADXL355機（device 2）の導入経緯・実装済み内容 | [docs/adxl355.md](docs/adxl355.md) |
 | ジオフォン(速度センサ)導入作戦（検討中・未着手） | [docs/geophone.md](docs/geophone.md) |
+| 停電対策のUPS導入作戦（方針決定・発注済み、実機未検証） | [docs/ups.md](docs/ups.md) |
 | 安価な代替センサ(圧電等)による補強検知の構想（雑談ベースの検討記録。piezo.mdへ引き継ぎ済み） | [docs/other-sensors.md](docs/other-sensors.md) |
 | ピエゾ実験機（device 3）。phase1（クラウド統合）まで実装済み・稼働中 | [docs/piezo.md](docs/piezo.md) |
 | ファームのOTA更新（実装済み・実機確認済み。使い方は§0クイックリファレンス） | [docs/ota.md](docs/ota.md) |
@@ -29,7 +31,8 @@
 | 最初の実装計画とユーザーの決定事項 | [plan.md](plan.md) |
 | バッチのバイナリ形式 | [docs/wire_format.md](docs/wire_format.md) |
 | 決定の経緯・作業ログ索引（**新しいものから読む**） | [docs/progress.md](docs/progress.md) → `docs/log/` |
-| 各領域の詳細 | `firmware/` `lambda/` `terraform/` `dashboard/` `tools/` の各 `README.md` |
+| 各領域の詳細 | [firmware/README.md](firmware/README.md) [lambda/README.md](lambda/README.md) [terraform/README.md](terraform/README.md) [dashboard/README.md](dashboard/README.md) [tools/README.md](tools/README.md) |
+| CIが何を検査しているか・落ちた時の直し方 | [docs/ci.md](docs/ci.md) |
 
 `memo.md` はユーザーの作業メモ（TODO・思いつき）。要件の出所になることがあるが、
 コミット対象ではない。
@@ -74,6 +77,10 @@
   - `device_prompt` … デバイス速報が来た / `cloud_confirmed` … クラウドFFTで確定
   - `checked` … detectが評価済み（未確定なら一覧の既定で隠れる=非該当）
   - `artificial` … 人工地震(テスト等)フラグ。立てると一覧の既定で隠れ、`all=1` でのみ薄く出る
+  - `verdict` … 事後解析の判定(`good`/`warning`/`critical`、`tools/detection_events.csv`と
+    同じ語彙)。`verdict_source` は `human`/`auto`。**一覧の既定フィルタはこれを見ない**
+    ——埋没と判定したイベントも既定で出す（「調べたが見えなかった」と「まだ調べていない」を
+    区別するため）。付けるのは `flag_event.py verdict` か `promote_event.py --verdict`
   - 一覧の既定フィルタは「(確定 or 未評価) かつ 非artificial」。表示震度は `effective_intensity`。
   - **`api`の`/event`はCloudFrontで長期キャッシュしている**（確定済みは1年相当、速報のみは
     無効化。`terraform/custom_domain.tf`の`aws_cloudfront_cache_policy.api_event`、
@@ -148,6 +155,17 @@ aws cloudfront create-invalidation \
 （試した順序・実測・元の不具合の経緯は`terraform/dashboard.tf`のコメントと
 [docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md](docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md)参照）。
 
+## ローカル環境（direnv・AWSプロファイル・.venv）
+
+このリポジトリでのAWS操作は`namazu-admin`プロファイルを使う。direnvで自動化してある。
+
+- `.envrc`・`.venv`は`.gitignore`対象で本体（`git worktree list`の先頭に出る非worktreeの
+  チェックアウト）にしかない。実体（`AWS_PROFILE`設定・`.venv`のactivate）は本体の`.envrc`
+  にだけ書く。
+- worktree側の`.envrc`は**`source_up`の1行だけ**でよい。direnvが親ディレクトリを遡って
+  本体の`.envrc`を見つけて読む——中身を複製しないので本体の設定を変えれば全worktreeに
+  自動で伝播する。書いたら`direnv allow <worktreeのパス>`を忘れずに。
+
 ## 開発の約束（グローバル設定に加えて）
 
 - コミットは日本語・意味単位。rebaseせず master を merge。テストは `.venv` で
@@ -165,3 +183,10 @@ aws cloudfront create-invalidation \
 
 ログに書くこと: **何を決めたか、なぜそう決めたか、何が覆ったか、次に何が可能になったか。**
 作業の実況中継は要らない。**判断とその理由だけ残せ。**
+
+**本体に残った経緯記述は、古くなったら刈り込む。** 上記3を守っていても、1トピックを
+複数セッションにまたいで追記していく過程で「新しい仮説(日付)」「未検証」「実装済み
+(日付)」のような時系列の推理過程が本体にそのまま積み上がりがちになる。
+1トピックの結論が出て後続の追記が止まったら、その節を読み返し、今の結論だけを残して
+推理の紆余曲折は削るか対応する`docs/log/*.md`へのリンクに置き換えること。**何を削るかは
+新規の判断なので、量が多い・迷う場合はユーザーに確認してから進める。**

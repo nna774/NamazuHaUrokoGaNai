@@ -169,6 +169,11 @@ CS が IIS3DHHC(GPIO33) と別なので、**比較フェーズでは両方を同
 直後のケーブル取り回し、§7.3のサービスループ）。`Iis3dhhc::read()` にも同じ
 検証漏れがあるが、今のところ発生報告なし。
 
+**別件との切り分け**: device2では別途、約36〜37秒の完全なデータ欠落が不規則に
+繰り返し発生する問題も見つかったが、原因はSPI配線ではなく`uploaderTask`のTASK_WDT
+（送信側のTLSハンドシェイク待ちで停止）と確定している。詳細・現在の対策状況は
+[design.md「送信の信頼性」](design.md#送信の信頼性)参照。
+
 ### 5.2 サンプルのビット幅（int32 か `>>3` か）
 
 ADXL355 の生値（3.9 µg/LSB）を素で int16 に入れると **±0.128g = 125 gal（震度5弱相当）で
@@ -334,47 +339,3 @@ PMDZ にマウントホールが無いので接着になる。間にアルミ板
   狙うなら速度計。
 - **IIS3DHHC 機の撤去**: 残す（§3）。
 
-## 9. 検証実行時の段取り（2026-08-04実施予定）
-
-コンクリートブロック + エポキシで固定後、§6 検証フロー実行。
-
-### 前準備
-- **90分硬化**（ボンド Eセット）を待つ
-- 硬化完了後、**水平出し**：
-  - sensortest で起動して z軸の直流レベルを見る（正常なら ~980 gal）
-  - x/y が大きく（±50 gal以上）出ていたら傾いている
-  - 理想は水準器で物理調整。急務でなければ**データから傾き推定・後補正**で対応
-    （直流オフセット x/y/z から逆算可能。backtest 照合で差が出たら判定）
-
-### phase 0: センサ確認
-```bash
-cd firmware
-../.venv/bin/pio run -e adxl355-sensortest -t upload
-../.venv/bin/pio device monitor
-# => "[sensor] ADXL355 ready" が出ればOK
-```
-
-### phase 1: 数値照合
-```bash
-cd tools
-python capture_serial.py --sensor adxl355 --port /dev/cu.usbserial-XXXXX > adxl_test.csv
-
-# backtest で tools/jismo と照合（数値一致を確認）
-python backtest.py adxl_test.csv
-```
-
-### phase 2: ノイズ測定
-- 1号機（IIS3DHHC）の隣に置いたままで、静穏区間を**1-2時間**測定
-- 測定時間は柔軟に決定（短すぎるとPSDがざらざら）
-```bash
-python capture_serial.py --sensor adxl355 --port ... > adxl_fixed.csv
-
-# noise.md の「再現」セクションでASD を計算
-# → in-band 14-17 µg/√Hz 等を確認
-```
-
-### phase 3: 受け入れ判定
-- noise.md の表（14-17 µg/√Hz / ≈0.10 gal / -1.0〜-1.1 など）に照合
-- PSD形状が平坦（白色）か確認
-- 判定 OK なら完了、NG なら設置改善（§7）へ
-- 完了後、noise.md に暫定測定ログ追記

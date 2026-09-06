@@ -2,7 +2,7 @@
 
 ## 何を決めたか
 
-[docs/remote_restart.md](remote_restart.md)（[2026-08-06 設計ログ](2026-08-06-remote-restart-design.md)）
+[docs/remote_restart.md](../remote_restart.md)（[2026-08-06 設計ログ](2026-08-06-remote-restart-design.md)）
 の設計通りに実装した。
 
 - batch-uplink（別リポジトリ）に `devices.request_restart`/`clear_restart_request`と、

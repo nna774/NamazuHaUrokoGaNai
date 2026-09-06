@@ -48,6 +48,17 @@ const SCALE_STYLE = {
   '7':  ['#b40068', '#fff'],
 };
 const ART_STYLE = ['#888', '#fff'];  // 人工地震はグレー
+// 事後解析の判定(verdict)の表示名。値は tools/detection_events.csv と共有の語彙。
+const VERDICT_LABEL = { good: '検出', warning: '微妙', critical: '埋没' };
+
+// 一覧の判定セル。未判定（まだ調べていない/自動確定のみ）は「—」。
+// 「調べたが埋没だった」と「まだ調べていない」を一覧で区別するための列なので、
+// verdict では行を隠さない（隠すと区別が消える。docs/log/2026-09-06-event-verdict.md）。
+function verdictCell(verdict) {
+  if (!verdict) return '<td class="col-verdict muted">—</td>';
+  const label = VERDICT_LABEL[verdict] || verdict;
+  return `<td class="col-verdict"><span class="dot d-${verdict}"></span>${label}</td>`;
+}
 
 // 震度バッジのHTML。階級で色分けし、人工地震はグレーにする。
 function scaleBadge(scale, artificial) {
@@ -747,6 +758,9 @@ function updateLiveIntensityMulti(waveforms) {
 // 選択の真実は liveDeviceId 側に置く。<select> の選択肢は /devices を引くまで
 // 空なので、DOM を真実にすると URL 復元と埋め込みの順序に依存してしまう。
 let liveDeviceId = null;
+// URL に d= も無く手動選択もされていない(=liveDeviceId未設定)時の既定機。
+// 実在しなければ最若番へ倒す(下のfillLiveDevices参照)。
+const DEFAULT_LIVE_DEVICE_ID = '2';
 let liveDevices = [];
 // device_id -> calibrated(bool)。/devices の "calibrated" を写した鏡（gal校正済みか、
 // wire.is_calibrated()が単一の真実。ピエゾ等はfalse）。未取得時は校正扱いで安全側に倒す。
@@ -801,9 +815,12 @@ async function fillLiveDevices() {
       sel.innerHTML = ids.map(id =>
         `<option value="${id}">${String(id).padStart(4, '0')}</option>`).join('');
     }
-    // URL 由来の選択が実在しなければ最若番へ倒す（デバイスを外した後のURL対策）。
+    // URL由来の選択が実在しなければ倒す（デバイスを外した後のURL対策）。
+    // 未選択（URLにdも無く手動選択も無い）時は既定機、それも無ければ最若番へ。
     if (!ids.map(String).includes(String(liveDeviceId))) {
-      liveDeviceId = ids.length ? String(ids[0]) : null;
+      liveDeviceId = liveDeviceId == null && ids.map(String).includes(DEFAULT_LIVE_DEVICE_ID)
+        ? DEFAULT_LIVE_DEVICE_ID
+        : (ids.length ? String(ids[0]) : null);
     }
     if (liveDeviceId) sel.value = liveDeviceId;
 
@@ -1024,7 +1041,12 @@ async function reloadEvents(pageNum = 1) {
     for (const ev of data.events) {
       const tr = document.createElement('tr');
       tr.dataset.id = ev.event_id;
-      const t = new Date(Number(ev.onset_us) / 1000).toLocaleString('ja-JP');
+      // 日付と時刻を別spanにしておき、狭い画面ではCSSで日付/時刻を2段に割る
+      // （ブラウザ任せの折り返しだと列幅が1行ぶんで見積もられ、右側に使わない
+      // 余白が残る）。広い画面では従来どおり1行に並ぶ。
+      const d = new Date(Number(ev.onset_us) / 1000);
+      const t = `<span class="ymd">${d.toLocaleDateString('ja-JP')}</span> `
+        + `<span class="hms">${d.toLocaleTimeString('ja-JP')}</span>`;
       const iv = Number(ev.max_intensity || 0);
       const i = iv.toFixed(1);
       const scale = ev.scale || intensityScale(iv);
@@ -1032,17 +1054,23 @@ async function reloadEvents(pageNum = 1) {
       // 震度バッジは階級で色分け（人工地震はグレー）。人工地震は種別を示すタグも震度セル内に
       // 添える。列を足すとチェック有無でレイアウトが変わるため、既存セル内で完結させる。
       // グレーは震度0とも紛らわしいので「人工」タグを併記して判別を確実にする（全件表示でのみ出る）。
-      const artTag = ev.artificial ? ' <span class="badge badge-art">人工地震</span>' : '';
-      const manualTag = ev.manual ? ' <span class="badge badge-manual">手動</span>' : '';
+      // ラベルは「人工」まで詰める（狭い画面で震度セルが2段になるため）。
+      // 正式名称は title と詳細ページ側に残す。
+      const artTag = ev.artificial
+        ? ' <span class="badge badge-art" title="人工地震（テスト等）">人工</span>' : '';
+      // 判定が付いていれば「人が調べた」ことは判定列が示すので、手動タグは出さない。
+      // まだ判定していない手動保存だけ「手動」と出る。
+      const manualTag = (ev.manual && !ev.verdict) ? ' <span class="badge badge-manual">手動</span>' : '';
       // どの機のイベントかは常に出す。多点では震度の意味が機ごとに違う。
       const dev = ev.device_id != null ? String(ev.device_id).padStart(4, '0') : '—';
-      tr.innerHTML = `<td>${t}</td><td>${dev}</td><td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
-        + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
+      tr.innerHTML = `<td class="col-time">${t}</td><td>${dev}</td>${verdictCell(ev.verdict)}`
+        + `<td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
+        + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td class="col-dur">${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
       // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）。
       // 手動保存(manual)は意図して残したものなので薄くしない。
       if (ev.artificial || (ev.checked && !ev.cloud_confirmed && !ev.manual)) tr.style.opacity = '0.45';
-      tr.onclick = () => { location.hash = eventHash(ev.event_id); };
+      tr.onclick = () => { location.hash = eventHash(ev.event_id, false); };
       tbody.appendChild(tr);
     }
     // ページャ
@@ -1099,7 +1127,7 @@ function renderEventInfo(m) {
   if (m.related_events && m.related_events.length) {
     const links = m.related_events.map(id => {
       const dev = String(id).split('-', 1)[0];
-      return `<a href="#${eventHash(id)}">${dev}号機 (${escapeHtml(id)})</a>`;
+      return `<a href="#${eventHash(id, false)}">${dev}号機 (${escapeHtml(id)})</a>`;
     }).join(' / ');
     rows.push(['関連イベント（同一地震・他機）', links]);
   }
@@ -1329,7 +1357,8 @@ function cloudwatchHeapUrl(deviceId) {
   const id = String(deviceId);
   return `https://${CLOUDWATCH_REGION}.console.aws.amazon.com/cloudwatch/home?region=${CLOUDWATCH_REGION}`
     + `#metricsV2:graph=~(metrics~(~(~'Namazu~'HeapFreeBytes~'DeviceId~'${id})`
-    + `~(~'Namazu~'HeapMaxAllocBytes~'DeviceId~'${id}))~view~'timeSeries~stacked~false`
+    + `~(~'Namazu~'HeapMaxAllocBytes~'DeviceId~'${id})`
+    + `~(~'Namazu~'HeapMinFreeBytes~'DeviceId~'${id}))~view~'timeSeries~stacked~false`
     + `~region~'${CLOUDWATCH_REGION}~start~'-PT24H~end~'P0D)`;
 }
 
@@ -1363,8 +1392,12 @@ function renderDeviceInfo(d) {
     ['稼働時間', d.uptime_s != null ? fmtAgoExact(d.uptime_s) : '不明'],
     ['前回の再起動理由', d.reset_reason ? escapeHtml(d.reset_reason) : '不明'],
   ];
+  const heapMinfreeText = d.heap_minfree_bytes != null
+    ? ` / 最小${(d.heap_minfree_bytes / 1024).toFixed(0)}KB`
+    : '';  // 旧ファーム(ヘッダ未送信)ではキー自体が無い
   const heapText = d.heap_free_bytes != null
-    ? `空き${(d.heap_free_bytes / 1024).toFixed(0)}KB / 最大連続${(d.heap_maxblock_bytes / 1024).toFixed(0)}KB　`
+    ? `空き${(d.heap_free_bytes / 1024).toFixed(0)}KB / 最大連続${(d.heap_maxblock_bytes / 1024).toFixed(0)}KB`
+      + `${heapMinfreeText}　`
     : '直近データなし　';
   rows.push(['ヒープ', heapText
     + `<a href="${cloudwatchHeapUrl(d.device_id)}" target="_blank" rel="noopener">CloudWatchで見る →</a>`]);
@@ -1535,10 +1568,12 @@ function eventsHash(pageNum) {
 
 // イベント詳細ハッシュ。戻り先の一覧状態(p/all/d)・縦軸レンジ(r)・時間ズーム(t)を持たせ、
 // リロード・共有URLでフィルタや表示範囲が復元されるようにする。
-function eventHash(id) {
+// includeZoom=false は「別イベントへ移動するリンク」用。eventZoomは今表示中のイベントの
+// 時間窓なので、遷移先のイベントには時刻が対応せず引き継ぐとグラフが壊れる。
+function eventHash(id, includeZoom = true) {
   const all = document.getElementById('events-all').checked ? 1 : 0;
   const r = document.getElementById('event-yrange').value;
-  const t = eventZoom ? `&t=${Math.round(eventZoom.fromUs)}-${Math.round(eventZoom.toUs)}` : '';
+  const t = includeZoom && eventZoom ? `&t=${Math.round(eventZoom.fromUs)}-${Math.round(eventZoom.toUs)}` : '';
   return `event/${encodeURIComponent(id)}?p=${eventsPageNum}&all=${all}`
     + `${eventsDeviceHash()}&r=${r}&ax=${axesStr('event')}${t}`;
 }

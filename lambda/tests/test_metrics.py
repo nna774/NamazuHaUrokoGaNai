@@ -38,12 +38,23 @@ def test_record_heap_sends_both_metrics_with_device_dimension(client):
     call = client.calls[0]
     assert call["Namespace"] == metrics.NAMESPACE
     by_name = {m["MetricName"]: m for m in call["MetricData"]}
+    # minfree省略時(旧ファーム相当)はHeapMinFreeBytesを送らない。
     assert set(by_name) == {"HeapFreeBytes", "HeapMaxAllocBytes"}
     assert by_name["HeapFreeBytes"]["Value"] == 123456
     assert by_name["HeapMaxAllocBytes"]["Value"] == 45678
     for m in by_name.values():
         assert m["Dimensions"] == [{"Name": "DeviceId", "Value": "2"}]
         assert m["Unit"] == "Bytes"
+
+
+def test_record_heap_includes_minfree_when_given(client):
+    metrics.record_heap(2, 123456, 45678, 98765)
+
+    by_name = {m["MetricName"]: m for m in client.calls[0]["MetricData"]}
+    assert set(by_name) == {"HeapFreeBytes", "HeapMaxAllocBytes", "HeapMinFreeBytes"}
+    assert by_name["HeapMinFreeBytes"]["Value"] == 98765
+    assert by_name["HeapMinFreeBytes"]["Dimensions"] == [{"Name": "DeviceId", "Value": "2"}]
+    assert by_name["HeapMinFreeBytes"]["Unit"] == "Bytes"
 
 
 def test_latest_heap_returns_none_without_data(client):
@@ -65,6 +76,19 @@ def test_latest_heap_picks_the_newest_datapoint(client):
     assert result["heap_free_bytes"] == 123456
     assert result["heap_maxblock_bytes"] == 45678
     assert result["heap_measured_at_us"] == int(now.timestamp() * 1e6)
+    # HeapMinFreeBytesは未設定(旧ファーム相当) -> キー自体が無い。
+    assert "heap_minfree_bytes" not in result
+
+
+def test_latest_heap_includes_minfree_when_data_exists(client):
+    now = datetime.now(timezone.utc)
+    client.datapoints["HeapFreeBytes"] = [{"Timestamp": now, "Average": 123456.0}]
+    client.datapoints["HeapMaxAllocBytes"] = [{"Timestamp": now, "Average": 45678.0}]
+    client.datapoints["HeapMinFreeBytes"] = [{"Timestamp": now, "Average": 98765.0}]
+
+    result = metrics.latest_heap(1)
+
+    assert result["heap_minfree_bytes"] == 98765
 
 
 def test_latest_heap_none_when_only_one_metric_has_data(client):

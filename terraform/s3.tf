@@ -1,4 +1,6 @@
-# データ用バケット: raw/（60日でexpire、削除後さらに30日分は復旧可能）と events/（永久）
+# データ用バケット: raw/（60日でexpire、削除後さらに30日分は復旧可能）と events/（永久）と
+# coredump/（60日でexpire。秘密情報が写り込んでいる可能性があるため events/ のように
+# 永久保持にはしない。docs/log/2026-08-29-coredump-auto-upload-plan.md）
 resource "aws_s3_bucket" "data" {
   bucket = local.data_bucket
 }
@@ -46,6 +48,23 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
     }
     expiration {
       days = var.raw_retention_days
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  # coredump/ 配下も同様に保持期間で削除する。秘密情報(WiFiパス・HMAC鍵)が写り込んで
+  # いる可能性がある前提で扱う(docs/log/2026-08-29-coredump-auto-upload-design-discussion.md)
+  # ため、events/ のような永久保持にはせず露出期間を絞る。raw/ と違い変数化はせず固定60日。
+  rule {
+    id     = "expire-coredump"
+    status = "Enabled"
+    filter {
+      prefix = "coredump/"
+    }
+    expiration {
+      days = 60
     }
     noncurrent_version_expiration {
       noncurrent_days = 30

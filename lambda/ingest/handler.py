@@ -1,13 +1,16 @@
-"""ingest Lambda: デバイスからのバッチPOSTと速報アラートを受ける。
+"""ingest Lambda: デバイスからのバッチPOST・速報アラート・coredumpを受ける。
 
 Lambda Function URL (payload v2.0) 前提。
-- POST /       : 30秒バッチ（application/octet-stream, HMAC署名）→ S3 raw/ へ
-- POST /alert  : デバイス速報（JSON, HMAC署名）→ DynamoDB + 即Slack通知
+- POST /          : 30秒バッチ（application/octet-stream, HMAC署名）→ S3 raw/ へ
+- POST /alert     : デバイス速報（JSON, HMAC署名）→ DynamoDB + 即Slack通知
+- POST /coredump  : 起動時に見つかったコアダンプ（application/octet-stream, HMAC署名）
+                    → S3 coredump/ へ（docs/log/2026-08-29-coredump-auto-upload-plan.md）
 """
 
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import json
 import os
 import time
@@ -26,6 +29,12 @@ _devices_table = boto3.resource("dynamodb").Table(os.environ["NAMZ_DEVICES_TABLE
 
 # デバイス速報を Slack 通知する最小計測震度(k)。確定報の閾値(l)より高くする想定。
 NOTIFY_PROMPT_MIN = float(os.environ.get("NAMZ_NOTIFY_PROMPT_MIN", "3.0"))
+
+# watchdog(lambda/watchdog/handler.py)と同じメンション先。coredumpは再起動原因の
+# 調査を促す通知なので、欠測アラートと同じ人に飛ばす。
+SLACK_MENTION = "<@U0323ESK6> "
+
+JST = dt.timezone(dt.timedelta(hours=9))
 
 
 def _resp(code: int, msg: str, extra_headers: dict[str, str] | None = None):
@@ -49,8 +58,11 @@ def handler(event, context):
         return _resp(401, f"auth: {e}")
 
     try:
-        if path.rstrip("/").endswith("alert"):
+        p = path.rstrip("/")
+        if p.endswith("alert"):
             return _handle_alert(raw, device)
+        if p.endswith("coredump"):
+            return _handle_coredump(raw, device, headers)
         return _handle_batch(raw, device, headers)
     except Exception as e:  # noqa: BLE001
         print(f"ingest error: {e!r}")
@@ -105,15 +117,19 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
         except Exception as e:  # noqa: BLE001
             print(f"device_temp.record failed: {e!r}")
 
-    # ヒープ空き容量ヘッダ(X-Namz-Heap-Free/-Maxblock、docs/design.md「送信の
-    # 信頼性」未定事項4)をCloudWatchカスタムメトリクスへ送る。TLS接続使い回し
-    # (v1.7.0)がバックフィル中の断片化にどう効くか、実機のシリアルログ無しでも
-    # 事後に推移で追えるようにするための可観測性。
+    # ヒープ空き容量ヘッダ(X-Namz-Heap-Free/-Maxblock/-Minfree、docs/design.md
+    # 「送信の信頼性」未定事項4)をCloudWatchカスタムメトリクスへ送る。TLS接続
+    # 使い回し(v1.7.0)がバックフィル中の断片化にどう効くか、実機のシリアルログ
+    # 無しでも事後に推移で追えるようにするための可観測性。
     heap_free_raw = headers.get("x-namz-heap-free", "")
     heap_maxblock_raw = headers.get("x-namz-heap-maxblock", "")
+    # X-Namz-Heap-Minfree(ESP.getMinFreeHeap())は後から追加したヘッダなので旧
+    # ファームは送ってこない。無ければNoneのままrecord_heapへ渡す(そちらが省く)。
+    heap_minfree_raw = headers.get("x-namz-heap-minfree", "")
     if heap_free_raw and heap_maxblock_raw:
         try:
-            metrics.record_heap(b.meta.device_id, int(heap_free_raw), int(heap_maxblock_raw))
+            metrics.record_heap(b.meta.device_id, int(heap_free_raw), int(heap_maxblock_raw),
+                                 int(heap_minfree_raw) if heap_minfree_raw else None)
         except Exception as e:  # noqa: BLE001
             print(f"metrics.record_heap failed: {e!r}")
 
@@ -202,3 +218,36 @@ def _handle_alert(raw: bytes, auth_device: str):
         )
         events.set_field(eid, "notified_prompt_ord", ord_now)
     return _resp(200, "alert ok")
+
+
+def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
+    # コアダンプ本体はwire formatを持たない生バイナリなので、device_idは(認証済みの)
+    # X-Namz-Deviceヘッダだけが情報源(バッチ/速報のような本文とのdevice_id一致検証は
+    # 元々できない)。
+    device_id = int(auth_device)
+    fw_version = headers.get("x-namz-fw-version", "unknown")
+    uploaded_at_us = int(time.time() * 1e6)
+    key = s3util.coredump_key(device_id, fw_version, uploaded_at_us)
+    s3.put_object(Bucket=BUCKET, Key=key, Body=raw, ContentType="application/octet-stream")
+
+    # ファームは起動直後・WiFi接続後すぐアップロードするので、回収時刻は
+    # 再起動（≒クラッシュ発生）時刻とほぼ同一とみなせる。
+    collected_at = dt.datetime.fromtimestamp(uploaded_at_us / 1e6, JST).strftime("%Y-%m-%d %H:%M:%S JST")
+
+    # 通知は主経路ではないので、S3保存が済んでいれば失敗してもACK(200)は返す
+    # （_handle_batchのdevices.get_device失敗時と同じ扱い）。
+    try:
+        # 回収時刻・S3キーは fields(横並びグリッド)ではなく本文に直接埋め込む。
+        # iOSのSlackは長押しコピーで fields ブロックを拾わないため、S3キーを
+        # そのままコピペして aws s3 cp 等に使いたい場合に困る。
+        notify.from_env().notify(
+            "コアダンプを回収した",
+            f"{SLACK_MENTION}device *{device_id:04d}* (fw={fw_version}) の起動時にコアダンプが"
+            "見つかり、S3へ保存した。再起動原因の調査に使える。\n"
+            f"*回収時刻*: {collected_at}\n"
+            f"*S3キー*: {key}",
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"coredump notify failed: {e!r}")
+
+    return _resp(200, f"stored {key}")

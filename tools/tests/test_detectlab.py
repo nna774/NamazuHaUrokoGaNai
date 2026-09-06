@@ -236,6 +236,25 @@ def test_print_corr_bin_report_handles_empty_input(capsys):
     assert "データなし" in out
 
 
+def test_coda_window_starts_at_s_window_end_and_spans_coda_s():
+    # S窓終了から後ろCODA_S秒ぶんが「コーダ想定域」——ピーク振幅が到達"瞬間"の窓の外に
+    # 来ることがあるため(2026-08-26福島県沖M4.5の事後解析で自動化した)。
+    origin_us = 0
+    s_win = detectlab.arrival_window(200.0, origin_us, detectlab.S_VEL_RANGE)
+    coda_win = (s_win[1], s_win[1] + int(detectlab.CODA_S * 1e6))
+    assert coda_win[0] == s_win[1]
+    assert (coda_win[1] - coda_win[0]) / 1e6 == detectlab.CODA_S
+    assert detectlab.CODA_S > 0
+
+
+def test_classify_snr_wrect_thresholds():
+    # 重ね描き時の窓別レポート表(パターンB)とreport()の標準出力が同じ分類を共有する。
+    assert detectlab.classify_snr_wrect(snr=2.0, wrect=0.7) == "地震らしい"
+    assert detectlab.classify_snr_wrect(snr=1.5, wrect=0.6) == "地震らしい"
+    assert detectlab.classify_snr_wrect(snr=1.0, wrect=0.9) == "微妙"
+    assert detectlab.classify_snr_wrect(snr=1.4, wrect=0.4) == "要検討"
+
+
 def test_expand_event_ids_builds_full_ids_from_bare_suffix():
     # "59577127"のような裸のバケット番号は --device と組んで完全なIDへ展開される
     assert detectlab.expand_event_ids(["59577127"], [1, 2]) == \

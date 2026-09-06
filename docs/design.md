@@ -232,85 +232,120 @@ YAML ではなく JSON にしたのは、`tools/` に PyYAML 依存を持ち込�
 - 送信タスクは「**2xx ackが返るまでバッチを未送信キューから消さない**」の一本のルール。失敗理由は区別しない
 - 失敗時は指数バックオフ。RAMキューが溢れそうなら LittleFS へ退避、復旧後に古い順でバックフィル
 - S3キーは**測定開始時刻**から決める → バックフィルは正しい時間位置に入り、ダッシュボードの欠測穴が後から埋まる。二重送信は同一キー上書きで冪等
-- **`uploaderTask`の手前に、もう1段浅いバッファがある。** `samplingTask`(Core1)が組み上げたバッチは、まず`gBatchQueue`(FreeRTOSキュー、深さ4、非ブロッキング送信)に積まれる。`uploaderTask`(Core0)がここから吸い出せていない間も、`samplingTask`は待たずに**最古を1本捨てて新しいバッチを積み続ける**（drop-oldest、`main.cpp`の`samplingTask`内）。`Uploader`自身のRAMキュー(`kMaxRamBatches`: 現行esp32dev機=6本/3分、adxl355機=3本/45秒)へは、`uploaderTask`が生きて`gBatchQueue`から吸い出せて初めて届く。**つまり`uploaderTask`が1箇所で長時間ブロックし続けると、ブロック時間の長さに関わらず「直近`gBatchQueue`の深さぶん」（device1なら4本=2分）しか残らず、それより前のデータは`Uploader`に届く機会すら無いままリアルタイムに失われ続ける**——退避漏れではなく、そもそも退避対象になっていない
-- **退避済みのファイルは電源断で飛ばない。** LittleFSは電源断への耐性を設計目標にしているため、`spillOldestRam()`の`close()`が返った後なら安全
-- 実測: 2026-08-07の家庭内ネット障害でdevice1が復旧に失敗し、約70分間1本もLittleFSへ退避できなかった。ユーザーが電源を落とす直前までTFTの時計表示（`loop()`が担当、Core1の別タスク）は秒が動いていたと確認しており、**チップ全体のフリーズではなく`uploaderTask`(Core0)だけが単一のブロッキング呼び出しで70分間詰まっていた**と考えられる（`loop()`・`samplingTask`は生きていた）。この場合、実際に失われたのは`Uploader`のRAM分(3分)ではなく、**`gBatchQueue`のdrop-oldestにより70分の大半がリアルタイムに継続して失われ続けていた**ことになる。詳細は[log/2026-08-08-device1-outage-and-deploy-drift.md](log/2026-08-08-device1-outage-and-deploy-drift.md)
-  - **この結論への留保(2026-08-09追記)。** 上記の「時計の秒が動いていた」はユーザーの一度の目視に基づく。パニック再起動は`loop()`を含むチップ全体を再起動させるが、起動〜NTP再同期後は数秒で時計表示が正常に戻るため、**約40秒周期のパニック再起動ループ（下記で2026-08-09に実機再現）を一瞬だけ見た場合と、本当に単発のまま70分固まっていた場合を、目視だけでは区別できない。** 「単発のフリーズだった」は確定した結論ではなく、有力な仮説の一つに格下げする。詳細は[log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md](log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md)
-- **バックフィル（数秒おきに連続TLSハンドシェイク）自体がヒープを圧迫し、クラッシュの引き金になりうる。** device2で、通常のWiFi復旧とは別に、バックフィル最中にもう一度測定が止まる現象を観測した（同ログ）。原因は未検証。「障害前は何日も普通に動いていたので通常運用は安全」という見方は一度書いたが、**再起動検知(`docs/uptime.md`)自体2026-08-08にようやく本番反映されたばかりで、それ以前に無自覚な再起動が無かったかは確認していない**（意図的に未調査のまま）
+- 退避済みのファイルは電源断で飛ばない（LittleFSは電源断耐性が設計目標）
 
-### 未定事項（信頼性まわり、2026-08-08時点）
+### バッファの多段構成
 
-- **実装・配信済み(2026-08-09)。** `esp_reset_reason()`を`X-Namz-Reset-Reason`ヘッダで毎バッチ報告し、再起動が「パニック」「電源断」「ブラウンアウト」等のどれだったか区別できるようにした。詳細は[log/2026-08-09-reset-reason-telemetry.md](log/2026-08-09-reset-reason-telemetry.md)。
-- **新しい仮説（2026-08-08）: `uploaderTask`のtask watchdog(10秒・`trigger_panic=true`、`main.cpp`)が、`WiFiClientSecure`のTLSハンドシェイクの内部タイムアウト(120秒、`WiFiClientSecure.cpp`の`handshake_timeout = 120000`)より先に発火し、ハンドシェイク中に強制パニック再起動させている可能性がある。** ハンドシェイクの待ちループ(`ssl_client.cpp`)は`esp_task_wdt_reset()`を一度も呼ばない（呼べるのはUploader/main.cppのコードで、ライブラリの奥のこのループには手が届かない）ので、ネット瞬断でハンドシェイクが詰まると10秒でWDTが先に勝つ。パニック再起動は`flushToSpill()`を経由しないため、RAM上のバッチは毎回失われる。
-  - 2026-08-08 10:10頃に再現していそうな実例を観測: device1の`boot_epoch_us`が10:10:44 JSTに更新される（＝再起動）のと、device2が10:10:43〜59 JST頃を最後に受信が止まる（`boot_epoch_us`自体は更新されず＝device2はこの時点では未再起動）のがほぼ同時刻。家庭内ネットの瞬断で両機が同時に影響を受け、device1だけがこの機構でパニック再起動した、という筋が通る（[PR #36](https://github.com/nna774/NamazuHaUrokoGaNai/pull/36)マージ直前のタイミングで気づいたが、PR自体とは無関係。device1のfw_versionはこの時点でもv1.7.0のままでv1.8.0は未配信）
-  - この仮説が正しければ、**2026-08-07 22:04の70分間ゼロ退避の説明にもなる**——単発のフリーズではなく「ハンドシェイクで詰まる→10秒でpanic→再起動→WiFi再接続→また詰まる→panic……」の再起動ループが70分間続き、`flushToSpill()`を一度も通らないままRAMを失い続けた、という解釈ができる
-  - **未検証。裏付けはreset_reasonテレメトリ配信後の次の再起動を待つ（2026-08-09時点、device2にOTA配信予定）。** [heapテレメトリ](2026-08-08-heap-telemetry.md)（実機配信済み）と合わせて見れば、この説と「バックフィル起因のヒープ枯渇」説(下記)を切り分けられる。
-  - **確認手順（次に再起動が起きたら）**: `/devices/<id>`の`reset_reason`を見る。
-    - `TASK_WDT`なら本仮説が確定。対策として`WiFiClientSecure::setHandshakeTimeout()`（既定120000ms）をWDTの10秒未満（案: 8000ms程度）に縮め、ハンドシェイクが詰まった時はWDTより先にライブラリ自身が諦めて接続失敗を返すようにする——panicで強制再起動しRAM上のバッチを失う代わりに、既存の指数バックオフによる通常の再試行に落とす（**実装済み(2026-08-09)。4000msへ短縮、[batch-uplink#11](https://github.com/nna774/batch-uplink/pull/11)、v2.2.0**）
-    - `TASK_WDT`以外（`BROWNOUT`/`POWERON`等）なら本仮説は外れ、電源まわりなど別要因を疑う
-  - **自然発生の断では反証(2026-08-09)。** device1が19:09〜21:09 JSTの約2時間再ハングした際、
-    シリアルログを直接キャプチャしながら複数回の手動再起動を観察したが、**一度もWDTパニックに
-    よる自動再起動が起きなかった**（`rst:0xc (SW_CPU_RESET)`＝ボタン起因のソフトリセットのみ、
-    数分〜十数分無応答が続いてもパニックしない）。自然発生した今回の断そのものはこの仮説では
-    説明できない。
-  - **一方、意図的な全断では確定(2026-08-09、同日追試)。** ルーターでdevice1のみ通信を
-    遮断する実験を行い、`reset_reason=TASK_WDT`を実機で直接確認した。ログに
-    `http_.POST() start`の直後10秒沈黙→`task_wdt: ... - uploader (CPU 0)`→`abort()`→
-    再起動、という想定通りの流れが写っている。**新規接続・使い回し接続のどちらでも同じく
-    約42秒周期のパニック再起動ループになり、ルーターの遮断を解除すると何も操作せず
-    数十秒で自動復帰した。** つまりこの仮説自体は正しいが、「完全な全断」条件でしか
-    再現しない自己回復型の障害であり、**ボタンを押すまで2時間戻らなかった自然発生の断とは
-    別の失敗モード**だと分かった（全断がその間ずっと続いていたなら区別が付かないが、
-    仮に全断ループだったなら家庭内ネットの復旧と同時に自然回復していたはずで、それが
-    起きなかった点が引っかかる）。`setHandshakeTimeout()`短縮の対策は、この意図的全断の
-    ケースでは「10秒待ってpanicで強制再起動しRAMを失う」を「ライブラリが先に諦めて
-    バックオフに落ちる」へ改善できるはずで、依然として実施する価値がある（**実装済み、上記**）。
-    さらに同日、`WiFi.hostByName()`内部のDNS解決待ち(lwIP内部タイムアウト14秒、
-    HTTPClientの接続タイムアウトにもTLSハンドシェイクタイムアウトにも守られていない
-    別枠のブロッキング)がTASK_WDTの真因と特定し、`main.cpp`のtask watchdogを
-    10秒→20秒へ拡張、実機で「14.04秒でDNS失敗→パニックせず正常復帰」を確認した
-    （詳細下記の続報2）。**この20秒化は一度、無関係なバッファプール実験を
-    `main.cpp`ごとorigin/masterへ戻した際に巻き添えで消えており(2026-08-10)、
-    PR #54のマージ前に復元した。** ドキュメントが「確認した」と書いている対策と
-    実際にリポジトリへ入っている内容がずれる事故だったので、今後同種のrevertでは
-    「何を戻すか」を差分単位で確認すること。
-    詳細は[log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md](log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md)
-- **`gBatchQueue`（深さ4・drop-oldest）がボトルネックだと分かった。** `uploaderTask`が長時間ブロックする間も真っ先に失われるのはここ。`Uploader`のRAMキュー(`kMaxRamBatches`)より手前で対策しないと、退避の仕組み自体に一度もデータが届かない。
-  - **実装済み(2026-08-11)。** `uploaderTask`を「吸い出し(`gBatchQueue`→`Uploader`、退避含む)」と「送信」の2タスクに割った。どちらもCore0に置く（`loop()`と`samplingTask`がCore1を共有しているのと同じ理屈で、吸い出し側は`xQueueReceive(..., portMAX_DELAY)`でブロックして待てば、来ない間はCPUをほぼ使わない）。**分割が効くのはCPU競合の解消のためではなく**、以前は「吸い出し」と「送信」が1つのタスクの中で直列に書かれていたため、送信側の1行が長時間ブロックすると後ろの吸い出し処理に**プログラムカウンタが物理的に到達できない**ことだった。タスクを分けたことで、送信側が(CPUを使わない正しいブロッキング待ちとして)何十分固まっていようと、吸い出し側は別の実行の流れとしてスケジューラに動かしてもらえる——2026-08-07のdevice1のように送信側だけが詰まるケースにこれがそのまま効く。`batchDrainTask`は送信タスクより優先度を高くし、task watchdogには登録しない（待機自体が正常状態のため）。詳細は[log/2026-08-11-uploader-task-split-design.md](log/2026-08-11-uploader-task-split-design.md)
-  - **実装済み(2026-08-11)。** `Uploader.ram_`・spillディレクトリを2タスクが触るようになったため、`batch-uplink`側([PR #22](https://github.com/nna774/batch-uplink/pull/22))に`Uploader`内部mutexを追加した。**`pump()`のネットワークI/O区間(`postBatch()`呼び出し)はロックを保持しない**——ここを握ると吸い出し側の`enqueue()`まで巻き込んでブロックし、分割の意味が消えるため。また`pump()`のRAM分岐は「popしてから送る」方式に変更した——`front()`を覗いたまま送ると、送信中に`enqueue()`側のRAM満杯検知が同じ先頭要素を退避・deleteする競合windowがあったため
-  - **検討して却下した案**: `batchDrainTask`が`Uploader`をbypassして直接spillファイルを書く案。spillのファイル命名規則・カウント・容量管理をfirmware側で二重実装することになり、2026-08-10に踏んだLittleFS整合性崩壊と同種の壊れ方を再現しうるため却下した。**将来の選択肢としては残す**——`Uploader`に「RAM未経由で直接spillへ書く」専用publicメソッドを足す形なら、spillフォーマットの単一の真実を保ったまま実現できる
-  - **検討して見送った案**: 常時spillへ直行させ電源断耐性を最大化する案。flash摩耗を試算したところ(spillパーティション約11.87MB、書き込み量esp32dev機52MB/日・adxl355機104MB/日)、悪い個体を引いても3〜6年は持つ計算で摩耗自体は却下理由にならないと分かったが、今回困っていたのは`gBatchQueue`オーバーフローであって電源断耐性の別問題だったため、目的を切り分けて見送った
-  - **実装済み(2026-08-11)。追加で見つけた別の飢餓バグ**: 送信が連続失敗し`ram_`もBatchバッファプールも満杯になると、`enqueue()`頼みの退避トリガーが二度と来ず`newBatch stuck`が回復しない飢餓状態を実機のWiFi遮断試験で発見した。詰まっている間`samplingTask`は生サンプルをその場で捨て続ける(即時震度・地震速報は別経路なので影響しない)ため、`pump()`に「`ram_.size() >= maxRam_`なら毎呼び出し(~50ms周期)で`flushToSpill()`を試みる」安全弁を追加した(`batch-uplink` v2.13.0)。詳細は[log/2026-08-11-uploader-starvation-under-sustained-send-failure.md](log/2026-08-11-uploader-starvation-under-sustained-send-failure.md)
-  - **実装済み(2026-08-11)。** `batch-uplink` PR #22をマージし`v2.13.0`をタグ付け、`firmware/platformio.ini`・`terraform/build_lambda.sh`のpinを揃えた。実機(esp32dev機/fake-sensor env)でWiFi遮断→復旧の一連の流れを確認済み。device2(ADXL355機)は未確認・投入保留のまま
-  - `samplingTask`側から直接LittleFSへ書く案は却下。100Hzサンプリングを担うタスクをflash I/O(数十ms級)でブロックさせたくない
-  - **新たに見つかった別のボトルネック(2026-08-09)。** `gBatchQueue`にすら乗る前、`namzwire::newBatch()`(=`Batch`の`malloc()`)自体がヒープに十分な空きがあるように見えるのに失敗し、`samplingTask`がバッチを作れなくなる現象を実機で確認した。原因は`ESP.getMaxAllocHeap()`(`heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)`)が、`malloc()`が実際に要求する`MALLOC_CAP_8BIT`基準の最大空きブロックを大きく過大報告していたこと（実測: `INTERNAL`基準45044バイトに対し`8BIT`基準17396バイト、必要な18038バイトに642バイト不足）。断片化そのものの発生源は未特定。`getMaxAllocHeap()`が`MALLOC_CAP_INTERNAL`基準であること自体はArduino-ESP32コアのソース(`cores/esp32/Esp.cpp`)で確認済みだが、上記の実測数値(45044/17396)は1回の観測のみで再現確認はまだ——単発ログから断定はせず、有力な説明という位置づけに留める（2026-08-10追記）。対策として、`Batch`に外部バッファ+解放コールバックのコンストラクタを足し、`samplingTask`側に固定サイズのバッファプールを持たせる設計を検討し、`batch-uplink`側は実装・[PR #13](https://github.com/nna774/batch-uplink/pull/13)まで進めた（`v2.4.0`先行タグ、`Uploader`の所有権契約は変えていない）。プールを`static uint8_t[][]`(=`.dram0.bss`)で確保しようとしたら`dram0_0_seg`のリンク時オーバーフローで一度失敗したが、原因は静的配列という実装選択そのものだった——`tools/sdk/esp32/ld/memory.ld`のコメントに「`dram0_0_seg`の宣言サイズ(約121KB)はROM起動時の一時使用と衝突しないための静的配置専用の保守的な制限で、本来のDRAM(320KB)の残りは実行時のヒープでは普通に使える」と明記されており、`setup()`で1回`malloc()`する方式に変えたら制限を受けなかった。実機（予備基板、esp32dev/adxl355両env）で6スロット(108384B、`kMaxRamBatches=1`)の確保成功・7スロット(126448B、`kMaxRamBatches=2`)の失敗を確認し、6スロットを採用して`firmware/`側を最終化した（`config.h`の`kMaxRamBatches=1`、`main.cpp`の`sBatchPool`は`malloc()`確保）。PSRAMは無いと予備基板の実機確認で判明済みだが、上記の理由で不要になった。**しかしその後、予備基板での結合試験(FakeSensor+実際のingest経路)で新たな問題が続けて見つかった**——6スロットは実機でsamplingTaskのタスク生成に必要なヒープを食い潰しパニックループし、5スロットに削ると別の未定義動作(`kMaxRamBatches=0`は不可と判明)を踏み、5スロット+`kMaxRamBatches=1`まで調整してもUploaderの送信(`pump()`)が進まない原因不明の停滞が残った。**このハードの8bit可能DRAM予算自体が既に限界に近く、何を積んでも他を圧迫する構造的な問題に見える。プール化は一旦見送り、`firmware/`側は`main.cpp`/`config.h`ともプール導入前の状態へ戻した(2026-08-10)。** `batch-uplink`のPR #13(前方互換な追加のみ)は巻き戻していないため再開時はそのまま使える。次に検討するのは(1) design.md予備案のmbedTLS専用固定プール化(`Batch`のバッファは増やさずTLS側だけ隔離)、(2) プール化自体を諦め`newBatch()`失敗時の再試行に任せる、のどちらか——**未定**。実機（device1/device2）は一切触っていない。結合試験用に作った`FakeSensor`/`env:fake-sensor`は汎用ツールとして残した。**追記(2026-08-10):** 見送りの直接の原因だった静的DRAM予算の逼迫は、無関係に見えた`Shindo::currentIntensity()`の静的24KB作業バッファ(`tmp[6000]`、移動窓`composite_`と同サイズのコピー)を撤去したことで大きく緩和された（静的RAM使用量106092B→82092B）。プールのスロット数見積もり直しは可能になったが、結合試験で見つかった他の問題（`kMaxRamBatches=0`のUploader未定義動作、`pump()`の原因不明の停滞）はDRAM予算とは別の話で未解決のまま残っているため、プール化の再開は次の課題。詳細は[log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md](log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md)・[log/2026-08-10-newbatch-buffer-pool-handoff.md](log/2026-08-10-newbatch-buffer-pool-handoff.md)・[log/2026-08-10-shindo-currentintensity-heap-tmp-buffer-removal.md](log/2026-08-10-shindo-currentintensity-heap-tmp-buffer-removal.md)。**再追記(2026-08-10、別の並行セッション):** TlsMemPool導入（下記(1)）とPR#59〜61での静的RAM削減(計約28KB)を経てから、プール化を`kMaxRamBatches+1`(3本、54192B)へさらに小さく絞って再挑戦したところ、実機(fake-sensor)でタスク生成失敗を再現せず、通常運転(平常時はプールが常にヒットし一般ヒープのmalloc(18032)を叩かない設計)を確認できた。**ただし確認できたのはspill=0の定常状態のみ。これまで実際に問題が起きていたのはspillに大量の未送信分が溜まった状態から復旧する局面で、そこは物理的なWiFi遮断が要るため未検証のまま残っている——「直った」とはまだ言えない。** また`pump()`のspill読み込み用バッファ(`Uploader.cpp`内`malloc(len)→POST→free()`、断片化の原因になりうる箇所の**もう一方**)は**今回も未対応のまま**。詳細は[log/2026-08-10-batch-ram-pool.md](log/2026-08-10-batch-ram-pool.md)
-- クラッシュ直前にRAMキューをLittleFSへ退避する経路（`flushToSpill()`はOTA前専用。パニックハンドラやtask watchdogのフックに仕込めるか）。上記の`gBatchQueue`問題を踏まえると、これだけでは「直近2〜3分」しか救えない点に注意
-- **実装済み(2026-08-08)。** 物理ボタン長押しでの手動再起動（`flushToSpill()`→`ESP.restart()`）。2026-08-07の実測で「`uploaderTask`だけが詰まり、`loop()`（ボタンを読んでいるのと同じタスク）は生きている」パターンが実際にあると確認できたので、想定どおり有効という判断のまま実装した。誤操作防止のため2段階にし、2秒(`kRebootHoldConfirmMs`)押し続けたら確認画面(黄)に切り替えつつその時点で先回り`flushToSpill()`を始め、5秒(`kRebootHoldTriggerMs`)まで押し続けたら実際に再起動する（未満で離せばキャンセル、通常表示に戻る）。実際の再起動はリモート再起動(`docs/remote_restart.md`)と同じ`restartRequested`の仕組みに合流させており、Uploaderの「2xxが返るまで捨てない」不変条件は破らない。ボタン読み取り(`loop()`/Core1)と送信タスク(`uploaderTask`/Core0)は別コアなので、Core0側が長時間ブロックしていてもボタンは効く。ただし`gBatchQueue`分より前は既に失われた後なので、早めに気づいて押すことが前提になる点は変わらない。詳細は[log/2026-08-08-emergency-reboot-button.md](log/2026-08-08-emergency-reboot-button.md)
-- **バックフィル起因のクラッシュ（device2で発見、上記）の対策。定期再起動は不採用**——地震はいつ来るか分からず、メンテナンス目的の再起動と本震のタイミングが重なるリスクを許容できないため、意図的に選択肢から外した。検討した案（優先度順）:
-  1. **実装済み(2026-08-08)。** `Uploader::postBatch()`が毎回ローカルで新規に`WiFiClientSecure`/`HTTPClient`を作りTLSハンドシェイクをやり直していた(`batch-uplink/src/Uploader.cpp`)のを、`client_`/`http_`をメンバへ昇格しバックログ吸い出し中は接続を使い回す(keep-alive)ように直した（[batch-uplink#7](https://github.com/nna774/batch-uplink/pull/7)、v1.7.0）。ワイヤ形式やingest側には一切触れていない。**device1へpull型OTAで配信し本番デプロイ済み**（通常運用が正常なことは確認したが、バックフィル時にハンドシェイクが実際に省略されるかはまだ未確認）。詳細は[log/2026-08-08-uplink-v1.7.0-conn-reuse.md](log/2026-08-08-uplink-v1.7.0-conn-reuse.md)。
-     **効果の検証方法（新規コード不要、実施はまだ）**: S3の`raw/`キー内の測定時刻とアップロード時刻(LastModified)を突き合わせ、バックフィル中の「1本あたりの送信間隔」を測る（2026-08-07の障害調査で使った手法そのまま）。修正前の基準値はdevice2の実測で**1本あたり3〜17秒**（TLSハンドシェイク込み）。意図的に数分間切断してバックフィルを起こし、この間隔がどれだけ縮むかを見れば「使い回しが実際に効いているか」を新規コード無しで確認できる。切断はルーター側でdevice1のMAC/IPを一時ブロックすれば確実（device1・device2は同一WiFiなので、device1だけ落とすにはMAC/IPでの選別が要る）。**device1/device2が同一WiFiで検証が面倒なため保留中**、後日実施する
-     **新しい疑い(2026-08-09、未検証)**: device1が2026-08-09夜に再現した「1本送信成功後、
-     パニックもせず無期限に無応答」というハングパターンは、この接続使い回し
-     （`setReuse(true)`、`client_`/`http_`をUploaderの寿命だけ生かす）が壊れた状態の
-     ソケット/TLSセッションを掴んだまま次の送信で無限待ちする、という筋が現時点で
-     一番説明力がある。**ただしdevice2も同じ`batch-uplink@v1.8.0`（`[env:adxl355]`は
-     `extends = env:esp32dev`でlib_depsを継承、接続使い回しは共通）を使っており、
-     同じ夜にdevice2は再現していない。** 単純に「使い回しが常に壊れる」とは言えず、
-     device1固有の何かとの組み合わせで発現している可能性がある。次は`setReuse(false)`
-     との比較が要る。
-     **追試(2026-08-09、同日)**: 意図的な全断テストで「1回成功させ使い回し状態にしてから
-     切る」を試したが、新規接続の時と同じく約42秒周期の`TASK_WDT`パニックループになった
-     （区別できず）。**「無期限に無応答・パニックも起きない」という元のハングパターン自体は
-     この意図的な全断では再現できなかった**——本物の自然発生ハングは、全断より中途半端な
-     接続状態（一部だけ届く・DNSだけ死ぬ等）でしか起きない可能性がある。原因はまだ未特定。
-     診断用に`UPLINK_DEBUG_TIMING`（batch-uplink v2.1.0、既定オフ、この機体では常時有効化）と
-     `main.cpp`側の`LOOP_DEBUG_LOG`（`uploaderTask`ループの各呼び出し前後）を追加したので、
-     次に自然発生した時はどの呼び出しで止まったか一発で分かる。詳細は
-     [log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md](log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md)
-  2. 複数バッチを1リクエストにまとめて送る案は却下ではなく保留。**ingest側で受信ペイロードをN個のバッチに分割してから今まで通り1オブジェクト1バッチでS3へ書けば、S3レイアウト・冪等性・ダッシュボード側は無変更のまま実装できる**（送信経路だけがまとまり、保存モデルは変えない設計）とは分かったが、それでも`NamzWire`・ingest双方に手を入れる変更にはなるため、(1)より優先度を下げた
-  3. **予備案としてメモ: mbedTLSの確保・解放を`mbedtls_platform_set_calloc_free()`で専用の固定プールに差し替える。** TLS接続は同時に1本しか開かない設計なので、接続終了ごとにプールを丸ごとリセットできれば、TLS由来の断片化はプール内で完結し一般ヒープに影響しない。`uploaderTask`のスタック(12KB)はTLSセッションの内部バッファ(証明書チェーン・鍵交換・レコード層バッファ)を乗せるには小さすぎるため「スタックで済ませる」は不可、というのがこの案の背景。**(1)で改善しなければ次に試す**
-  4. **実装済み(2026-08-08)。heap free/maxblockをバッチ送信ヘッダで定期報告する。** `fw_version`・稼働時間と同じ`extraRequestHeaderNames/Values`の仕組みに`X-Namz-Heap-Free`/`X-Namz-Heap-Maxblock`を追加（4枠使い切り、**batch-uplink側の変更は不要**だった）。保存先は`namazu-devices`（上書き型の現在値台帳）ではなくCloudWatchカスタムメトリクス（`common/metrics.py`）を選んだ——上書きだと障害調査に要る推移が追えないため。maxblockは空き合計より断片化の兆候を直接示す（TLSハンドシェイクは大きな連続ブロックを要求するため）。CloudWatchの保持期間は解像度に応じて自動で粗くなる（1分解像度15日→5分63日→1時間455日）ので、直近の障害調査には十分な解像度が残る。これで次に実機で障害が起きた時、シリアルログ無しでも事後にCloudWatchのグラフで診断できるようになった。**実機配信済み(2026-08-08)**、device1/device2ともCloudWatchへの到達を確認した。
-     **ダッシュボードのデバイス詳細ページにも「軽く見る」導線を追加した(2026-08-08)。** トレンド全体はCloudWatchコンソール任せのまま、直近1点の値だけをテキストで出す設計にした——チャートを新設すると新規API+チャートコード一式が要り「軽く」から外れるため。`api`の`/devices/<id>`だけに`cloudwatch:GetMetricStatistics`で直近10分の最新点を足す(`common/metrics.latest_heap()`、一覧`/devices`はデバイス数ぶん呼び出しが増えるため対象外)。トレンドを見たい時は隣に置いたCloudWatchコンソールへの深リンク（`~region~'ap-northeast-1~start~'-PT24H~end~'P0D`形式のURL、ダッシュボード側で組み立てるだけで新規バックエンド不要）から飛ぶ
+`samplingTask`(Core1)が組み上げたバッチは、`gBatchQueue`(FreeRTOSキュー、深さ4、
+詰まったら**最古を1本捨てて積み続ける**drop-oldest)→吸い出し専用の`batchDrainTask`
+(Core0)→`Uploader`のRAMキュー(`kMaxRamBatches`本、断片化観察に応じて実機で
+6→3→2と縮小してきた。現在値・経緯は`firmware/src/config.h`のコメント参照)→
+溢れたら`flushToSpill()`でLittleFSへ、という順で流れ、別タスクの送信専用処理が
+2xxを確認するまで送り続ける。
+
+吸い出しと送信をあえて別タスクに分けてあるのは、**1つのタスクの中で直列に書くと
+送信側のブロックで後続の吸い出し処理にプログラムカウンタが物理的に到達できなく
+なる**ため——2026-08-07のdevice1で約70分間LittleFSへの退避が1本も走らなかった
+障害([log/2026-08-08-device1-outage-and-deploy-drift.md](log/2026-08-08-device1-outage-and-deploy-drift.md))
+の原因がこれで説明できると分かった。`Uploader`内部はmutexで保護しているが、
+ネットワークI/O区間(`postBatch()`)はロックを保持しない（保持すると吸い出し側の
+`enqueue()`まで巻き込みタスク分割の意味が消えるため）。
+
+詰まった時に実際に失われるのは**RAM上にある分だけ**（`gBatchQueue`の深さぶん・
+`Uploader.ram_`の送信中で宙ぶらりんな分・`samplingTask`の`cur`）。**LittleFSへ
+退避済み(spill)は2xx確認後にしか消さない設計のため、パニックでも失われない。**
+`newBatch()`用の固定バッファプール化は一度DRAM予算の逼迫で見送ったが、
+TlsMemPool導入と静的RAM削減を経て小さいスロット数で再挑戦し、平常時の通常運転は
+確認できている——ただしspillに大量の未送信分が溜まった状態からの復旧はまだ
+実機検証できていない（[log/2026-08-10-batch-ram-pool.md](log/2026-08-10-batch-ram-pool.md)）。
+
+### ネットワークI/Oのタイムアウト予算
+
+`uploaderTask`のtask watchdog(20秒、`trigger_panic=true`)がライブラリ内部の
+無制限待ちより先に発火してパニック再起動しRAM上のバッチを失う、という失敗
+モードを塞ぐため、`postBatch()`が**必ず`true`/`false`で戻る**方針にしてある。
+接続・TLSハンドシェイク・レスポンスヘッダ読み取りの3区間をいずれも3000ms
+（`Uploader`のコンストラクタ引数、周波数モニタElectabuzzとも共有するため
+呼び出し側で指定できる）に縮め、最悪合計12秒(WDT20秒に対し8秒の余裕)にして
+ある。**DNS解決(`WiFi.hostByName()`)の締切は対象外のまま**——lwIP既定の
+タイムアウト(14秒)に丸投げで、ここが詰まってもこの対策では防げない既知の
+制限。レスポンスボディ読み取りには当初タイムアウトが無かったが、
+`postBatch()`/`sendAlert()`はどちらもボディを読まないため実際には到達しない
+コードパスと判明し、対処不要と分かった。
+
+**pull型OTA取得(`performPullOta()`)にも同じ形の穴があった。** `WiFiClientSecure`の
+TLSハンドシェイクの締切が既定**120秒**のまま`httpUpdate.update()`を呼んでおり、
+`onProgress()`によるWDT給餌は「進捗があった時」にしか効かないため、ハンドシェイクが
+WDT(20秒)より長く詰まると`onProgress()`が一度も呼ばれないままパニックする
+（[log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md)
+で発見、[log/2026-09-06-device1-hostbyname-patch-rollout.md](log/2026-09-06-device1-hostbyname-patch-rollout.md)
+でesp32dev環境でも再現)。`performPullOta()`は`HTTP_UPDATE_FAILED`を60秒バックオフで
+再試行する穏当な失敗パスを既に持っていたため、対処は`client.setHandshakeTimeout(4)`
+(秒、`Uploader`と同じ値)を`httpUpdate.update()`より前に呼ぶだけで済んだ——単発の
+遅延をハードパニックではなくその失敗パスに変える。
+
+**read/writeの締切は`client.setTimeout()`では変えられない。** `httpUpdate.update()`
+内部で`HTTPClient::connect()`が独自の既定値(接続5000ms、以後は`HTTPUpdate`の
+`_httpClientTimeout`既定値8000ms)で必ず上書きする——グローバル`httpUpdate`インスタンス
+にこれを変える公開APIは無い。当初`client.setTimeout(4)`も一緒に呼んでいたが、実際には
+何の効果も持たないdeadコードだったと[コードレビューで指摘され判明し](log/2026-09-06-ota-pull-timeout-budget-fix.md)、
+削除した。幸い接続5秒・read/write8秒とも既にWDT(20秒)に十分収まる値のため、対処不要と
+判断した——効いていたのは`setHandshakeTimeout(4)`だけで、それで実害の原因(120秒の
+無制限待ち)は塞げている。
+
+**既知の未解決問題**: 接続を使い回す(`setReuse(true)`)実装のため、前回
+レスポンスのボディを読み残したまま次のヘッダ読み取りに入ると誤読しうる。
+誤読時は`client_.stop()`で次回強制的に繋ぎ直され自己修復するため実害は
+散発的なPOST失敗止まりと見られるが、原因調査とは独立した別バグのため
+未着手のまま残っている。
+
+検討して保留・却下した案:
+
+- **定期再起動は不採用**——地震はいつ来るか分からず、メンテナンス目的の
+  再起動と本震のタイミングが重なるリスクを許容できないため選択肢から外した
+- **複数バッチを1リクエストにまとめる案**: S3レイアウト・冪等性は無変更で
+  実装できると分かったが、`NamzWire`・ingest双方への変更が要るため保留
+- **mbedTLS専用固定プール化**: タイムアウト予算の見直しで当面の問題は
+  解消したため、予備案のまま棚上げ
+- **常時spill化**: flash摩耗は問題にならないと試算済みだが、健全時のI/O
+  負荷が乗る上にタイムアウト無制限という根本原因を直さない対症療法になる
+  ため保留（根本対策=上記のタイムアウト予算を先に実施）
+
+このあたりの推理の紆余曲折（複数の仮説とその反証・実機再現実験）を辿りたい
+場合は[log/2026-08-08-device1-outage-and-deploy-drift.md](log/2026-08-08-device1-outage-and-deploy-drift.md)・
+[log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md](log/2026-08-09-device1-outage-reboot-loop-and-data-loss.md)・
+[log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md](log/2026-08-29-device2-task-wdt-coredump-tls-handshake.md)・
+[log/2026-08-29-device2-wdt-panic-fix-direction.md](log/2026-08-29-device2-wdt-panic-fix-direction.md)・
+[log/2026-08-29-device2-wdt-timeout-budget-implementation.md](log/2026-08-29-device2-wdt-timeout-budget-implementation.md)を参照。
+
+### 可観測性
+
+- `esp_reset_reason()`を毎バッチ`X-Namz-Reset-Reason`ヘッダで報告し、再起動が
+  「パニック」「電源断」等どれだったか区別できる
+- heap free/maxblock/minfreeを`X-Namz-Heap-Free`/`X-Namz-Heap-Maxblock`/
+  `X-Namz-Heap-Minfree`ヘッダで報告しCloudWatchカスタムメトリクスに蓄積
+  （ダッシュボードのデバイス詳細ページにも直近値とCloudWatchコンソールへの
+  深リンクがある）。minfree(`ESP.getMinFreeHeap()`、起動後の生涯最小値)は
+  他の2つと違い瞬間値ではないので、free_heapの推移だけでは見逃しうるスロー
+  リークも必ず反映される
+- ボタン長押しでの手動緊急再起動（`flushToSpill()`→`ESP.restart()`、2秒で
+  確認画面・5秒で実行）。`uploaderTask`(Core0)が詰まっていても、別コアの
+  `loop()`（ボタン読み取り）は生きているため効く
+
+### coredumpの自動クラウド送信
+
+**実装済み(2026-08-30、PR #167・#171)。** パニック時、ESP-IDFの
+coredump-to-flash機構が残すバックトレースを、起動直後・WiFi接続前に
+LittleFS(`/coredump/`、保持`kMaxCoredumpFiles`件のリングバッファ)へコピー
+してからパーティションを消去し、`setup()`内で`gUploader`起動前に同期的に
+`lambda/ingest`の`POST /coredump`へアップロードする。保存先は`data`バケットの
+`coredump/`prefix(60日ライフサイクル)。ペイロードはHMAC署名計算とPOSTボディで
+同じバッファを使い回す構成にした（署名にどのみちファイル全体をバッファへ
+読む必要があるため）。**実機フラッシュでの動作確認・実際のパニック誘発による
+アップロード確認はまだ実施していない。**
+設計の経緯は[log/2026-08-29-coredump-auto-upload-design-discussion.md](log/2026-08-29-coredump-auto-upload-design-discussion.md)・
+[log/2026-08-29-coredump-auto-upload-design-continued.md](log/2026-08-29-coredump-auto-upload-design-continued.md)、
+実装の詳細は[log/2026-08-30-coredump-auto-upload-implementation-wrapup.md](log/2026-08-30-coredump-auto-upload-implementation-wrapup.md)参照。
 
 ## 時刻同期
 

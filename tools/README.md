@@ -20,6 +20,8 @@ pip install -r requirements.txt
 | `realtime.py` | FIRによるストリーミング震度（ファーム実装のリファレンス） |
 | `rounding.py` | 気象庁の丸め規則・震度階級 |
 
+回帰確認用の実機キャプチャ3点セットは [testdata/README.md](testdata/README.md) 参照。
+
 ## スクリプト
 
 ```bash
@@ -39,6 +41,15 @@ python provision_device.py add --id 2 --label 2号機 --sensor adxl355  # HMAC�
 python provision_device.py provision-h --id 2 --force                 # NVS書き込み用(secrets_provision.h)
 python provision_device.py tfvars                                     # サーバ側（tfvarsへ貼る）
 python provision_device.py env --id 2                                 # 焼くenv名
+
+# 事後解析した地震を detection_events.csv に1行足したら、目安表を再生成
+python detection_range.py --out-md ../docs/detection_range.md
+# 手元の候補地震（M・震源距離）が投げる価値があるか即判定
+python detection_range.py --check 4.2 250
+
+# 気象庁の地震一覧から「投げる価値あり」「恐らく埋没(埋没側の実例集め用)」を機械的に抽出
+python scan_quakes.py                    # 直近3日
+python scan_quakes.py --days 7 --all     # 直近7日、近すぎ(ほぼ確実に捕れる)も含め全部
 
 # 確定イベントに人工地震（テスト等）フラグを立てる/降ろす（DynamoDBを直接更新）
 export NAMZ_EVENTS_TABLE=namz-events   # or --table
@@ -124,6 +135,25 @@ python flag_event.py unrelate 0001-59462454 0002-59462111              # 指定�
 python flag_event.py confirm 0001-59577127 0002-59577127   # 一覧の既定表示に出す
 python flag_event.py unconfirm 0001-59577127               # 取り消す
 ```
+
+### 事後解析の判定（`verdict`）
+
+事後解析で出した判定をイベント自身に持たせる。語彙は `detection_events.csv` の
+verdict 列と同じ（`good` / `warning` / `critical`）で、**両方に同じ値を書く**
+（手順は [docs/post_hoc_detection.md](../docs/post_hoc_detection.md) の手順3.5）。
+
+```bash
+python flag_event.py verdict critical 0001-59616930 0002-59616930  # 完全埋没だった
+python flag_event.py verdict good --source auto 0001-59622394      # 一次判定が付ける場合
+python flag_event.py unverdict 0001-59616930                       # 消す
+```
+
+**一覧の既定フィルタは verdict を見ていない。** 埋没と判定したイベントも既定で出る——
+「調べたが何も見えなかった」は「まだ調べていない」と区別されるべき記録だからだ
+（→ [docs/log/2026-09-06-event-verdict.md](../docs/log/2026-09-06-event-verdict.md)）。
+機械が陰性を大量に保存し始めたら `verdict_source == "auto"` で絞る余地を残してある。
+
+`promote_event.py` にも `--verdict` があり、昇格と同時に付けられる。
 
 `promote_event.py` は、自動検知に満たない弱い揺れや振り返りたい時間帯を、raw の保持期限
 （90日）で消える前に手動で events/ へ昇格（永久保存）する。`manual` フラグが立ち、一覧の
@@ -306,13 +336,18 @@ python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 
 [docs/log/2026-08-23-ibaraki-nanbu-m5.9-post-hoc-detection.md](../docs/log/2026-08-23-ibaraki-nanbu-m5.9-post-hoc-detection.md)）。
 3機以上の重ね描きでは「どの組を見せるか」が自明でないため、このパネルは付かない。
 
-**`--corr-bin SEC` で、この一致度を秒単位のbinでテキスト集計できる。** 相関パネルを
-目視で「t=200sあたりまで高いまま残っているか」と読むのは主観に頼るため、bin別の
+**この一致度は`--corr-bin SEC`（既定20秒）で秒単位のbinごとにテキスト集計され、常に出る。**
+相関パネルを目視で「t=200sあたりまで高いまま残っているか」と読むのは主観に頼るため、bin別の
 `frac(corr≥0.6)`・`mean_corr` を数値で出す（`--eew`指定時は背景(発生-150秒〜-30秒)の
-値も併記するので、どのbinまで背景水準より明確に高いかを比較できる）。2026-08-24浦河沖
-M6.0・2026-08-27三陸沖M6.1の事後解析で同種の集計を都度その場のスクリプトで書いていたのを
-本体に引き上げたもの（実例:
-[docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md](../docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md)）。
+値も併記するので、どのbinまで背景水準より明確に高いかを比較できる）。プロット用に相関系列は
+どのみち計算しているため追加コストはほぼ無く、片方の機体だけの孤立ピークが本物かの裏取りにも
+使える（実例:
+[docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md](../docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md)、
+[docs/log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md](../docs/log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md)）。
+
+**`--eew`指定時、P窓・S窓に加えてS窓終了から180秒ぶんの「コーダ想定域」窓も自動で出る。**
+ピーク振幅は到達"瞬間"の窓の中に来るとは限らず、実体波からコーダへの減衰で窓の直後に
+来ることがあるため（`docs/post_hoc_detection.md`「P窓・S窓が示すのは〜」参照）。
 
 `--dump-csv` は指定すると各デバイスに `.dev<id>` を挟んだファイル名で個別保存する。
 
@@ -330,7 +365,7 @@ M6.0・2026-08-27三陸沖M6.1の事後解析で同種の集計を都度その�
 | `--axes` | `xyz` | 解析に使う軸。`xy`=水平のみ（z軸の低周波ノイズが大きい時、遠地弱震で有利） |
 | `--rect-win` | `3` | 直線性の移動窓[秒] |
 | `--corr-win` | `2` | 2機重ね描き時の直線性一致度パネルに使う移動相関の窓[秒] |
-| `--corr-bin SEC` | なし | 直線性の一致度をこの秒数のbinでテキスト集計（`--eew`指定時は背景の値も併記） |
+| `--corr-bin SEC` | `20` | 直線性の一致度をこの秒数のbinでテキスト集計して常に出す（`--eew`指定時は背景の値も併記） |
 | `--eew "lat,lon,depth,時刻"` | なし | 震源との照合。P/S到達窓＋SNR/直線性 |
 | `--station "lat,lon"` | 湯沢町 | 観測点座標（`--eew` 用） |
 | `--dump-csv PATH` | なし | 取得した生窓を `t_us,x,y,z` CSVで保存 |

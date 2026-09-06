@@ -20,7 +20,7 @@ PR #40（ボタン長押しでの緊急手動再起動）をdevice2へ配信後�
 falseへ戻す処理が無かった。確認画面に一度入ると、次に**新しく押すまで**
 `rebootArmed`がtrueのまま残り続け、画面が黄色のまま固まって見えていた
 （実害は無い——`gManualRebootArmed`は既にtrueのままでもharmlessと
-設計している、[log/2026-08-08-emergency-reboot-button.md](log/2026-08-08-emergency-reboot-button.md)
+設計している、[log/2026-08-08-emergency-reboot-button.md](2026-08-08-emergency-reboot-button.md)
 参照——が、UXとして明らかにバグだった）。離した時点で`rebootArmed`を
 falseへ戻し、次の描画tickで通常表示に戻すようにした。
 

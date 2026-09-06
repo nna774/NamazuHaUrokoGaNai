@@ -24,6 +24,10 @@ def _key_batch_start_us(key: str) -> int | None:
 # 「この時刻に始まったバッチはどんなに長くても window に届かない」を判定する余裕。
 MAX_BATCH_DURATION_US = 60_000_000
 
+# バッチ間の正常な送信ジッタの上限目安（実測で~0.1-0.4秒）。これを超える空きは
+# WiFi再接続等でサンプリング自体が数十秒単位で止まっていた実欠落とみなす。
+BATCH_GAP_TOLERANCE_US = 2_000_000
+
 
 def list_raw_keys_in_range(s3, bucket: str, start_us: int, end_us: int,
                            device_id: int | None = None) -> list[str]:
@@ -55,11 +59,77 @@ def list_raw_keys_in_range(s3, bucket: str, start_us: int, end_us: int,
     return keys
 
 
-def load_event(s3, bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
+def _split_into_contiguous_segments(
+    batches: list[wire.Batch],
+) -> tuple[list[tuple[np.ndarray, int]], float]:
+    """バッチ列を時系列連結しつつ、`BATCH_GAP_TOLERANCE_US` を超える実欠落
+    （WiFi再接続等でサンプリング自体が止まっていた区間）で分割する。
+
+    単純に全部連結すると、欠落後のサンプルの時刻が `win_start + i/fs` で
+    実時刻より欠落秒数ぶん早く計算され、onset時刻等が実際より早くズレる
+    （2026-08-29 NERV防災通知の事後解析で発見。docs/log/2026-08-29-gunma-kitabu-m3.2
+    -post-hoc-detection.md参照）。どの区間を残すかは呼び出し側の用途で異なる
+    （`load_window`は末尾＝直近が欲しい、`load_event`は肝心のonsetを含む区間が
+    欲しい——保存範囲に複数の欠落があると、onsetは先頭でも末尾でもない真ん中の
+    区間に入ることがある。実際に踏んだ）ので、ここでは分割だけ行い、選択は
+    呼び出し側に委ねる。
+
+    returns: ([(gal, segment_start_us), ...], fs)。segmentsは時系列順。
+    """
+    segments: list[tuple[np.ndarray, int]] = []
+    parts: list[np.ndarray] = []
+    seg_start: int | None = None
+    prev_end: int | None = None
+    fs = 100.0
+    for b in batches:
+        b_start = b.meta.batch_start_us
+        b_end = b_start + int(b.meta.sample_count / b.meta.sample_rate_hz * 1e6)
+        if prev_end is not None and b_start - prev_end > BATCH_GAP_TOLERANCE_US:
+            segments.append((np.concatenate(parts, axis=0), seg_start))
+            parts = []
+            seg_start = None
+        fs = b.meta.sample_rate_hz
+        if seg_start is None:
+            seg_start = b_start
+        parts.append(b.gal)
+        prev_end = b_end
+    if parts:
+        segments.append((np.concatenate(parts, axis=0), seg_start))
+    return segments, fs
+
+
+def _pick_segment(
+    segments: list[tuple[np.ndarray, int]], fs: float, near_us: int | None,
+) -> tuple[np.ndarray, int]:
+    """複数の連続区間から1つを選ぶ。`near_us`を含む区間があればそれ、
+    無ければ最も近い区間。`near_us`未指定なら最大（サンプル数最多）の区間。"""
+    if near_us is not None:
+        for gal, start in segments:
+            end = start + int(gal.shape[0] / fs * 1e6)
+            if start <= near_us < end:
+                return gal, start
+
+        def distance(seg: tuple[np.ndarray, int]) -> int:
+            gal, start = seg
+            end = start + int(gal.shape[0] / fs * 1e6)
+            return min(abs(start - near_us), abs(end - near_us))
+
+        return min(segments, key=distance)
+    return max(segments, key=lambda seg: seg[0].shape[0])
+
+
+def load_event(s3, bucket: str, eid: str, near_us: int | None = None,
+               ) -> tuple[np.ndarray, int, float]:
     """events/<id>/*.bin を時系列に連結して返す（永久保存したイベント波形）。
 
     returns: (gal[N,3], window_start_us, fs)。無ければ (empty, 0, 100.0)。
     api の _event と同じ読み方。detect のクイックルック描画で使う。
+
+    保存範囲の中に実欠落（`BATCH_GAP_TOLERANCE_US`超）が複数あると、肝心の
+    onsetは先頭でも末尾でもない真ん中の区間に入ることがある
+    （2026-08-29、群馬県北部M3.2の事後解析で実際に踏んだ——post側で無関係な
+    欠落がもう1回起きていた）。`near_us`（通常はonset_us）を渡せば、それを
+    含む区間（無ければ最も近い区間）を選ぶ。渡さなければ最大の区間を選ぶ。
     """
     prefix = f"{s3util.EVENTS_PREFIX}/{eid}/"
     keys: list[str] = []
@@ -75,21 +145,17 @@ def load_event(s3, bucket: str, eid: str) -> tuple[np.ndarray, int, float]:
         else:
             break
     keys.sort()  # キー末尾の startus(20桁ゼロ埋め) で時系列順
-    parts = []
-    win_start = None
-    fs = 100.0
+    batches = []
     for key in keys:
         try:
-            b = get_batch(s3, bucket, key)
+            batches.append(get_batch(s3, bucket, key))
         except Exception:
             continue
-        if win_start is None:
-            win_start = b.meta.batch_start_us
-        fs = b.meta.sample_rate_hz
-        parts.append(b.gal)
-    if not parts:
+    segments, fs = _split_into_contiguous_segments(batches)
+    if not segments:
         return np.empty((0, 3)), 0, fs
-    return np.concatenate(parts, axis=0), win_start, fs
+    gal, win_start = _pick_segment(segments, fs, near_us)
+    return gal, win_start, fs
 
 
 def copy_raw_to_event(s3, bucket: str, eid: str, start_us: int, end_us: int,
@@ -117,12 +183,14 @@ def load_window(s3, bucket: str, end_us: int, seconds: float,
     device_id は必須。省略できるようにしておくと、多点化した時に別デバイスの波形を
     つなげて震度が跳ねる（`list_raw_keys_in_range` の注記を読め）。
 
+    欠落（実欠落。`BATCH_GAP_TOLERANCE_US`超）があった場合は**末尾の連続区間**
+    （＝ end_us に一番近い、直近の意味そのもの）だけを残す。
+
     returns: (gal[N,3], window_start_us, fs)。データが無ければ (empty, end_us, 100.0)。
     """
     start_us = int(end_us - seconds * 1e6)
     keys = list_raw_keys_in_range(s3, bucket, start_us - 60_000_000, end_us, device_id)
-    parts = []
-    win_start = None
+    batches = []
     fs = 100.0
     for key in keys:
         # list_raw_keys_in_range の Prefix は時間(hour)+device までしか絞れないので、
@@ -144,9 +212,9 @@ def load_window(s3, bucket: str, end_us: int, seconds: float,
         if b_end < start_us or b_start > end_us:
             continue
         fs = b.meta.sample_rate_hz
-        if win_start is None:
-            win_start = b_start
-        parts.append(b.gal)
-    if not parts:
+        batches.append(b)
+    segments, fs = _split_into_contiguous_segments(batches)
+    if not segments:
         return np.empty((0, 3)), end_us, fs
-    return np.concatenate(parts, axis=0), win_start, fs
+    gal, win_start = segments[-1]
+    return gal, win_start, fs
