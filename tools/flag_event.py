@@ -43,6 +43,10 @@
     # リンクを外す（指定した組み合わせだけ解除。他の関連は残る）
     python flag_event.py unrelate 0001-59462454 0002-59462111
 
+    # 事後解析の判定を付ける（detection_events.csv と同じ語彙。消すなら unverdict）
+    python flag_event.py verdict critical 0001-59616930 0002-59616930
+    python flag_event.py unverdict 0001-59616930
+
     # 速報のみ(cloud_confirmed=false)で終わったイベントを、人力で「本物の地震」と
     # 判断した後に一覧の既定表示へ昇格させる（`manual`フィールドを立てる。
     # promote_event.pyが新規イベント作成時に立てるのと同じ値で、既存イベントを
@@ -62,7 +66,9 @@ from pathlib import Path
 import boto3
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lambda"))  # common
 import awsenv  # noqa: E402
+from common.events import VERDICTS  # noqa: E402  判定の語彙は events.py を単一の出所にする
 
 EVENT_ID_RE = re.compile(r"\d{4}-\d{1,16}")
 
@@ -177,6 +183,34 @@ def cmd_confirm(args, value: bool):
     verb = "確定扱いにする(manual=true)" if value else "確定扱いを外す(manual=false)"
     for eid in args.event_id:
         _set_field(table, eid, "manual", value)
+    print(f"{verb}: {len(args.event_id)} 件 完了")
+
+
+def cmd_verdict(args, value: str | None):
+    """事後解析の判定(good/warning/critical)をイベントに付ける/消す。
+
+    `tools/detection_events.csv` の verdict 列と同じ値を入れること（語彙は共有する）。
+    一覧の既定フィルタはこの値を見ない——埋没と判定したイベントも既定で出る。
+    """
+    table = _table(args.table)
+    for eid in args.event_id:
+        if not EVENT_ID_RE.fullmatch(eid):
+            sys.exit(f"event_id の書式が不正: {eid}")
+    for eid in args.event_id:
+        if value is None:
+            table.update_item(
+                Key={"event_id": eid},
+                UpdateExpression="REMOVE #v, #s",
+                ExpressionAttributeNames={"#v": "verdict", "#s": "verdict_source"},
+            )
+        else:
+            table.update_item(
+                Key={"event_id": eid},
+                UpdateExpression="SET #v = :v, #s = :s",
+                ExpressionAttributeNames={"#v": "verdict", "#s": "verdict_source"},
+                ExpressionAttributeValues={":v": value, ":s": args.source},
+            )
+    verb = f"判定を {value} にする" if value else "判定を削除する"
     print(f"{verb}: {len(args.event_id)} 件 完了")
 
 
@@ -302,6 +336,15 @@ def main(argv=None):
         sr.add_argument("event_id", nargs="+",
                         help="対象の event_id を2件以上（スペース区切り）")
 
+    sv = sub.add_parser("verdict", help="事後解析の判定(good/warning/critical)を付ける")
+    sv.add_argument("value", choices=VERDICTS, help="判定。detection_events.csv と同じ語彙")
+    sv.add_argument("event_id", nargs="+", help="対象の event_id（スペース区切りで複数指定可）")
+    sv.add_argument("--source", default="human", choices=("human", "auto"),
+                    help="誰が判定したか（既定: human）")
+
+    su = sub.add_parser("unverdict", help="事後解析の判定を削除する")
+    su.add_argument("event_id", nargs="+", help="対象の event_id（スペース区切りで複数指定可）")
+
     for name, help_ in (("confirm", "速報のみのイベントを人力で確定扱いにする(manual=true)"),
                         ("unconfirm", "confirmで立てたmanualフラグを降ろす")):
         sc = sub.add_parser(name, help=help_)
@@ -324,6 +367,10 @@ def main(argv=None):
         cmd_relate(args)
     elif args.cmd == "unrelate":
         cmd_unrelate(args)
+    elif args.cmd == "verdict":
+        cmd_verdict(args, args.value)
+    elif args.cmd == "unverdict":
+        cmd_verdict(args, None)
     elif args.cmd == "confirm":
         cmd_confirm(args, True)
     elif args.cmd == "unconfirm":

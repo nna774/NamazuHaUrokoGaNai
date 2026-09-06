@@ -199,6 +199,9 @@ def _event(q):
             meta["checked"] = bool(item.get("checked"))
             meta["artificial"] = bool(item.get("artificial"))
             meta["manual"] = bool(item.get("manual"))
+            # 事後解析の判定（無ければ null）。一覧の絞り込みには使っていない。
+            meta["verdict"] = item.get("verdict")
+            meta["verdict_source"] = item.get("verdict_source")
             # メモは DynamoDB を権威とする（meta.json の値より後の編集を優先）。
             meta["note"] = item.get("note", meta.get("note"))
             # 他デバイスの同一地震イベントへの相互リンク（flag_event.py relate で設定）。
@@ -222,6 +225,8 @@ def _event(q):
             "checked": bool(item.get("checked")),
             "artificial": bool(item.get("artificial")),
             "manual": bool(item.get("manual")),
+            "verdict": item.get("verdict"),
+            "verdict_source": item.get("verdict_source"),
             "note": item.get("note"),  # ユーザーの自由記述メモ（無ければ null）
             "related_events": list(item.get("related_events", [])),
         }

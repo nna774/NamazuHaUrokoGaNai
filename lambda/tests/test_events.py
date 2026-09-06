@@ -3,6 +3,8 @@
 DynamoDBに触らず、全件scanだけ差し替えてフィルタ/ソートの純粋ロジックを確認する。
 """
 
+import pytest
+
 from common import events
 
 
@@ -104,11 +106,17 @@ class _FakeTable:
     def update_item(self, Key, UpdateExpression, ExpressionAttributeNames=None,
                     ExpressionAttributeValues=None):
         it = self.items.setdefault(Key["event_id"], {"event_id": Key["event_id"]})
-        name = ExpressionAttributeNames["#n"]
-        if UpdateExpression.strip().startswith("SET"):
-            it[name] = ExpressionAttributeValues[":v"]
-        elif UpdateExpression.strip().startswith("REMOVE"):
-            it.pop(name, None)
+        expr = UpdateExpression.strip()
+        names = ExpressionAttributeNames or {}
+        if expr.startswith("SET"):
+            # "SET #n = :v" / "SET #v = :v, #s = :s" / "SET waveform_prefix = :wp"
+            for assign in expr[len("SET"):].split(","):
+                ph, val = (x.strip() for x in assign.split("="))
+                it[names.get(ph, ph)] = ExpressionAttributeValues[val]
+        elif expr.startswith("REMOVE"):
+            for ph in expr[len("REMOVE"):].split(","):
+                ph = ph.strip()
+                it.pop(names.get(ph, ph), None)
 
 
 def test_record_manual_event(monkeypatch):
@@ -126,6 +134,48 @@ def test_record_manual_event(monkeypatch):
     _stub_scan(monkeypatch, [dict(it)])
     shown, total = events.list_page(show_all=False)
     assert total == 1
+
+
+def test_record_manual_event_with_verdict(monkeypatch):
+    fake = _FakeTable()
+    monkeypatch.setattr(events, "_table", lambda: fake)
+    eid = events.record_manual_event(1, 1_000_000_000, 0.0, 0.1, verdict="critical")
+    it = fake.items[eid]
+    assert it["verdict"] == "critical" and it["verdict_source"] == "human"
+
+
+def test_record_manual_event_rejects_unknown_verdict(monkeypatch):
+    monkeypatch.setattr(events, "_table", lambda: _FakeTable())
+    with pytest.raises(ValueError):
+        events.record_manual_event(1, 1_000_000_000, 0.0, 0.1, verdict="buried")
+
+
+def test_set_verdict_set_and_clear(monkeypatch):
+    fake = _FakeTable()
+    fake.items["0001-1"] = {"event_id": "0001-1"}
+    monkeypatch.setattr(events, "_table", lambda: fake)
+    events.set_verdict("0001-1", "good")
+    assert fake.items["0001-1"]["verdict"] == "good"
+    assert fake.items["0001-1"]["verdict_source"] == "human"
+    events.set_verdict("0001-1", "warning", source="auto")
+    assert fake.items["0001-1"]["verdict_source"] == "auto"
+    events.set_verdict("0001-1", None)
+    assert "verdict" not in fake.items["0001-1"]
+    assert "verdict_source" not in fake.items["0001-1"]
+
+
+def test_buried_verdict_still_listed(monkeypatch):
+    """完全埋没(critical)と判定したイベントも既定一覧に出す。
+
+    「調べたが何も見えなかった」は「まだ調べていない」と区別されるべき記録なので、
+    verdict では絞らない（docs/log/2026-09-06-event-verdict.md）。
+    """
+    fake = _FakeTable()
+    monkeypatch.setattr(events, "_table", lambda: fake)
+    eid = events.record_manual_event(1, 1_000_000_000, 0.0, 0.1, verdict="critical")
+    _stub_scan(monkeypatch, [dict(fake.items[eid])])
+    shown, total = events.list_page(show_all=False)
+    assert total == 1 and shown[0]["verdict"] == "critical"
 
 
 def test_set_note_set_and_clear(monkeypatch):
