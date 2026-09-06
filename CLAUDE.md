@@ -78,7 +78,9 @@
   - `device_prompt` … デバイス速報が来た / `cloud_confirmed` … クラウドFFTで確定
   - `checked` … detectが評価済み（未確定なら一覧の既定で隠れる=非該当）
   - `artificial` … 人工地震(テスト等)フラグ。立てると一覧の既定で隠れ、`all=1` でのみ薄く出る
-  - 一覧の既定フィルタは「(確定 or 未評価) かつ 非artificial」。表示震度は `effective_intensity`。
+  - 一覧の既定フィルタは「(確定 or **manual** or 未評価) かつ 非artificial」（`lambda/common/events.py`の
+    `list_page()`）。**`manual`＝手動昇格は確定と同格に既定一覧へ出る**——`promote_event.py`で
+    昇格したものは震度0でも一覧の先頭に並ぶ。表示震度は `effective_intensity`。
   - **`api`の`/event`はCloudFrontで長期キャッシュしている**（確定済みは1年相当、速報のみは
     無効化。`terraform/custom_domain.tf`の`aws_cloudfront_cache_policy.api_event`、
     `lambda/api/handler.py`の`EVENT_CONFIRMED_CACHE_S`。Electabuzz PR#29と同じ「閲覧人数が
