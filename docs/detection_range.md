@@ -1,6 +1,6 @@
 # 検出限界の目安表（自動生成）
 
-`tools/detection_range.py`で`tools/detection_events.csv`（19件、うちgood=10件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
+`tools/detection_range.py`で`tools/detection_events.csv`（22件、うちgood=10件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
 
 回帰式（verdict=good のみでフィット）: `log10(震源距離[km]) = 1.1691 + 0.2472 * M`
 
@@ -39,8 +39,10 @@
 | `ibaraki-hokubu-m3.8` | 茨城県北部 | 2026-08-08 | 3.8 | 161km | good | 1.26 |
 | `fukushima-nakadori-m3.3` | 福島県中通り | 2026-08-31 | 3.3 | 163km | critical | 1.69 |
 | `ibaraki-nanbu-m5.9` | 茨城県南部 | 2026-08-23 | 5.9 | 170km | good | 0.40 |
+| `ibaraki-oki-m3.7` | 茨城県沖(9/6) | 2026-09-06 | 3.7 | 199km | critical | 1.64 |
 | `ibaraki-oki-m3.5` | 茨城県沖 | 2026-08-20 | 3.5 | 206km | warning | 1.90 |
 | `fukushima-oki-m4.0-2` | 福島県沖(新) | 2026-08-28 | 4.0 | 220km | warning | 1.53 |
+| `fukushima-oki-m4.0-3` | 福島県沖(9/4) | 2026-09-04 | 4.0 | 223km | critical | 1.55 |
 | `chiba-oki-m4.9` | 千葉県東方沖 | 2026-08-30 | 4.9 | 229km | good | 0.95 |
 | `fukushima-oki-m4.5` | 福島県沖 | 2026-08-26 | 4.5 | 271km | warning | 1.42 |
 | `fukushima-oki-m4.0-1` | 福島県沖(旧) | 2026-07-24 | 4.0 | 273km | good | 1.90 |
@@ -50,6 +52,7 @@
 | `iwate-oki-m5.6` | 岩手県沖 | 2026-08-09 | 5.6 | 471km | good | 1.32 |
 | `iwate-oki-m4.3` | 岩手県沖 | 2026-08-28 | 4.3 | 474km | critical | 2.78 |
 | `aomori-touhou-oki-m4.6` | 青森県東方沖 | 2026-08-28 | 4.6 | 509km | critical | 2.51 |
+| `aomori-touhou-oki-m4.7` | 青森県東方沖(9/6) | 2026-09-06 | 4.7 | 548km | warning | 2.56 |
 | `urakawa-oki-m6.0` | 浦河沖 | 2026-08-23 | 6.0 | 645km | good | 1.44 |
 | `kumamoto-m7.1` | 熊本地震(令和8年) | 2026-07-28 | 7.1 | 869km | good | 1.04 |
 
