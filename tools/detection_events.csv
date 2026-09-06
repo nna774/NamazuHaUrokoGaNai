@@ -18,3 +18,6 @@ gunma-kitabu-m3.2,群馬県北部,2026-08-29,36.9,139.3,5,,3.2,warning,要検討
 chiba-oki-m4.9,千葉県東方沖,2026-08-30,35.8,140.9,40,,4.9,good,確定検知(cloud_confirmed I=1/1)+detectlab probable(S波・コーダ帯で2機直線性一致),log/2026-08-30-chiba-oki-m4.9-post-hoc-detection.md
 fukushima-aizu-m3.5,福島県会津,2026-09-03,37.2,139.3,10,,3.5,good,probable(コーダ想定域内で両機ほぼ同時0.25秒差・STA/LTA大幅超過7.20/10.31・直線性0.68/0.71一致・機間相関ほぼ1.0。JMA計測震度換算ではI=-0.2で震度0相当),log/2026-09-03-fukushima-aizu-m3.5-post-hoc-detection.md
 miyagi-oki-m3.8,宮城県沖,2026-09-04,37.7,141.8,50,,3.8,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・P窓/S窓/コーダ想定域が背景と分離できず。記録全体が一様なノイズ),log/2026-09-04-miyagi-oki-m3.8-post-hoc-detection.md
+fukushima-oki-m4.0-3,福島県沖(9/4),2026-09-04,37.3,141.2,60,,4.0,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・到達窓の機間相関も背景水準。レンジ上端223kmでも埋没した実例),log/2026-09-06-fukushima-oki-m4.0-post-hoc-detection.md
+ibaraki-oki-m3.7,茨城県沖(9/6),2026-09-06,36.4,140.9,40,,3.7,critical,完全埋没(標準・低帯域xyとも到達窓が背景から分離せず・P窓/S窓の機間相関はむしろ背景以下),log/2026-09-06-ibaraki-oki-m3.7-post-hoc-detection.md
+aomori-touhou-oki-m4.7,青森県東方沖(9/6),2026-09-06,40.7,142.9,30,,4.7,good,probable(低帯域xyのS窓でdevice2が閾値超過5.05・直線性0.76「地震らしい」・device1も同時刻に要検討水準へ上昇・機間相関は記録中最大0.42(背景0.14)。閾値超過が高感度なdevice2のみなのは検出限界付近の期待通りの姿と判断),log/2026-09-06-aomori-touhou-oki-m4.7-post-hoc-detection.md
