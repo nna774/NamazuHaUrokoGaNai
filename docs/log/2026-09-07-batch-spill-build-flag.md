@@ -30,5 +30,6 @@ mainに合流させ、実機での実測(flash摩耗・I/O負荷)をしたい時
 [log/2026-09-02-firmware-build-ci.md](2026-09-02-firmware-build-ci.md)）が初めて
 このブランチにも効くようになり、`esp32dev`/`adxl355`/`piezo`/`fake-sensor`/
 `fake-sensor-device2-profile`は全green（`test`ジョブ=`firmware/test/run.sh`も
-green）で確認できた。追加した3つの`-always-spill`envは同じCIワークフローに
-追加した直後の最新pushでまだ結果待ち——PRのCIチェックで確認すること。
+green）で確認できた。追加した3つの`-always-spill`env（`NAMZ_ALWAYS_SPILL`定義済み、
+`flushToSpill()`呼び出しが実際にコンパイルされる側）もマトリクスに加えた直後の
+pushで全green——`#ifdef`の両分岐とも実機焼き前提のビルドは通ることを確認できた。
