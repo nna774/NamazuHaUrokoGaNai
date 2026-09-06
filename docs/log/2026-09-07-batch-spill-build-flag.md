@@ -18,12 +18,17 @@ mainに合流させ、実機での実測(flash摩耗・I/O負荷)をしたい時
   テスト機ではなく本番機のflash摩耗・I/O負荷を見たいものなので、既存の
   probe/test env群（`tls-alloc-probe`等）とは違い、本番envの直接拡張にした。
 - `docs/design.md`の該当項を、ビルドフラグ化と既定無効である旨に更新した。
+- `.github/workflows/firmware-build.yml`のビルドマトリクスに3envを追加した。
+  秘密や実機を要らず本番envに定義を1つ足すだけなので、probe/provision系(対象外)
+  ではなく本番3系統と同列に含めた。
 
-## 確認できていないこと
+## 確認したこと
 
-このworktreeにはPlatformIO(`pio`)がインストールされておらず、`firmware/test/run.sh`
-（batch-uplinkのビルド成果物に依存）も含めてビルド確認ができなかった。変更は
-`#ifdef`ガードの追加と`platformio.ini`への新規env追加のみで、変更前の3env
-(`esp32dev`/`adxl355`/`piezo`)のビルド結果には影響しないはずだが、マージ前に
-`pio run -e esp32dev -e adxl355 -e piezo`と`firmware/test/run.sh`を実行できる
-環境で確認すること。
+作業したworktreeにはPlatformIO(`pio`)がインストールされておらずローカルではビルド
+確認できなかったが、このPRブランチをmasterへ追従させたタイミングで
+`firmware-build`/`firmware-host-test`CI（2026-09-02にmasterへ追加されていたもの、
+[log/2026-09-02-firmware-build-ci.md](2026-09-02-firmware-build-ci.md)）が初めて
+このブランチにも効くようになり、`esp32dev`/`adxl355`/`piezo`/`fake-sensor`/
+`fake-sensor-device2-profile`は全green（`test`ジョブ=`firmware/test/run.sh`も
+green）で確認できた。追加した3つの`-always-spill`envは同じCIワークフローに
+追加した直後の最新pushでまだ結果待ち——PRのCIチェックで確認すること。

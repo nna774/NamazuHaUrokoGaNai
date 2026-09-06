@@ -22,13 +22,18 @@ jobs:
         # 本番3系統(esp32dev/adxl355/piezo)と、実センサ無しで通しの結合試験を再現する
         # fake-sensor系(WiFi/送信あり、秘密不要)。sensortest系(WiFi/送信なしのセンサ
         # 検証専用)・provisionやprobe系(secrets_provision.h・実機計測前提)は対象外
-        # （docs/ci.mdのfirmware-buildの節参照）。
+        # （docs/ci.mdのfirmware-buildの節参照）。-always-spill系(NAMZ_ALWAYS_SPILL、
+        # docs/log/2026-09-07-batch-spill-build-flag.md)は本番envに定義を1つ足すだけ
+        # (秘密・実機不要)なので本番3系統と同列に含める。
         env:
           - esp32dev
           - adxl355
           - piezo
           - fake-sensor
           - fake-sensor-device2-profile
+          - esp32dev-always-spill
+          - adxl355-always-spill
+          - piezo-always-spill
     steps:
       - uses: actions/checkout@v4
 
