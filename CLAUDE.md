@@ -151,6 +151,17 @@ aws cloudfront create-invalidation \
 （試した順序・実測・元の不具合の経緯は`terraform/dashboard.tf`のコメントと
 [docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md](docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md)参照）。
 
+## ローカル環境（direnv・AWSプロファイル・.venv）
+
+このリポジトリでのAWS操作は`namazu-admin`プロファイルを使う。direnvで自動化してある。
+
+- `.envrc`・`.venv`は`.gitignore`対象で本体（`git worktree list`の先頭に出る非worktreeの
+  チェックアウト）にしかない。実体（`AWS_PROFILE`設定・`.venv`のactivate）は本体の`.envrc`
+  にだけ書く。
+- worktree側の`.envrc`は**`source_up`の1行だけ**でよい。direnvが親ディレクトリを遡って
+  本体の`.envrc`を見つけて読む——中身を複製しないので本体の設定を変えれば全worktreeに
+  自動で伝播する。書いたら`direnv allow <worktreeのパス>`を忘れずに。
+
 ## 開発の約束（グローバル設定に加えて）
 
 - コミットは日本語・意味単位。rebaseせず master を merge。テストは `.venv` で
