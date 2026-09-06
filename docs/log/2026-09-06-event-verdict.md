@@ -55,9 +55,28 @@ verdictを持たせてバッジで出せば、一覧は「何を調べて、何�
 - テストの`_FakeTable.update_item`が`#n`1個しか扱えなかったので、複数の名前・値プレースホルダを
   扱える形に一般化した（`SET #v = :v, #s = :s`と`REMOVE #v, #s`のため）。
 
+## 実施した運用作業
+
+- **既存34件へverdictをバックフィル**（good 19 / warning 7 / critical 8、全て`source=human`）。
+  `detection_events.csv`の判定と手で紐付けた。
+- **`detection_events.csv`にあるのにイベントが無かった5件を昇格**（新しい手順書の
+  「判定に関わらず必ず昇格」に合わせた遡り適用）: 福島県沖M4.0(07-24)・福島県沖M4.5(08-26)・
+  茨城県南部M3.4(08-26)・福島県中通りM3.3(08-31)・宮城県沖M3.8(09-04)。**07-24のdevice2だけは
+  rawが無く昇格できない**——ADXL355(device2)の導入前だったため。残り4件は`relate`済み。
+- **Lambdaをデプロイ**（`common/`を触ったので ingest/detect/api/watchdog の4関数が更新。
+  planは`0 to add, 4 to change, 0 to destroy`）。`/events`・`/event`がverdictを返すのを実機で確認。
+
+## CloudFront invalidationを打っていない（既知の副作用）
+
+**ユーザー判断で今回は見送った。** `/event`は波形付きイベントを`max-age=365日`で返すため
+（`EVENT_CONFIRMED_CACHE_S`、`manual`イベントも同じ経路）、**今日より前に一度でも取得された
+event_idの詳細は、キャッシュが切れるまでverdictを含まない応答を返し続ける**。
+一覧(`/events`)はキャッシュしていないので即座に反映される。ダッシュボードのバッジを
+既存イベントで確認したくなったら、その時に34件ぶんの`/event?id=<eid>`を列挙して打てばよい
+（ワイルドカードは使わない）。
+
 ## 次に何が可能になったか
 
-- 既存イベントへのverdict後付け（`detection_events.csv`に判定はあるので手で紐付ける）。
 - ダッシュボードのバッジ表示——**未着手**。ユーザーが手元で見た目を決める。
 - 将来、イベントが震源要素まで持てば`detection_events.csv`をイベントから生成でき、
   手順3.5の二重記帳が消える。今回はそこまでやらない。
