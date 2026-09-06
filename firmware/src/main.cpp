@@ -610,8 +610,9 @@ static void checkAndPerformPullOta(const String& target) {
 // 「常時spill化」は一度保留と記録されているが、あれは別問題（2026-08-07の
 // 70分ブロッキング、既にタイムアウト予算で対処済み）への対症療法として
 // 見送られたもので、瞬時パニックでのRAM損失はタイムアウト予算では塞げない
-// 別の窓。健全時に常時LittleFS I/Oが乗るコストは変わらず残る——採用するか
-// どうかは実機での様子見込みで未確定（ユーザー指示、2026-08-30）。
+// 別の窓。健全時に常時LittleFS I/Oが乗るコストは変わらず残る——採用未確定な
+// ため既定では無効にし、build_flags の NAMZ_ALWAYS_SPILL で切り替える
+// （実機での実測用に[env:esp32dev-always-spill]等を用意、platformio.ini参照）。
 // flushToSpill()はファイルI/Oのみでネットワークを触らないため、このタスクを
 // 分けた本来の目的（送信タスクのブロックに巻き込まれない）は損なわない。
 static void batchDrainTask(void*) {
@@ -619,7 +620,9 @@ static void batchDrainTask(void*) {
     Batch* b = nullptr;
     if (xQueueReceive(gBatchQueue, &b, portMAX_DELAY) == pdTRUE) {
       gUploader->enqueue(b);
+#ifdef NAMZ_ALWAYS_SPILL
       gUploader->flushToSpill();
+#endif
     }
   }
 }

@@ -290,12 +290,15 @@ TlsMemPool導入と静的RAM削減を経て小さいスロット数で再挑戦�
 - **常時spill化**: 元々は2026-08-07の70分ブロッキング障害への対症療法として
   検討し、健全時のI/O負荷・根本原因(タイムアウト無制限)を直さない点を理由に
   保留した。**別の目的（WDTパニック等の瞬時再起動でRAM上のバッチが消える窓を
-  塞ぐ、タイムアウト予算では塞げない）で2026-08-30に実験実装した
-  （`batchDrainTask`の`enqueue()`直後に`flushToSpill()`を追加）。テスト機
-  (device_id 4294967295)への実機書き込みでenqueue直後の即時spill・POST成功
-  ・heap安定を3サイクル確認できたが、長時間運用でのflash摩耗・I/O負荷の実測
-  はまだ。健全時に常時LittleFS I/Oが乗るコスト自体は変わらず残っており、
-  採用するかは未確定**（[log/2026-08-30-batch-spill-before-send.md](log/2026-08-30-batch-spill-before-send.md)）
+  塞ぐ、タイムアウト予算では塞げない）で2026-08-30に実験実装し、`platformio.ini`
+  のビルドフラグ`NAMZ_ALWAYS_SPILL`で切り替えられるようにした
+  （`batchDrainTask`の`enqueue()`直後に`flushToSpill()`を追加、未定義=既定では
+  呼ばれない）。テスト機(device_id 4294967295)への実機書き込みでenqueue直後の
+  即時spill・POST成功・heap安定を3サイクル確認できたが、長時間運用でのflash
+  摩耗・I/O負荷の実測はまだ。健全時に常時LittleFS I/Oが乗るコスト自体は変わらず
+  残っており、採用は未確定——実測したい時だけ`-always-spill`系env
+  （`esp32dev-always-spill`等）で本番機に焼く**
+  （[log/2026-08-30-batch-spill-before-send.md](log/2026-08-30-batch-spill-before-send.md)）
 
 このあたりの推理の紆余曲折（複数の仮説とその反証・実機再現実験）を辿りたい
 場合は[log/2026-08-08-device1-outage-and-deploy-drift.md](log/2026-08-08-device1-outage-and-deploy-drift.md)・

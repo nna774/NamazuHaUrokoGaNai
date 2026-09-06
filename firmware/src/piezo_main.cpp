@@ -255,8 +255,11 @@ static void uploaderTask(void*) {
       drained = true;
     }
     // 吸い出した端から即座にLittleFSへ退避する（常時spill化、本線main.cppと同じ
-    // 理由）。ファイルI/Oのみでpump()のネットワークI/Oより前なのでブロックしない。
+    // 理由・同じNAMZ_ALWAYS_SPILLで既定無効）。ファイルI/Oのみでpump()の
+    // ネットワークI/Oより前なのでブロックしない。
+#ifdef NAMZ_ALWAYS_SPILL
     if (drained) gUploader->flushToSpill();
+#endif
     // 送信直前に稼働時間・ヒープヘッダを更新（Uploaderは値をコピーせずポインタを
     // 保持するため、pump()がPOSTする直前の値を確実に使わせるにはこの位置で書く
     // 必要がある。本線main.cppと同じ理由）。
