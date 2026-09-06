@@ -1058,7 +1058,9 @@ async function reloadEvents(pageNum = 1) {
       // 正式名称は title と詳細ページ側に残す。
       const artTag = ev.artificial
         ? ' <span class="badge badge-art" title="人工地震（テスト等）">人工</span>' : '';
-      const manualTag = ev.manual ? ' <span class="badge badge-manual">手動</span>' : '';
+      // 判定が付いていれば「人が調べた」ことは判定列が示すので、手動タグは出さない。
+      // まだ判定していない手動保存だけ「手動」と出る。
+      const manualTag = (ev.manual && !ev.verdict) ? ' <span class="badge badge-manual">手動</span>' : '';
       // どの機のイベントかは常に出す。多点では震度の意味が機ごとに違う。
       const dev = ev.device_id != null ? String(ev.device_id).padStart(4, '0') : '—';
       tr.innerHTML = `<td class="col-time">${t}</td><td>${dev}</td>${verdictCell(ev.verdict)}`
