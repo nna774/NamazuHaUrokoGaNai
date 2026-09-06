@@ -214,7 +214,7 @@ def set_verdict(eid: str, verdict: str | None, source: str = "human") -> None:
 
     `source` は "human"（人が判定した）か "auto"（一次判定が自動で付けた）。**一覧の
     既定フィルタはこの値を見ていない**——埋没を隠すかどうかは表示側の判断で、
-    機械が陰性を大量に保存し始めた時に初めて必要になる（→ docs/auto_judge.md）。
+    機械が陰性を大量に保存し始めた時に初めて必要になる（自動一次判定の構想は別途設計中）。
     """
     if verdict is None:
         _table().update_item(
@@ -272,7 +272,7 @@ def list_page(page: int = 0, size: int = 20, show_all: bool = False,
 
     **`verdict` では絞らない。** 事後解析で「完全埋没」と判定したイベントも既定で出す——
     「調べたが何も見えなかった」は「まだ調べていない」と区別されるべき記録で、隠すと
-    その区別が消えるため（→ docs/auto_judge.md、docs/log/2026-09-06-event-verdict.md）。
+    その区別が消えるため（→ docs/log/2026-09-06-event-verdict.md）。
 
     device_id を指定すると、そのデバイスのイベントだけに絞る（既定は全デバイス。
     波形と違いイベントは混ぜても壊れないので、絞り込みは任意）。
