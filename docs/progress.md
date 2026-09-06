@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-09-06 | **device1で3件目のcoredump(2026-09-06 08:54起動時に自動回収)をシンボライズし、2026-09-01調査済みの`udp_sendto`/`pcb=1`クラッシュ(lwIP DNSスレッド安全性違反、arduino-esp32 2.x系列の既知未解決バグ)の再発と確定した。** レジスタ・バックトレースとも前回・device2の同型クラッシュと完全一致し新事実は無い。device1単体では5日間隔での2件目、フリート全体では3件目。緩和策(タスク優先度変更/DNSキャッシュ/固定IP/3.x移行)はいずれも未実装のままユーザー判断待ちを継続。新しいマシンでの環境構築(PlatformIO/esp-coredump未導入・`namazu-admin`プロファイルでのAWSアクセス)から手順書通り再現できることも確認した | [log/2026-09-06-device1-udp-sendto-recurrence.md](log/2026-09-06-device1-udp-sendto-recurrence.md) |
 | 2026-09-04 | **宮城県沖M3.8(震源距離281km)の事後解析で完全埋没と判定した。** 標準・低帯域(0.5-2Hz水平2軸)どちらもSTA/LTAが一度も閾値を超えず、P窓/S窓/コーダ想定域いずれもSNR・直線性がノイズと分離できなかった。目安レンジ103〜205kmに対し明確に遠く、検出限界を下回った参考例 | [log/2026-09-04-miyagi-oki-m3.8-post-hoc-detection.md](log/2026-09-04-miyagi-oki-m3.8-post-hoc-detection.md) |
 | 2026-09-04 | **ダッシュボードをURLハッシュ無しで開いた時の既定表示機を、実在デバイスの最若番(実質1号機)から2号機へ変更した。** URLに`d`指定・手動選択のどちらも無い「未選択」時だけ新設の既定機に倒し、無効な`d`指定からの復帰など既存のフォールバックは最若番のまま維持した | [log/2026-09-04-dashboard-default-device-2.md](log/2026-09-04-dashboard-default-device-2.md) |
 | 2026-09-04 | **`firmware-build`・`firmware-host-test`に`paths`フィルタを追加し、`firmware/**`(と自ワークフローファイル)の変更時のみ走るようにした。** docs等firmwareと無関係な変更でのESP32ツールチェーン込みフルビルドを避けるため。「docだからスキップ」ではなく「firmwareに無関係だからスキップ」というallowlist方式を採用（ignoreリストだと新形式ファイル追加のたび追記が要るため）。masterはbranch protection未設定・必須チェック指定無しと確認済みで、スキップされてもマージはブロックされない | [log/2026-09-04-skip-firmware-ci-on-docs.md](log/2026-09-04-skip-firmware-ci-on-docs.md) |
