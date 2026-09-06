@@ -22,18 +22,24 @@ jobs:
         # 本番3系統(esp32dev/adxl355/piezo)と、実センサ無しで通しの結合試験を再現する
         # fake-sensor系(WiFi/送信あり、秘密不要)。sensortest系(WiFi/送信なしのセンサ
         # 検証専用)・provisionやprobe系(secrets_provision.h・実機計測前提)は対象外
-        # （docs/ci.mdのfirmware-buildの節参照）。-always-spill系(NAMZ_ALWAYS_SPILL、
-        # docs/log/2026-09-07-batch-spill-build-flag.md)は本番envに定義を1つ足すだけ
-        # (秘密・実機不要)なので本番3系統と同列に含める。
-        env:
-          - esp32dev
-          - adxl355
-          - piezo
-          - fake-sensor
-          - fake-sensor-device2-profile
-          - esp32dev-always-spill
-          - adxl355-always-spill
-          - piezo-always-spill
+        # （docs/ci.mdのfirmware-buildの節参照）。
+        # NAMZ_ALWAYS_SPILL等の実機トグル(firmware/flags_from_env.py、
+        # docs/log/2026-09-07-always-spill-env-var-toggle.md)は専用envを持たず
+        # 環境変数で切り替えるので、本番3系統ぶんだけnamz_always_spillを立てた
+        # 組み合わせをincludeで個別に足す（xN系統のような掛け算にしない）。
+        include:
+          - env: esp32dev
+          - env: adxl355
+          - env: piezo
+          - env: fake-sensor
+          - env: fake-sensor-device2-profile
+          - env: esp32dev
+            namz_always_spill: "1"
+          - env: adxl355
+            namz_always_spill: "1"
+          - env: piezo
+            namz_always_spill: "1"
+    name: build (${{ matrix.env }}${{ matrix.namz_always_spill && '+always-spill' || '' }})
     steps:
       - uses: actions/checkout@v4
 
@@ -57,6 +63,8 @@ jobs:
       - name: install PlatformIO
         run: pip install platformio==6.1.19
 
-      - name: build firmware (${{ matrix.env }})
+      - name: build firmware
         working-directory: firmware
+        env:
+          NAMZ_ALWAYS_SPILL: ${{ matrix.namz_always_spill }}
         run: pio run -e ${{ matrix.env }}

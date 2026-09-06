@@ -316,8 +316,11 @@ WDT(20秒)より長く詰まると`onProgress()`が一度も呼ばれないま�
   呼ばれない）。テスト機(device_id 4294967295)への実機書き込みでenqueue直後の
   即時spill・POST成功・heap安定を3サイクル確認できたが、長時間運用でのflash
   摩耗・I/O負荷の実測はまだ。健全時に常時LittleFS I/Oが乗るコスト自体は変わらず
-  残っており、採用は未確定——実測したい時だけ`-always-spill`系env
-  （`esp32dev-always-spill`等）で本番機に焼く**
+  残っており、採用は未確定——実測したい時は専用envではなく環境変数で切り替える
+  （`NAMZ_ALWAYS_SPILL=1 pio run -e esp32dev`、`python firmware/flags_from_env.py`
+  で一覧できる。専用envを増やすと複数の実機トグルが並んだ時に組み合わせが
+  指数的に増えるため、[log/2026-09-07-always-spill-env-var-toggle.md](log/2026-09-07-always-spill-env-var-toggle.md)で
+  この方式に切り替えた）**
   （[log/2026-08-30-batch-spill-before-send.md](log/2026-08-30-batch-spill-before-send.md)）
 
 このあたりの推理の紆余曲折（複数の仮説とその反証・実機再現実験）を辿りたい

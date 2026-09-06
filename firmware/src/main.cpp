@@ -622,8 +622,9 @@ static void checkAndPerformPullOta(const String& target) {
 // 70分ブロッキング、既にタイムアウト予算で対処済み）への対症療法として
 // 見送られたもので、瞬時パニックでのRAM損失はタイムアウト予算では塞げない
 // 別の窓。健全時に常時LittleFS I/Oが乗るコストは変わらず残る——採用未確定な
-// ため既定では無効にし、build_flags の NAMZ_ALWAYS_SPILL で切り替える
-// （実機での実測用に[env:esp32dev-always-spill]等を用意、platformio.ini参照）。
+// ため既定では無効にし、build_flags の NAMZ_ALWAYS_SPILL で切り替える（専用env
+// ではなく環境変数トグル、`NAMZ_ALWAYS_SPILL=1 pio run -e esp32dev`。理由は
+// firmware/flags_from_env.py、docs/log/2026-09-07-always-spill-env-var-toggle.md）。
 // flushToSpill()はファイルI/Oのみでネットワークを触らないため、このタスクを
 // 分けた本来の目的（送信タスクのブロックに巻き込まれない）は損なわない。
 static void batchDrainTask(void*) {
