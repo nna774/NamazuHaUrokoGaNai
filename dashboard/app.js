@@ -48,6 +48,17 @@ const SCALE_STYLE = {
   '7':  ['#b40068', '#fff'],
 };
 const ART_STYLE = ['#888', '#fff'];  // 人工地震はグレー
+// 事後解析の判定(verdict)の表示名。値は tools/detection_events.csv と共有の語彙。
+const VERDICT_LABEL = { good: '検出', warning: '微妙', critical: '埋没' };
+
+// 一覧の判定セル。未判定（まだ調べていない/自動確定のみ）は「—」。
+// 「調べたが埋没だった」と「まだ調べていない」を一覧で区別するための列なので、
+// verdict では行を隠さない（隠すと区別が消える。docs/log/2026-09-06-event-verdict.md）。
+function verdictCell(verdict) {
+  if (!verdict) return '<td class="col-verdict muted">—</td>';
+  const label = VERDICT_LABEL[verdict] || verdict;
+  return `<td class="col-verdict"><span class="dot d-${verdict}"></span>${label}</td>`;
+}
 
 // 震度バッジのHTML。階級で色分けし、人工地震はグレーにする。
 function scaleBadge(scale, artificial) {
@@ -1030,7 +1041,12 @@ async function reloadEvents(pageNum = 1) {
     for (const ev of data.events) {
       const tr = document.createElement('tr');
       tr.dataset.id = ev.event_id;
-      const t = new Date(Number(ev.onset_us) / 1000).toLocaleString('ja-JP');
+      // 日付と時刻を別spanにしておき、狭い画面ではCSSで日付/時刻を2段に割る
+      // （ブラウザ任せの折り返しだと列幅が1行ぶんで見積もられ、右側に使わない
+      // 余白が残る）。広い画面では従来どおり1行に並ぶ。
+      const d = new Date(Number(ev.onset_us) / 1000);
+      const t = `<span class="ymd">${d.toLocaleDateString('ja-JP')}</span> `
+        + `<span class="hms">${d.toLocaleTimeString('ja-JP')}</span>`;
       const iv = Number(ev.max_intensity || 0);
       const i = iv.toFixed(1);
       const scale = ev.scale || intensityScale(iv);
@@ -1038,12 +1054,18 @@ async function reloadEvents(pageNum = 1) {
       // 震度バッジは階級で色分け（人工地震はグレー）。人工地震は種別を示すタグも震度セル内に
       // 添える。列を足すとチェック有無でレイアウトが変わるため、既存セル内で完結させる。
       // グレーは震度0とも紛らわしいので「人工」タグを併記して判別を確実にする（全件表示でのみ出る）。
-      const artTag = ev.artificial ? ' <span class="badge badge-art">人工地震</span>' : '';
-      const manualTag = ev.manual ? ' <span class="badge badge-manual">手動</span>' : '';
+      // ラベルは「人工」まで詰める（狭い画面で震度セルが2段になるため）。
+      // 正式名称は title と詳細ページ側に残す。
+      const artTag = ev.artificial
+        ? ' <span class="badge badge-art" title="人工地震（テスト等）">人工</span>' : '';
+      // 判定が付いていれば「人が調べた」ことは判定列が示すので、手動タグは出さない。
+      // まだ判定していない手動保存だけ「手動」と出る。
+      const manualTag = (ev.manual && !ev.verdict) ? ' <span class="badge badge-manual">手動</span>' : '';
       // どの機のイベントかは常に出す。多点では震度の意味が機ごとに違う。
       const dev = ev.device_id != null ? String(ev.device_id).padStart(4, '0') : '—';
-      tr.innerHTML = `<td>${t}</td><td>${dev}</td><td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
-        + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td>${dur}</td>`
+      tr.innerHTML = `<td class="col-time">${t}</td><td>${dev}</td>${verdictCell(ev.verdict)}`
+        + `<td>${scaleBadge(scale, ev.artificial)}${artTag}${manualTag}</td>`
+        + `<td>${i}</td><td>${Number(ev.peak_gal || 0).toFixed(2)}</td><td class="col-dur">${dur}</td>`
         + `<td>${ev.device_prompt ? '✓' : ''}</td><td>${ev.cloud_confirmed ? '✓' : ''}</td>`;
       // 非該当（評価済みだが未確定）・人工地震は薄く表示して区別する（全件表示でのみ出る）。
       // 手動保存(manual)は意図して残したものなので薄くしない。
