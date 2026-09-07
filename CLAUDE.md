@@ -20,6 +20,7 @@
 | 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
 | ADXL355機（device 2）の導入経緯・実装済み内容 | [docs/adxl355.md](docs/adxl355.md) |
 | ジオフォン(速度センサ)導入作戦（検討中・未着手） | [docs/geophone.md](docs/geophone.md) |
+| 気象庁の地震一覧を定期スキャンし、事後解析すべき候補をSlack通知する構想（設計のみ・未実装。判定・保存は自動化しない） | [docs/auto_judge.md](docs/auto_judge.md) |
 | 停電対策のUPS導入作戦（方針決定・発注済み、実機未検証） | [docs/ups.md](docs/ups.md) |
 | 安価な代替センサ(圧電等)による補強検知の構想（雑談ベースの検討記録。piezo.mdへ引き継ぎ済み） | [docs/other-sensors.md](docs/other-sensors.md) |
 | ピエゾ実験機（device 3）。phase1（クラウド統合）まで実装済み・稼働中 | [docs/piezo.md](docs/piezo.md) |
@@ -81,7 +82,9 @@
     同じ語彙)。`verdict_source` は `human`/`auto`。**一覧の既定フィルタはこれを見ない**
     ——埋没と判定したイベントも既定で出す（「調べたが見えなかった」と「まだ調べていない」を
     区別するため）。付けるのは `flag_event.py verdict` か `promote_event.py --verdict`
-  - 一覧の既定フィルタは「(確定 or 未評価) かつ 非artificial」。表示震度は `effective_intensity`。
+  - 一覧の既定フィルタは「(確定 or **manual** or 未評価) かつ 非artificial」（`lambda/common/events.py`の
+    `list_page()`）。**`manual`＝手動昇格は確定と同格に既定一覧へ出る**——`promote_event.py`で
+    昇格したものは震度0でも一覧の先頭に並ぶ。表示震度は `effective_intensity`。
   - **`api`の`/event`はCloudFrontで長期キャッシュしている**（確定済みは1年相当、速報のみは
     無効化。`terraform/custom_domain.tf`の`aws_cloudfront_cache_policy.api_event`、
     `lambda/api/handler.py`の`EVENT_CONFIRMED_CACHE_S`。Electabuzz PR#29と同じ「閲覧人数が
