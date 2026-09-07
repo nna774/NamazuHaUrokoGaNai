@@ -526,7 +526,10 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
                          "地震なら両機とも同時に立つので1に近づく）", fontsize=9, loc="left")
 
     if show_intensity:
+        from jismo.rounding import SCALE_BAND_LABELS, SCALE_BOUNDARIES
+
         idx = 3 if show_corr else 2
+        t_min = None
         for i, (device_id, *_rest) in enumerate(per_device):
             entry = intensity_by_dev.get(device_id)
             if not entry:
@@ -535,7 +538,19 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
             color = colors[i % len(colors)]
             t = (i_start_us - ref_us) / 1e6 + ts
             axs[idx].plot(t, vals, lw=1.0, color=color, label=f"device {device_id}")
-        axs[idx].axhline(0.5, color="gray", lw=0.6, ls=":")
+            t_min = t.min() if t_min is None else min(t_min, t.min())
+        # 発生時刻より前（t<0）は必ず開いた背景ノイズ域なので、そこに震度階級の目盛りを
+        # 薄く重ねる。境界線・ラベルとも現在のy範囲に収まるものだけ出す。
+        ylo, yhi = axs[idx].get_ylim()
+        for b in SCALE_BOUNDARIES:
+            if ylo <= b <= yhi:
+                axs[idx].axhline(b, color="gray", lw=0.5, ls=":", alpha=0.6)
+        if t_min is not None:
+            x_text = t_min + 0.01 * (axs[idx].get_xlim()[1] - t_min)
+            for y, label in SCALE_BAND_LABELS:
+                if ylo <= y <= yhi:
+                    axs[idx].text(x_text, y, f"震度{label}", fontsize=7.5, color="gray",
+                                 va="center", ha="left")
         axs[idx].set_ylabel("計測震度")
         axs[idx].set_title(f"計測震度（60秒移動窓FIR版、{intensity_step:g}秒間隔サンプリング。"
                            "STA/LTA・直線性は検知アルゴリズムの中間量、こちらは気象庁の尺度そのもの）",

@@ -40,6 +40,16 @@ def scale_ordinal(intensity: float) -> int:
     return 9
 
 
+# 震度階級の境界値と帯の中央値ラベル。intensity_scale() のしきい値と対応させてある
+# （境界を変えたらこちらも直すこと）。プロットに階級を薄く重ねる用途
+# （tools/detectlab.py の --intensity パネル等）でのみ使う。
+SCALE_BOUNDARIES = (0.5, 1.5, 2.5, 3.5, 4.5, 5.0, 5.5, 6.0, 6.5)
+SCALE_BAND_LABELS = (
+    (0.25, "0"), (1.0, "1"), (2.0, "2"), (3.0, "3"), (4.0, "4"),
+    (4.75, "5弱"), (5.25, "5強"), (5.75, "6弱"), (6.25, "6強"), (7.0, "7"),
+)
+
+
 def intensity_scale(intensity: float) -> str:
     """計測震度から気象庁の震度階級を返す。"""
     i = intensity
