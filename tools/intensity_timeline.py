@@ -25,7 +25,7 @@ if str(_LAMBDA_DIR) not in sys.path:
     sys.path.insert(0, str(_LAMBDA_DIR))
 
 from jismo.realtime import intensity_timeline as compute_timeline  # noqa: E402
-from jismo.rounding import SCALE_BAND_LABELS, SCALE_BOUNDARIES  # noqa: E402
+from jismo.rounding import intensity_scale  # noqa: E402
 
 
 def main() -> int:
@@ -70,30 +70,30 @@ def main() -> int:
         raise SystemExit("プロットできる波形が無い")
 
     t0 = min(start_us for _, _, start_us, _, _ in series)
-    t_min = None
+    peaks = []
     for eid, device_id, start_us, ts, vals in series:
         offset = (start_us - t0) / 1e6
         t = ts + offset
-        ax.plot(t, vals, label=f"{int(device_id)}号機 ({eid})", linewidth=1.2)
-        t_min = t.min() if t_min is None else min(t_min, t.min())
+        line, = ax.plot(t, vals, label=f"{int(device_id)}号機 ({eid})", linewidth=1.2)
+        peak_i = int(np.argmax(vals))
+        peaks.append((device_id, line.get_color(), t[peak_i], vals[peak_i]))
+    # ピーク点にはドットだけ打ち、値は左上にまとめて注記する（ピーク位置に文字を置くと
+    # データの形次第で重なりやすいため、固定位置にまとめた方が読みやすい）。
+    for device_id, color, peak_t, peak_v in peaks:
+        ax.scatter([peak_t], [peak_v], color=color, s=20, zorder=5,
+                  edgecolor="white", linewidth=0.5)
+    for i, (device_id, color, _t, peak_v) in enumerate(peaks):
+        ax.text(0.01, 0.97 - 0.06 * i,
+               f"{int(device_id)}号機 ピーク I={peak_v:.1f} 震度{intensity_scale(peak_v)}",
+               transform=ax.transAxes, color=color, fontsize=8, va="top", ha="left",
+               bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=1))
 
     ax.set_xlabel("経過時間 [秒]")
     ax.set_ylabel("計測震度")
     ax.set_title(f"計測震度の時系列（{args.step}秒間隔・60秒移動窓）")
     if args.xlim:
         ax.set_xlim(args.xlim[0], args.xlim[1])
-    # 窓の先頭（普通は発生前の背景ノイズ域）に震度階級の目盛りを薄く重ねる。
-    ylo, yhi = ax.get_ylim()
-    for b in SCALE_BOUNDARIES:
-        if ylo <= b <= yhi:
-            ax.axhline(b, color="gray", linewidth=0.5, linestyle=":", alpha=0.6)
-    if t_min is not None:
-        x_text = t_min + 0.01 * (ax.get_xlim()[1] - t_min)
-        for y, label in SCALE_BAND_LABELS:
-            if ylo <= y <= yhi:
-                ax.text(x_text, y, f"震度{label}", fontsize=7.5, color="gray",
-                       va="center", ha="left")
-    ax.legend()
+    ax.legend(loc="upper right")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     fig.savefig(args.out, dpi=150)

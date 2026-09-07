@@ -526,10 +526,10 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
                          "地震なら両機とも同時に立つので1に近づく）", fontsize=9, loc="left")
 
     if show_intensity:
-        from jismo.rounding import SCALE_BAND_LABELS, SCALE_BOUNDARIES
+        from jismo.rounding import intensity_scale
 
         idx = 3 if show_corr else 2
-        t_min = None
+        peaks = []
         for i, (device_id, *_rest) in enumerate(per_device):
             entry = intensity_by_dev.get(device_id)
             if not entry:
@@ -538,19 +538,19 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
             color = colors[i % len(colors)]
             t = (i_start_us - ref_us) / 1e6 + ts
             axs[idx].plot(t, vals, lw=1.0, color=color, label=f"device {device_id}")
-            t_min = t.min() if t_min is None else min(t_min, t.min())
-        # 発生時刻より前（t<0）は必ず開いた背景ノイズ域なので、そこに震度階級の目盛りを
-        # 薄く重ねる。境界線・ラベルとも現在のy範囲に収まるものだけ出す。
-        ylo, yhi = axs[idx].get_ylim()
-        for b in SCALE_BOUNDARIES:
-            if ylo <= b <= yhi:
-                axs[idx].axhline(b, color="gray", lw=0.5, ls=":", alpha=0.6)
-        if t_min is not None:
-            x_text = t_min + 0.01 * (axs[idx].get_xlim()[1] - t_min)
-            for y, label in SCALE_BAND_LABELS:
-                if ylo <= y <= yhi:
-                    axs[idx].text(x_text, y, f"震度{label}", fontsize=7.5, color="gray",
-                                 va="center", ha="left")
+            peak_i = int(np.argmax(vals))
+            peaks.append((device_id, color, t[peak_i], vals[peak_i]))
+        # ピーク点にはドットだけ打ち、値は左上にまとめて注記する（ピーク位置に文字を
+        # 置くとパネル境界やコーダ帯の塗りとぶつかりやすいため）。
+        for device_id, color, peak_t, peak_v in peaks:
+            axs[idx].scatter([peak_t], [peak_v], color=color, s=20, zorder=5,
+                             edgecolor="white", linewidth=0.5)
+        for i, (device_id, color, _t, peak_v) in enumerate(peaks):
+            axs[idx].text(0.01, 0.95 - 0.11 * i,
+                         f"device {device_id} ピーク I={peak_v:.1f} 震度{intensity_scale(peak_v)}",
+                         transform=axs[idx].transAxes, color=color, fontsize=8,
+                         va="top", ha="left",
+                         bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=1))
         axs[idx].set_ylabel("計測震度")
         axs[idx].set_title(f"計測震度（60秒移動窓FIR版、{intensity_step:g}秒間隔サンプリング。"
                            "STA/LTA・直線性は検知アルゴリズムの中間量、こちらは気象庁の尺度そのもの）",
