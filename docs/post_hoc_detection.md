@@ -127,11 +127,18 @@ python tools/detectlab.py --at "<保存範囲の終端付近>" \
 ブロックされ、人間がウィンドウを閉じるまでコマンドが終わらない（`--corr-bin`だけの
 テキスト統計が欲しい時も同じ）。バックグラウンド実行で「えらい遅い」と思ったら、まずこれを疑う。
 
+**重ね描き（`--device 1 2`・`--event`複数指定）では`--intensity`を基本的に付ける。**
+STA/LTA・直線性・直線性の一致度は検知アルゴリズムの中間量（スケールに震度としての意味は無い）
+だが、`--intensity`が追加する最下段パネルは`jismo.realtime`（ファームと数値照合済み）による
+計測震度の時系列そのもの——「結局どれくらいの揺れだったか」を気象庁の尺度で直接見られる。
+検出できた地震は4段とも同時に反応し、埋没した地震は4段ともフラットなまま、という対比が
+一枚で分かる（[2026-09-08のログ](log/2026-09-08-detectlab-intensity-panel.md)参照）。
+
 ### まず標準設定（3軸・1-10Hz）で全体像を1枚
 
 ```bash
 python tools/detectlab.py --at "<発生時刻、分単位 例 2026-08-23 22:45:00>" \
-  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 10 --device 1 2 \
+  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 10 --device 1 2 --intensity \
   --out docs/log/img/<slug>-8min.png
 ```
 
@@ -162,7 +169,7 @@ STA/LTA比・直線性に加えて出る。「重ね合わせでSTA/LTA・直線
 
 ```bash
 python tools/detectlab.py --at "<P窓付近、分秒>" \
-  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 2 --lead-min 2 --device 1 2 \
+  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 2 --lead-min 2 --device 1 2 --intensity \
   --out docs/log/img/<slug>-2min-zoom.png
 ```
 
@@ -172,7 +179,7 @@ python tools/detectlab.py --at "<P窓付近、分秒>" \
 
 ```bash
 python tools/detectlab.py --at "<発生時刻>" \
-  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 10 --device 1 2 \
+  --eew "<lat>,<lon>,<depth_km>,<発生時刻>" --minutes 10 --device 1 2 --intensity \
   --band 0.5 2 --axes xy --out docs/log/img/<slug>-lowband-xy.png
 ```
 
