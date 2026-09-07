@@ -126,3 +126,9 @@ variable "watchdog_schedule" {
   default     = "rate(5 minutes)"
   description = "欠測監視 watchdog の起動間隔（EventBridge schedule expression）。通知の遅れ ≒ 欠測しきい値 + この間隔。どの頻度でも無料枠に収まるので、遅さの許容度で決める。"
 }
+
+variable "quake_scan_schedule" {
+  type        = string
+  default     = "cron(0 0 * * ? *)" # 毎日UTC 0:00=JST 9:00
+  description = "地震候補スキャン(docs/auto_judge.md)の起動時刻。地震の発生自体に日内パターンは無いが、人間がSlackを見る生活リズムには意味があるので、rate()の「デプロイ時刻に固定される」不定さを避けてJST朝9時に固定した。重複排除の窓(NAMZ_QUAKE_SCAN_WINDOW_HOURS、lambda/quake_scan)は実行間隔(24時間)より広めに取り、実行時刻のブレを吸収する。"
+}

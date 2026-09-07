@@ -26,7 +26,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from detectlab import DEFAULT_STATION, hypocentral_km, parse_station
+from station import DEFAULT_STATION, hypocentral_km, parse_station
 from detection_range import CSV_PATH, fit_good, load_events, r_pred, worth_asking_band, zone_of
 
 JMA_LIST_URL = "https://www.jma.go.jp/bosai/quake/data/list.json"
@@ -107,6 +107,20 @@ def build_candidates(
     return out
 
 
+def format_candidate(c: Candidate, a: float, b: float) -> str:
+    """候補1件を、地名・M・震源距離・ゾーンの要約行と、そのままコピペできる
+    detectlab.pyコマンド行に整形する（`--eew`はdocs/post_hoc_detection.md手順0の
+    入力そのもの）。CLI出力とlambda/quake_scanのSlackダイジェストで共用する。"""
+    lo, hi = worth_asking_band(a, b, c.magnitude)
+    at_str = c.at[:16].replace("T", " ")
+    eew = f"{c.lat},{c.lon},{c.depth_km:g},{at_str}"
+    return (
+        f"[{c.at}] {c.region}  M{c.magnitude:g}  震源距離{c.hyp_km:.0f}km"
+        f"（レンジ{lo:.0f}〜{hi:.0f}km）  最大震度{c.max_intensity}  → {c.zone}\n"
+        f'  detectlab.py --at "{at_str}" --eew "{eew}" --minutes 10 --device 1 2'
+    )
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--days", type=float, default=3.0, help="何日前まで遡るか（既定3日）")
@@ -137,12 +151,8 @@ def main() -> int:
         return 0
 
     for c in sorted(candidates, key=lambda c: c.at, reverse=True):
-        lo, hi = worth_asking_band(a, b, c.magnitude)
-        at_str = c.at[:16].replace("T", " ")
-        eew = f"{c.lat},{c.lon},{c.depth_km:g},{at_str}"
-        print(f"\n[{c.at}] {c.region}  M{c.magnitude:g}  震源距離{c.hyp_km:.0f}km"
-              f"（レンジ{lo:.0f}〜{hi:.0f}km）  最大震度{c.max_intensity}  → {c.zone}")
-        print(f'  detectlab.py --at "{at_str}" --eew "{eew}" --minutes 10 --device 1 2')
+        print()
+        print(format_candidate(c, a, b))
     return 0
 
 

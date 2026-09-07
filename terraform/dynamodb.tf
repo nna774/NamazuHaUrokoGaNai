@@ -30,6 +30,26 @@ resource "aws_dynamodb_table" "devices" {
   }
 }
 
+# 地震候補スキャン(docs/auto_judge.md)の状態。"id"=JMAのeidの行が通知済み候補の
+# 重複排除、"id"="_state"の固定行が最終成功実行時刻(watchdogの停滞検知が読む)。
+# 通知済みeidにはttlを付けて自動失効させる（list.jsonが直近~1ヶ月しかロールしない
+# ので、それより十分長く持てば重複通知は起きない。lambda/common/quake_scan.py）。
+resource "aws_dynamodb_table" "quake_scan" {
+  name         = "${local.name}-quake-scan"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+}
+
 # センサ内蔵温度の時系列。ingest が受信バッチごとに1件書き（wire.parse 済みなので
 # 追加のS3アクセス無し）、api /devices/<id>/temp が device_id + 時刻レンジで Query する。
 # 波形と違い読み取り側でS3を漁らないので、公開読み取りAPIを叩かれても課金が

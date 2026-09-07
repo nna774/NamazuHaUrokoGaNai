@@ -43,11 +43,15 @@ data "aws_iam_policy_document" "lambda" {
       "dynamodb:UpdateItem",
       "dynamodb:Scan",
       "dynamodb:Query",
+      # quake_scan（common/quake_scan.py）が候補eidの突き合わせ・記録に使う
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
     ]
     resources = [
       aws_dynamodb_table.events.arn,
       aws_dynamodb_table.devices.arn,
       aws_dynamodb_table.device_temp.arn,
+      aws_dynamodb_table.quake_scan.arn,
     ]
   }
 

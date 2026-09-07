@@ -9,7 +9,8 @@ Python。計測震度は `tools/jismo`（FFT版・numpyのみ）を共有する�
 | `ingest` | Function URL | バッチPOSTを S3 raw/ へ保存。`/alert` はデバイス速報→即Slack通知 |
 | `detect` | S3 ObjectCreated(raw/*) | 直近窓を再解析し地震を確定検知→events/コピー・DynamoDB・確定報通知 |
 | `api`    | Function URL | ダッシュボード向け読み取り（波形・イベント・デバイス生存）。認証なし・CORS許可 |
-| `watchdog` | EventBridge 定期 | 各デバイスの最終受信からの経過を見て欠測をSlack通知（1日ごと再送・復帰通知） |
+| `watchdog` | EventBridge 定期 | 各デバイスの最終受信からの経過を見て欠測をSlack通知（1日ごと再送・復帰通知）。地震候補スキャンの停滞検知も相乗り |
+| `quake_scan` | EventBridge 定期(日次) | 気象庁の地震一覧から事後解析すべき候補を抽出し、1日1通のSlackダイジェストで知らせる（[docs/auto_judge.md](../docs/auto_judge.md)）。判定・保存はしない |
 
 ## 共通モジュール (`common/`)
 
@@ -22,6 +23,7 @@ Python。計測震度は `tools/jismo`（FFT版・numpyのみ）を共有する�
 | `events.py`      | DynamoDBイベント管理（デバイス速報とクラウド確定報の突合・重複排除） |
 | `quicklook.py`   | 確定報に添える波形クイックルックPNGの描画（detectのみ・Pillow使用） |
 | `imagehost.py`   | PNGを公開URLに載せる配信層（Gyazo初期実装。S3等に替えるならここに分岐追加） |
+| `quake_scan.py`  | 地震候補スキャンの状態（通知済みJMA eid・最終成功実行時刻）。quake_scanが書き、watchdogが停滞検知に読む |
 
 ## 共有ライブラリ (`batch_uplink`)
 
@@ -57,11 +59,16 @@ Python。計測震度は `tools/jismo`（FFT版・numpyのみ）を共有する�
 | `NAMZ_DETECT_STRIDE_S` | 窓を再評価する刻み[秒]（detect・既定0=バッチ到着ごと）。0超なら「この刻みの境界を跨いだバッチ」だけが評価する |
 | `NAMZ_OFFLINE_AFTER_S` | 欠測とみなす最終受信からの秒数（api/watchdog共通・既定300） |
 | `NAMZ_OFFLINE_RENOTIFY_S` | 欠測継続中の再送間隔[秒]（watchdog・既定86400） |
+| `NAMZ_QUAKE_SCAN_TABLE` | 地震候補スキャンの状態テーブル（quake_scan/watchdog共通） |
+| `NAMZ_QUAKE_SCAN_WINDOW_HOURS` | 候補抽出の遡り時間[時間]（quake_scan・既定28。実行間隔24時間より広めに取る） |
+| `NAMZ_QUAKE_SCAN_STUCK_AFTER_S` / `_RENOTIFY_S` | 地震候補スキャンの停滞判定[秒]・再送間隔[秒]（watchdog・既定115200=32時間 / 86400） |
 
 ## パッケージング
 
 各関数のzipには `handler.py` と `common/`・`jismo/` を同梱する。
-`terraform/build_lambda.sh` が `tools/jismo` をコピーして固める。
+`terraform/build_lambda.sh` が `tools/jismo` をコピーして固める。`quake_scan`のみ
+`tools/scan_quakes.py`・`detection_range.py`・`station.py`・`detection_events.csv`も
+追加で同梱する（候補抽出ロジックの単一の真実を`tools/`側に保つため）。
 
 ## テスト
 
