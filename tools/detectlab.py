@@ -464,7 +464,7 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
 
 
 def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, precomputed_corr=None,
-                 window_reports=None):
+                 window_reports=None, intensity_by_dev=None, intensity_step=0.5):
     """複数デバイスのSTA/LTA・直線性を同一時間軸に重ねて描く。
 
     生波形やスペクトログラムは軸の向きが機体ごとに違い重ねる意味が無いので出さない
@@ -473,6 +473,11 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
 
     ちょうど2機の重ね描きなら、直線性の移動相関（一致度）パネルを追加する。3機以上は
     どの組み合わせを見せるべきか自明でないため付けない。
+
+    `intensity_by_dev`（{device_id: (経過時間配列, 計測震度配列, その系列のstart_us)}）を
+    渡すと、計測震度の時系列（tools/intensity_timeline.py と同じ`jismo.realtime`計算）を
+    最下段パネルに追加する。STA/LTA・直線性は検知アルゴリズムの中間量で単位が無いのに対し、
+    計測震度は「結局どれくらいの揺れだったか」を気象庁の尺度で見られる（震度0.5の目安線付き）。
     """
     import matplotlib
 
@@ -490,8 +495,9 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
     plt.rcParams["axes.unicode_minus"] = False
 
     show_corr = len(per_device) == 2
-    nrows = 3 if show_corr else 2
-    fig, axs = plt.subplots(nrows, 1, figsize=(12, 6 if nrows == 2 else 8), sharex=True)
+    show_intensity = bool(intensity_by_dev)
+    nrows = (3 if show_corr else 2) + (1 if show_intensity else 0)
+    fig, axs = plt.subplots(nrows, 1, figsize=(12, 2.2 * nrows + 1), sharex=True)
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     for i, (device_id, start_us, fs, ratio, rect, onsets) in enumerate(per_device):
@@ -518,6 +524,22 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
         axs[2].set_ylabel("直線性の相関")
         axs[2].set_title(f"直線性の一致度（device {dev_a}/{dev_b} 間、窓{corr_win:g}秒の移動Pearson相関。"
                          "地震なら両機とも同時に立つので1に近づく）", fontsize=9, loc="left")
+
+    if show_intensity:
+        idx = 3 if show_corr else 2
+        for i, (device_id, *_rest) in enumerate(per_device):
+            entry = intensity_by_dev.get(device_id)
+            if not entry:
+                continue
+            ts, vals, i_start_us = entry
+            color = colors[i % len(colors)]
+            t = (i_start_us - ref_us) / 1e6 + ts
+            axs[idx].plot(t, vals, lw=1.0, color=color, label=f"device {device_id}")
+        axs[idx].axhline(0.5, color="gray", lw=0.6, ls=":")
+        axs[idx].set_ylabel("計測震度")
+        axs[idx].set_title(f"計測震度（60秒移動窓FIR版、{intensity_step:g}秒間隔サンプリング。"
+                           "STA/LTA・直線性は検知アルゴリズムの中間量、こちらは気象庁の尺度そのもの）",
+                           fontsize=9, loc="left")
 
     def sec_to_clock(x):
         return [datetime.fromtimestamp(ref_us / 1e6 + v, JST) for v in x]
@@ -676,6 +698,12 @@ def main() -> int:
     p.add_argument("--no-cache", action="store_true",
                    help="S3から毎回取り直す（既定は.s3cache/でget_objectをキャッシュ。"
                         "raw batchは書き込み後不変なので通常は付けなくてよい）")
+    p.add_argument("--intensity", action="store_true",
+                   help="計測震度の時系列パネルを重ね描き最下段に追加する（重ね描きモード限定。"
+                        "tools/intensity_timeline.py と同じ計算をdetectlabの他パネルと"
+                        "同一時間軸で見る）")
+    p.add_argument("--intensity-step", dest="intensity_step", type=float, default=0.5,
+                   help="計測震度パネルのサンプリング間隔[秒]（既定0.5、記事に合わせた値）")
     p.add_argument("--out", help="図の保存先PNG（無指定なら画面表示）")
     p.add_argument("--dump-csv", dest="dump", help="取得した生窓をCSV保存（再利用用）")
     p.add_argument("--show", action="store_true", help="--out 指定時も画面表示する")
@@ -749,6 +777,7 @@ def main() -> int:
         return window_results
 
     window_reports: dict[int, list] = {}  # dev -> report()の窓別結果（plot_overlayの表用）
+    intensity_by_dev: dict[int, tuple] = {}  # dev -> (経過時間, 計測震度, start_us)。--intensity時のみ
 
     def overlay_source(label: str, dev: int, data, start_us, fs) -> tuple:
         """重ね描き用の1機ぶん: 解析・レポート・dump・plot_overlay向けタプル化をまとめる
@@ -758,6 +787,9 @@ def main() -> int:
         band, ratio, onsets, rect, vec = analyze(
             data, fs, start_us, args.band, args.axes, args.sta, args.lta, args.thr, args.rect_win)
         window_reports[dev] = report(label, fs, start_us, band, ratio, onsets, rect, vec, data)
+        if args.intensity:
+            from jismo.realtime import intensity_timeline
+            intensity_by_dev[dev] = (*intensity_timeline(data, fs, args.intensity_step), start_us)
         if args.dump:
             stem, dot, ext = args.dump.rpartition(".")
             dump_csv(f"{stem}.dev{dev}.{ext}" if dot else f"{args.dump}.dev{dev}",
@@ -799,7 +831,9 @@ def main() -> int:
             print_corr_bin_report(*precomputed_corr, args.corr_bin, 0.6, origin_us)
         plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
                     show=args.show or not args.out, corr_win=args.corr_win,
-                    precomputed_corr=precomputed_corr, window_reports=window_reports)
+                    precomputed_corr=precomputed_corr, window_reports=window_reports,
+                    intensity_by_dev=intensity_by_dev if args.intensity else None,
+                    intensity_step=args.intensity_step)
         return 0
     else:
         device_id = args.device[0]
@@ -830,7 +864,9 @@ def main() -> int:
                 print_corr_bin_report(*precomputed_corr, args.corr_bin, 0.6, origin_us)
             plot_overlay(per_device, args.thr, arrivals, ref_us, args.out,
                         show=args.show or not args.out, corr_win=args.corr_win,
-                        precomputed_corr=precomputed_corr, window_reports=window_reports)
+                        precomputed_corr=precomputed_corr, window_reports=window_reports,
+                        intensity_by_dev=intensity_by_dev if args.intensity else None,
+                        intensity_step=args.intensity_step)
             return 0
 
         data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
