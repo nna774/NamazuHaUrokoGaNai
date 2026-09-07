@@ -345,6 +345,16 @@ python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 
 [docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md](../docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md)、
 [docs/log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md](../docs/log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md)）。
 
+**`--intensity`を付けると計測震度の時系列パネルが最下段に追加される（重ね描きモード限定）。**
+STA/LTA・直線性・直線性の一致度はいずれも検知アルゴリズムの中間量でスケールに震度としての
+意味は無いが、このパネルは`jismo.realtime.intensity_timeline()`（ファームと数値照合済みの
+FIR・60秒移動窓、既定0.5秒間隔でサンプリング）による計測震度そのものを同じ時間軸に描く。
+検出できた地震は4段とも同時に反応し、埋没した地震は4段ともフラットなまま、という対比が
+一枚の図で分かる（実例: [docs/log/2026-09-08-detectlab-intensity-panel.md](../docs/log/2026-09-08-detectlab-intensity-panel.md)）。
+単体窓のプロット（`--device`1個）には付かない。`--intensity-step SEC`（既定0.5）で
+サンプリング間隔を変えられる。同じ計算を単発でCSV等に使いたい時は`tools/intensity_timeline.py`
+（複数`--event`を渡すだけの薄いラッパー）を直接呼んでもよい。
+
 **`--eew`指定時、P窓・S窓に加えてS窓終了から180秒ぶんの「コーダ想定域」窓も自動で出る。**
 ピーク振幅は到達"瞬間"の窓の中に来るとは限らず、実体波からコーダへの減衰で窓の直後に
 来ることがあるため（`docs/post_hoc_detection.md`「P窓・S窓が示すのは〜」参照）。
@@ -366,6 +376,8 @@ python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 
 | `--rect-win` | `3` | 直線性の移動窓[秒] |
 | `--corr-win` | `2` | 2機重ね描き時の直線性一致度パネルに使う移動相関の窓[秒] |
 | `--corr-bin SEC` | `20` | 直線性の一致度をこの秒数のbinでテキスト集計して常に出す（`--eew`指定時は背景の値も併記） |
+| `--intensity` | 無効 | 計測震度の時系列パネルを最下段に追加（重ね描きモード限定） |
+| `--intensity-step SEC` | `0.5` | `--intensity`のサンプリング間隔[秒] |
 | `--eew "lat,lon,depth,時刻"` | なし | 震源との照合。P/S到達窓＋SNR/直線性 |
 | `--station "lat,lon"` | 湯沢町 | 観測点座標（`--eew` 用） |
 | `--dump-csv PATH` | なし | 取得した生窓を `t_us,x,y,z` CSVで保存 |
