@@ -126,3 +126,9 @@ variable "watchdog_schedule" {
   default     = "rate(5 minutes)"
   description = "欠測監視 watchdog の起動間隔（EventBridge schedule expression）。通知の遅れ ≒ 欠測しきい値 + この間隔。どの頻度でも無料枠に収まるので、遅さの許容度で決める。"
 }
+
+variable "quake_scan_schedule" {
+  type        = string
+  default     = "rate(1 day)"
+  description = "地震候補スキャン(docs/auto_judge.md)の起動間隔。地震の発生に日内パターンは無いので実行時刻自体に意味はなく、重複排除の窓(NAMZ_QUAKE_SCAN_WINDOW_HOURS、lambda/quake_scan)をこの間隔より広めに取ることで実行時刻のブレを吸収する。"
+}

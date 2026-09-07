@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from detectlab import DEFAULT_STATION, bearing_deg, hypocentral_km, parse_station
+from station import DEFAULT_STATION, bearing_deg, hypocentral_km, parse_station
 
 BAND_LO, BAND_HI = 0.8, 1.6  # 「投げる価値ありレンジ」の予測値に対する倍率
 CSV_PATH = os.path.join(os.path.dirname(__file__), "detection_events.csv")
@@ -90,6 +90,27 @@ def zone_of(a: float, b: float, magnitude: float, hyp_km: float) -> str:
     if hyp_km > hi:
         return "遠すぎ(恐らく埋没・埋没側の実例集めが目的の時だけ)"
     return "投げる価値あり(境界帯)"
+
+
+# 「遠すぎ」ゾーンでも拾う下限マグニチュード（docs/auto_judge.md）。
+# n=5の実例（detection_events.csv、2026-09-08時点）に基づく暫定値——唯一の成功例は
+# 青森県東方沖M4.7(548km)。M4.0未満まで広げると震源距離~900kmに対して物理的に
+# ほぼ検出不能な群発地震（九州M1.7〜3.0が大半）が月100件超流入するため、そこは
+# 拾わない。実例が増えるたびに見直す前提（毎週土曜のダイジェストでリマインドする）。
+FAR_BUT_NOTABLE_MAG = 4.0
+
+
+def worth_notifying(zone: str, magnitude: float) -> bool:
+    """地震候補スキャン（docs/auto_judge.md）が通知すべき候補か。
+
+    「投げる価値あり」「近すぎ」は全件、「遠すぎ」はFAR_BUT_NOTABLE_MAG以上のみ。
+    zone_of()の判定結果（文字列）とマグニチュードから決まる、副作用のない判定。
+    """
+    if "投げる価値あり" in zone or "近すぎ" in zone:
+        return True
+    if "遠すぎ" in zone:
+        return magnitude >= FAR_BUT_NOTABLE_MAG
+    return False
 
 
 def print_report(events: list[Event], a: float, b: float) -> None:

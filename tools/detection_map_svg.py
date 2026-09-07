@@ -23,7 +23,7 @@ import math
 import os
 
 from detection_range import CSV_PATH, fit_good, load_events, r_pred
-from detectlab import parse_station
+from station import parse_station
 
 PX_PER_KM = 0.279  # 方位図: 200km=55.8px の実測比を踏襲
 SCATTER_X_MIN, SCATTER_X_MAX = 40.0, 900.0  # 震源距離[km]の表示レンジ（対数軸）

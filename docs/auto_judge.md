@@ -1,8 +1,10 @@
-# 地震候補の定期スキャンと通知（構想・未実装）
+# 地震候補の定期スキャンと通知
 
-**「気象庁の地震一覧を定期的に見て、事後解析すべき候補をSlackに知らせる」** 仕組みの設計。
-2026-09-08時点で未実装。パラメータは全て決定済みで、実装に着手できる状態。
-**判定・保存は自動化しない**——機械がやるのは「候補への気付き」まで。
+**「気象庁の地震一覧を定期的に見て、事後解析すべき候補をSlackに知らせる」** 仕組み。
+2026-09-08にコード実装済み（`lambda/quake_scan/`・`terraform apply`は未実行、
+実機ではまだ動いていない）。**判定・保存は自動化しない**——機械がやるのは
+「候補への気付き」まで。実装の詳細は
+[log/2026-09-08-quake-scan-implementation.md](log/2026-09-08-quake-scan-implementation.md)。
 
 ## なぜやるか
 
@@ -159,20 +161,27 @@ M3.0未満まで広げると九州の群発地震（M1.7〜3.0が大半）が月
 
 ## 実装
 
-`detect`/`ingest`と同じ骨格。
+`detect`/`ingest`と同じ骨格。新しいアルゴリズムは無く、既存のロジックの移植・共有化。
 
-- 新規Lambda関数（`lambda/quake_scan/`案）＋`terraform/lambda.tf`にEventBridge日次ルール
+- 新規Lambda関数`lambda/quake_scan/`＋`terraform/lambda.tf`にEventBridge日次ルール
   （`watchdog`と同じ形の`aws_lambda_function`/`aws_cloudwatch_event_rule`/
   `aws_cloudwatch_event_target`/`aws_lambda_permission`）＋DynamoDBテーブル新設
-  （`namazu-quake-scan`）。
-- `detection_range.py`に`FAR_BUT_NOTABLE_MAG = 4.0`と、ゾーン＋マグニチュードから
-  「通知すべきか」を返す関数（`worth_notifying(zone, magnitude)`案）を追加。
-  `scan_quakes.py`とLambdaの両方がこれを呼ぶことで、閾値が2箇所に分散するのを防ぐ。
-- `scan_quakes.py`の候補整形部分（`main()`内、地名・M・震源距離・ゾーン・detectlabコマンド
-  の出力）を関数に切り出し、CLIとLambda通知の両方で使い回す。
-- `watchdog/handler.py`へ失敗検知の1ブロックを追加。
+  （`namazu-quake-scan`、状態管理は`lambda/common/quake_scan.py`）。
+- `tools/detection_range.py`に`FAR_BUT_NOTABLE_MAG = 4.0`と、ゾーン＋マグニチュードから
+  「通知すべきか」を返す`worth_notifying(zone, magnitude)`を追加。`scan_quakes.py`と
+  Lambdaの両方がこれを呼ぶことで、閾値が2箇所に分散するのを防ぐ。
+- `hypocentral_km`/`bearing_deg`/`parse_station`/`DEFAULT_STATION`を`detectlab.py`
+  （scipyに依存）から`tools/station.py`（math/osのみ）へ切り出した。これで
+  `scan_quakes.py`・`detection_range.py`はscipyを持ち込まずにLambdaへ同梱できる。
+- `scan_quakes.py`の候補整形部分を`format_candidate()`に切り出し、CLI出力と
+  Lambda通知のSlackダイジェストで共用する。
+- `watchdog/handler.py`へ失敗検知の1ブロックを追加（デバイスループの外、
+  `quake_scan.evaluate_stuck()`を1回だけ呼ぶ）。
+- `terraform/build_lambda.sh`の`build_one()`に、tools/直下のファイルを追加同梱する
+  引数を足し、`quake_scan`だけ`scan_quakes.py`・`detection_range.py`・`station.py`・
+  `detection_events.csv`を同梱する。
 
-新しいアルゴリズムは不要——既存のロジックを移植・共有化するだけで済む。
+**実装のみ完了、`terraform apply`はまだ実行していない**（実データでの動作確認はこれから）。
 
 ## コスト
 
@@ -191,4 +200,5 @@ M3.0未満まで広げると九州の群発地震（M1.7〜3.0が大半）が月
 | 通知形式 | 1日1通のダイジェスト（`scan_quakes.py`と同じブロックを候補ごとに並べる） |
 | 閾値見直しリマインド | 毎週土曜日のダイジェストに一言追記 |
 
-未決事項は無い。次に必要なのは実装のみ。
+コードは実装済み（`git grep quake_scan`で追える）。残っているのは`terraform apply`
+での実デプロイと、実データで数週間回した上での閾値の検証・見直しのみ。
