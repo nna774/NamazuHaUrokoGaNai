@@ -30,6 +30,10 @@ WINDOW_HOURS = float(os.environ.get("NAMZ_QUAKE_SCAN_WINDOW_HOURS", "28"))
 
 SATURDAY = 5  # datetime.weekday(): Monday=0 ... Sunday=6
 
+# 候補が0件でない時は見逃されたら困るのでメンションを付ける
+# （watchdogの欠測通知と同じ考え方・同じ宛先）。
+SLACK_MENTION = "<@U0323ESK6> "
+
 
 def _threshold_reminder() -> str:
     # 数字は実行時の値を埋め込む（本文のハードコードによる値のズレを避ける）。
@@ -64,7 +68,10 @@ def handler(event, context):
 
     if new_candidates:
         title = f"地震候補スキャン（{len(new_candidates)}件）"
-        body = "\n\n".join(format_candidate(c, a, b) for c in new_candidates)
+        body = (
+            f"{SLACK_MENTION}事後解析すべき候補が{len(new_candidates)}件。\n\n"
+            + "\n\n".join(format_candidate(c, a, b) for c in new_candidates)
+        )
     else:
         title = "地震候補スキャン"
         body = "新規候補なし。"

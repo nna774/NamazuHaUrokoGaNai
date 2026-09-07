@@ -76,6 +76,7 @@ def test_notifies_new_worth_asking_candidate():
     assert "1件" in title
     assert "テスト震源" in body
     assert "detectlab.py" in body
+    assert qs.SLACK_MENTION in body  # 0件でない時は見逃し防止でメンションを付ける
     assert marked == [(["e1"], succeeded[0])]
     assert len(succeeded) == 1
 
@@ -87,6 +88,7 @@ def test_far_zone_below_threshold_is_not_notified():
     assert result["new"] == 0
     title, body, _ = fake_notifier.calls[0]
     assert body == "新規候補なし。"
+    assert qs.SLACK_MENTION not in body  # 0件の時はメンション無し
     # 成功記録は候補の有無に関わらず必ず行う（watchdogの停滞検知が読むため）
     assert len(succeeded) == 1
     assert marked == []
