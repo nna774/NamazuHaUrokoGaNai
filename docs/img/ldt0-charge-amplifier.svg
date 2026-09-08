@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" font-family="sans-serif">
+  <rect width="1200" height="800" fill="white"/>
+  <text x="600" y="34" text-anchor="middle" font-size="22" font-weight="bold">LDT0-028K 東西・南北 2 軸電荷増幅器（MCP6004）</text>
+  <line x1="50" y1="70" x2="1130" y2="70" stroke="black" stroke-width="2"/>
+  <text x="1140" y="76" font-size="15">3.3 V</text>
+  <line x1="50" y1="745" x2="1130" y2="745" stroke="black" stroke-width="2"/>
+  <text x="1140" y="751" font-size="15">GND</text>
+
+  <!-- Shared VREF -->
+  <line x1="120" y1="70" x2="120" y2="105" stroke="black" stroke-width="2"/>
+  <rect x="108" y="105" width="24" height="55" fill="white" stroke="black" stroke-width="2"/>
+  <line x1="120" y1="160" x2="120" y2="195" stroke="black" stroke-width="2"/>
+  <circle cx="120" cy="195" r="4" fill="black"/>
+  <rect x="108" y="195" width="24" height="55" fill="white" stroke="black" stroke-width="2"/>
+  <line x1="120" y1="250" x2="120" y2="270" stroke="black" stroke-width="2"/>
+  <path d="M100 270h40m-33 8h26m-19 8h12" fill="none" stroke="black" stroke-width="2"/>
+  <text x="145" y="137" font-size="13">100 kΩ</text>
+  <text x="145" y="227" font-size="13">100 kΩ</text>
+  <line x1="120" y1="195" x2="230" y2="195" stroke="black" stroke-width="2"/>
+  <polygon points="230,155 230,235 325,195" fill="white" stroke="black" stroke-width="2"/>
+  <text x="245" y="184" font-size="15">+</text><text x="245" y="220" font-size="15">−</text>
+  <text x="273" y="200" font-size="14">C</text>
+  <line x1="325" y1="195" x2="380" y2="195" stroke="black" stroke-width="2"/>
+  <path d="M350 195v65H210v-45h20" fill="none" stroke="black" stroke-width="2"/>
+  <circle cx="350" cy="195" r="4" fill="black"/>
+  <text x="275" y="143" text-anchor="middle" font-size="13">MCP6004-C</text>
+  <text x="385" y="190" font-size="15" font-weight="bold">VREF = 1.65 V</text>
+  <line x1="380" y1="195" x2="480" y2="195" stroke="#2457a6" stroke-width="3"/>
+  <line x1="480" y1="195" x2="480" y2="695" stroke="#2457a6" stroke-width="3"/>
+
+  <!-- Decoupling and unused channel -->
+  <line x1="750" y1="70" x2="750" y2="110" stroke="black" stroke-width="2"/>
+  <path d="M733 110h34m-34 13h34M750 123v18M730 141h40m-33 8h26m-19 8h12" fill="none" stroke="black" stroke-width="2"/>
+  <text x="775" y="120" font-size="13">100 nF（IC直近）</text>
+  <rect x="880" y="120" width="250" height="95" rx="5" fill="#f5f5f5" stroke="#666" stroke-width="1.5"/>
+  <text x="1005" y="147" text-anchor="middle" font-size="14" font-weight="bold">MCP6004-D（未使用）</text>
+  <text x="1005" y="173" text-anchor="middle" font-size="13">+入力 → VREF</text>
+  <text x="1005" y="196" text-anchor="middle" font-size="13">出力 → −入力（帰還）</text>
+
+  <!-- East-west channel -->
+  <text x="50" y="360" font-size="17" font-weight="bold">東西軸</text>
+  <rect x="50" y="380" width="145" height="85" rx="5" fill="white" stroke="black" stroke-width="2"/>
+  <text x="122" y="412" text-anchor="middle" font-size="15">LDT0-028K</text><text x="122" y="435" text-anchor="middle" font-size="13">東西方向</text><text x="122" y="454" text-anchor="middle" font-size="11">480 pF / 80 Vpp</text>
+  <line x1="195" y1="405" x2="250" y2="405" stroke="black" stroke-width="2"/>
+  <rect x="250" y="393" width="90" height="24" fill="white" stroke="black" stroke-width="2"/>
+  <text x="295" y="383" text-anchor="middle" font-size="13">220 kΩ</text>
+  <line x1="340" y1="405" x2="550" y2="405" stroke="black" stroke-width="2"/>
+  <line x1="195" y1="445" x2="480" y2="445" stroke="#2457a6" stroke-width="3"/>
+  <circle cx="480" cy="445" r="4" fill="#2457a6"/>
+  <polygon points="550,355 550,455 680,405" fill="white" stroke="black" stroke-width="2"/>
+  <text x="566" y="387" font-size="15">−</text><text x="566" y="435" font-size="15">+</text><text x="610" y="410" font-size="14">A</text>
+  <line x1="480" y1="430" x2="550" y2="430" stroke="#2457a6" stroke-width="3"/>
+  <circle cx="480" cy="430" r="4" fill="#2457a6"/>
+  <text x="615" y="470" text-anchor="middle" font-size="13">MCP6004-A</text>
+  <circle cx="520" cy="405" r="4" fill="black"/>
+  <path d="M520 405V310H550" fill="none" stroke="black" stroke-width="2"/>
+  <rect x="550" y="298" width="130" height="24" fill="white" stroke="black" stroke-width="2"/>
+  <path d="M680 310h35v95" fill="none" stroke="black" stroke-width="2"/>
+  <text x="615" y="288" text-anchor="middle" font-size="13">Rf = 10 MΩ</text>
+  <path d="M520 340h80M600 327v26m13-26v26M613 340h102" fill="none" stroke="black" stroke-width="2"/>
+  <text x="655" y="334" font-size="12">Cf = 22 nF</text><text x="655" y="350" font-size="11">フィルム</text>
+  <line x1="680" y1="405" x2="770" y2="405" stroke="black" stroke-width="2"/><circle cx="715" cy="405" r="4" fill="black"/>
+  <rect x="770" y="393" width="75" height="24" fill="white" stroke="black" stroke-width="2"/><text x="807" y="383" text-anchor="middle" font-size="13">470 Ω</text>
+  <line x1="845" y1="405" x2="920" y2="405" stroke="black" stroke-width="2"/><circle cx="880" cy="405" r="4" fill="black"/>
+  <path d="M880 405v45m-15 0h30m-30 12h30M880 462v18M860 480h40m-33 8h26m-19 8h12" fill="none" stroke="black" stroke-width="2"/><text x="900" y="460" font-size="12">10 nF</text>
+  <rect x="920" y="377" width="150" height="56" rx="4" fill="white" stroke="black" stroke-width="2"/><text x="995" y="400" text-anchor="middle" font-size="14">ESP32-C3</text><text x="995" y="421" text-anchor="middle" font-size="14">GPIO0（X）</text>
+
+  <!-- North-south channel -->
+  <text x="50" y="610" font-size="17" font-weight="bold">南北軸</text>
+  <rect x="50" y="630" width="145" height="85" rx="5" fill="white" stroke="black" stroke-width="2"/>
+  <text x="122" y="662" text-anchor="middle" font-size="15">LDT0-028K</text><text x="122" y="685" text-anchor="middle" font-size="13">南北方向</text><text x="122" y="704" text-anchor="middle" font-size="11">480 pF / 80 Vpp</text>
+  <line x1="195" y1="655" x2="250" y2="655" stroke="black" stroke-width="2"/><rect x="250" y="643" width="90" height="24" fill="white" stroke="black" stroke-width="2"/><text x="295" y="633" text-anchor="middle" font-size="13">220 kΩ</text>
+  <line x1="340" y1="655" x2="550" y2="655" stroke="black" stroke-width="2"/><line x1="195" y1="695" x2="480" y2="695" stroke="#2457a6" stroke-width="3"/><circle cx="480" cy="695" r="4" fill="#2457a6"/>
+  <polygon points="550,605 550,705 680,655" fill="white" stroke="black" stroke-width="2"/><text x="566" y="637" font-size="15">−</text><text x="566" y="685" font-size="15">+</text><text x="610" y="660" font-size="14">B</text>
+  <line x1="480" y1="680" x2="550" y2="680" stroke="#2457a6" stroke-width="3"/><circle cx="480" cy="680" r="4" fill="#2457a6"/><text x="615" y="720" text-anchor="middle" font-size="13">MCP6004-B</text>
+  <circle cx="520" cy="655" r="4" fill="black"/><path d="M520 655V560H550" fill="none" stroke="black" stroke-width="2"/><rect x="550" y="548" width="130" height="24" fill="white" stroke="black" stroke-width="2"/><path d="M680 560h35v95" fill="none" stroke="black" stroke-width="2"/><text x="615" y="538" text-anchor="middle" font-size="13">Rf = 10 MΩ</text>
+  <path d="M520 590h80M600 577v26m13-26v26M613 590h102" fill="none" stroke="black" stroke-width="2"/><text x="655" y="584" font-size="12">Cf = 22 nF</text><text x="655" y="600" font-size="11">フィルム</text>
+  <line x1="680" y1="655" x2="770" y2="655" stroke="black" stroke-width="2"/><circle cx="715" cy="655" r="4" fill="black"/><rect x="770" y="643" width="75" height="24" fill="white" stroke="black" stroke-width="2"/><text x="807" y="633" text-anchor="middle" font-size="13">470 Ω</text>
+  <line x1="845" y1="655" x2="920" y2="655" stroke="black" stroke-width="2"/><circle cx="880" cy="655" r="4" fill="black"/><path d="M880 655v40m-15 0h30m-30 12h30M880 707v10M860 717h40m-33 8h26m-19 8h12" fill="none" stroke="black" stroke-width="2"/><text x="900" y="705" font-size="12">10 nF</text>
+  <rect x="920" y="627" width="150" height="56" rx="4" fill="white" stroke="black" stroke-width="2"/><text x="995" y="650" text-anchor="middle" font-size="14">ESP32-C3</text><text x="995" y="671" text-anchor="middle" font-size="14">GPIO1（Y）</text>
+
+  <text x="600" y="778" text-anchor="middle" font-size="13" fill="#444">各軸 fc ≈ 0.72 Hz、80 Vpp 時の出力 ≈ 1.65 V ± 0.87 V。入力クランプと非通電時保護は別途設計する。</text>
+</svg>
