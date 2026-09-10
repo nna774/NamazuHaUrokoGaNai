@@ -21,7 +21,7 @@
 | ADXL355機（device 2）の導入経緯・実装済み内容 | [docs/adxl355.md](docs/adxl355.md) |
 | ジオフォン(速度センサ)導入作戦（検討中・未着手） | [docs/geophone.md](docs/geophone.md) |
 | 気象庁の地震一覧を定期スキャンし、事後解析すべき候補をSlack通知する仕組み（実装済み・terraform apply/実機確認は未了。判定・保存は自動化しない） | [docs/auto_judge.md](docs/auto_judge.md) |
-| 停電対策のUPS導入作戦（方針決定・発注済み、実機未検証） | [docs/ups.md](docs/ups.md) |
+| 停電対策のUPS導入作戦（方針決定・発注済み、実機検証中） | [docs/ups.md](docs/ups.md) |
 | 安価な代替センサ(圧電等)による補強検知の構想（雑談ベースの検討記録。piezo.mdへ引き継ぎ済み） | [docs/other-sensors.md](docs/other-sensors.md) |
 | ピエゾ実験機（device 3）。phase1（クラウド統合）まで実装済み・稼働中 | [docs/piezo.md](docs/piezo.md) |
 | ファームのOTA更新（実装済み・実機確認済み。使い方は§0クイックリファレンス） | [docs/ota.md](docs/ota.md) |
