@@ -1,6 +1,6 @@
 # 検出限界の目安表（自動生成）
 
-`tools/detection_range.py`で`tools/detection_events.csv`（22件、うちgood=11件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
+`tools/detection_range.py`で`tools/detection_events.csv`（23件、うちgood=11件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
 
 回帰式（verdict=good のみでフィット）: `log10(震源距離[km]) = 1.2898 + 0.2310 * M`
 
@@ -41,6 +41,7 @@
 | `ibaraki-nanbu-m5.9` | 茨城県南部 | 2026-08-23 | 5.9 | 170km | good | 0.38 |
 | `ibaraki-oki-m3.7` | 茨城県沖(9/6) | 2026-09-06 | 3.7 | 199km | critical | 1.43 |
 | `ibaraki-oki-m3.5` | 茨城県沖 | 2026-08-20 | 3.5 | 206km | warning | 1.64 |
+| `gifu-mino-chuseibu-m3.8` | 岐阜県美濃中西部 | 2026-09-10 | 3.8 | 206km | critical | 1.40 |
 | `fukushima-oki-m4.0-2` | 福島県沖(新) | 2026-08-28 | 4.0 | 220km | warning | 1.34 |
 | `fukushima-oki-m4.0-3` | 福島県沖(9/4) | 2026-09-04 | 4.0 | 223km | critical | 1.36 |
 | `chiba-oki-m4.9` | 千葉県東方沖 | 2026-08-30 | 4.9 | 229km | good | 0.86 |
