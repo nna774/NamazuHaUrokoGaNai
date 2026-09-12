@@ -81,7 +81,14 @@ def test_notifies_new_worth_asking_candidate():
     assert len(succeeded) == 1
 
 
-def test_far_zone_below_threshold_is_not_notified():
+def test_far_zone_below_threshold_is_not_notified(monkeypatch):
+    class FixedWeekday(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            # 2026-09-09は水曜日（土曜だけ閾値見直しリマインドが付くため固定）
+            return cls(2026, 9, 9, 9, 0, tzinfo=tz)
+
+    monkeypatch.setattr(qs.dt, "datetime", FixedWeekday)
     qs_entries["value"] = [_entry("e2", 1, "遠い小さい地震", **FAR_TOO_SMALL)]
     result = qs.handler({}, None)
 

@@ -45,7 +45,7 @@ def _threshold_reminder() -> str:
         "(tools/detection_range.pyのFAR_BUT_NOTABLE_MAG)、"
         f"重複排除の窓は今{WINDOW_HOURS:g}時間(NAMZ_QUAKE_SCAN_WINDOW_HOURS)、"
         "失敗検知のしきい値はwatchdog側のNAMZ_QUAKE_SCAN_STUCK_AFTER_S。"
-        "いずれもn=5の実例に基づく暫定値。tools/detection_events.csvに"
+        "いずれもn=6の実例に基づく暫定値。tools/detection_events.csvに"
         "実例が増えていないか確認せよ）。"
     )
 
