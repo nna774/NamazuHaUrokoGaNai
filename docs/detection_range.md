@@ -1,6 +1,6 @@
 # 検出限界の目安表（自動生成）
 
-`tools/detection_range.py`で`tools/detection_events.csv`（26件、うちgood=11件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
+`tools/detection_range.py`で`tools/detection_events.csv`（28件、うちgood=11件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
 
 回帰式（verdict=good のみでフィット）: `log10(震源距離[km]) = 1.2898 + 0.2310 * M`
 
@@ -57,6 +57,8 @@
 | `iwate-oki-m4.3` | 岩手県沖 | 2026-08-28 | 4.3 | 474km | critical | 2.47 |
 | `aomori-touhou-oki-m4.6` | 青森県東方沖 | 2026-08-28 | 4.6 | 509km | critical | 2.26 |
 | `aomori-touhou-oki-m4.7` | 青森県東方沖(9/6) | 2026-09-06 | 4.7 | 548km | good | 2.31 |
+| `tsugaru-kaikyo-m4.5` | 津軽海峡 | 2026-09-13 | 4.5 | 563km | critical | 2.64 |
 | `urakawa-oki-m6.0` | 浦河沖 | 2026-08-23 | 6.0 | 645km | good | 1.36 |
 | `kumamoto-m7.1` | 熊本地震(令和8年) | 2026-07-28 | 7.1 | 869km | good | 1.02 |
+| `chichijima-oki-m4.6` | 父島近海 | 2026-09-13 | 4.6 | 1221km | critical | 5.42 |
 
