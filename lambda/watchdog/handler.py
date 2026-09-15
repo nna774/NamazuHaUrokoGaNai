@@ -9,8 +9,12 @@ last_ingest_at_us を見る。
 - 受信が再開したら「復帰」を1回通知して状態を解除。
 - 受信は続いているが測定時刻が NAMZ_LAG_AFTER_S 以上遅れていたら「データ遅延」を通知。
   こちらも NAMZ_LAG_RENOTIFY_S 間隔で再送し、遅延が解消したら1回通知して解除。
+- 地震候補スキャン(lambda/quake_scan、docs/auto_judge.md)が最後に成功実行してから
+  NAMZ_QUAKE_SCAN_STUCK_AFTER_S を超えていたら「停滞」を通知（デバイスと違い単一の
+  ジョブなのでループの外で1回だけ判定する）。
 
-状態遷移の判定は devices.evaluate()/evaluate_lag() に集約（DynamoDB 抜きでテストできる）。
+状態遷移の判定は devices.evaluate()/evaluate_lag()・quake_scan.evaluate_stuck() に
+集約（DynamoDB 抜きでテストできる）。
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import time
 
 from batch_uplink import devices, notify
 
-from common import ota_watch, watchdog_mute
+from common import ota_watch, quake_scan, watchdog_mute
 
 # 生存とみなす最終受信からの猶予[s]。バッチは30秒間隔なので、既定300秒＝約10バッチ落ち。
 OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))
@@ -37,6 +41,12 @@ LAG_RENOTIFY_S = float(os.environ.get("NAMZ_LAG_RENOTIFY_S", "86400"))
 OTA_STUCK_AFTER_S = float(os.environ.get("NAMZ_OTA_STUCK_AFTER_S", "1800"))
 # 停滞が続いている間の再送間隔[s]。既定1日。
 OTA_STUCK_RENOTIFY_S = float(os.environ.get("NAMZ_OTA_STUCK_RENOTIFY_S", "86400"))
+# 地震候補スキャン(docs/auto_judge.md)。日次実行のはずなのにこの秒数を超えて
+# 成功していなければ「停滞」とみなす。重複排除の窓(28時間)よりさらに余裕を
+# 持たせ、「本当に動いていない」と確信してから鳴らす。既定32時間。
+QUAKE_SCAN_STUCK_AFTER_S = float(os.environ.get("NAMZ_QUAKE_SCAN_STUCK_AFTER_S", "115200"))
+# 停滞が続いている間の再送間隔[s]。既定1日。
+QUAKE_SCAN_STUCK_RENOTIFY_S = float(os.environ.get("NAMZ_QUAKE_SCAN_STUCK_RENOTIFY_S", "86400"))
 
 JST = dt.timezone(dt.timedelta(hours=9))
 
@@ -154,5 +164,26 @@ def handler(event, context):
                 {"デバイス": _device_field(did), "許可したバージョン": target, "経過": elapsed},
             )
             ota_watch.mark_ota_stuck_notified(did, now_us)
+
+    # 地震候補スキャン(docs/auto_judge.md)の停滞。単一のジョブなのでデバイスループの
+    # 外で1回だけ判定する。
+    quake_scan_stuck_after = int(QUAKE_SCAN_STUCK_AFTER_S * 1e6)
+    quake_scan_stuck_renotify = int(QUAKE_SCAN_STUCK_RENOTIFY_S * 1e6)
+    qs_state = quake_scan.get_state()
+    qs_action = quake_scan.evaluate_stuck(qs_state, now_us, quake_scan_stuck_after,
+                                          quake_scan_stuck_renotify)
+    if qs_action is not None:
+        actions.append({"quake_scan": qs_action})
+        last_success = int(qs_state.get("last_success_at_us", 0))
+        elapsed = _humanize((now_us - last_success) / 1e6) if last_success else "?"
+        title = "地震候補スキャンが停滞" if qs_action == "stuck" else "地震候補スキャンが停滞（継続）"
+        n.notify(
+            title,
+            f"地震候補スキャン(lambda/quake_scan)が最後に成功してから *{elapsed}* 経つが"
+            "実行された形跡がない。ホストごと落ちた・EventBridgeが呼べなかった等、"
+            "ジョブの外側の要因を疑うこと。",
+            {"最終成功": _fmt_time(last_success), "経過": elapsed},
+        )
+        quake_scan.mark_stuck_notified(now_us)
 
     return {"ok": True, "actions": actions}

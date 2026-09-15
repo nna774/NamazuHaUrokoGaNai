@@ -20,7 +20,8 @@
 | 震度算出の落とし穴（窓の違い・ドリフトと端の暴れ） | [docs/intensity_pitfalls.md](docs/intensity_pitfalls.md) |
 | ADXL355機（device 2）の導入経緯・実装済み内容 | [docs/adxl355.md](docs/adxl355.md) |
 | ジオフォン(速度センサ)導入作戦（検討中・未着手） | [docs/geophone.md](docs/geophone.md) |
-| 停電対策のUPS導入作戦（検討中・未着手） | [docs/ups.md](docs/ups.md) |
+| 気象庁の地震一覧を定期スキャンし、事後解析すべき候補をSlack通知する仕組み（実装・デプロイ済み、2026-09-07から実機稼働中。判定・保存は自動化しない） | [docs/auto_judge.md](docs/auto_judge.md) |
+| 停電対策のUPS導入作戦（方針決定・発注済み、実機未検証） | [docs/ups.md](docs/ups.md) |
 | 安価な代替センサ(圧電等)による補強検知の構想（雑談ベースの検討記録。piezo.mdへ引き継ぎ済み） | [docs/other-sensors.md](docs/other-sensors.md) |
 | ピエゾ実験機（device 3）。phase1（クラウド統合）まで実装済み・稼働中 | [docs/piezo.md](docs/piezo.md) |
 | ファームのOTA更新（実装済み・実機確認済み。使い方は§0クイックリファレンス） | [docs/ota.md](docs/ota.md) |
@@ -77,7 +78,13 @@
   - `device_prompt` … デバイス速報が来た / `cloud_confirmed` … クラウドFFTで確定
   - `checked` … detectが評価済み（未確定なら一覧の既定で隠れる=非該当）
   - `artificial` … 人工地震(テスト等)フラグ。立てると一覧の既定で隠れ、`all=1` でのみ薄く出る
-  - 一覧の既定フィルタは「(確定 or 未評価) かつ 非artificial」。表示震度は `effective_intensity`。
+  - `verdict` … 事後解析の判定(`good`/`warning`/`critical`、`tools/detection_events.csv`と
+    同じ語彙)。`verdict_source` は `human`/`auto`。**一覧の既定フィルタはこれを見ない**
+    ——埋没と判定したイベントも既定で出す（「調べたが見えなかった」と「まだ調べていない」を
+    区別するため）。付けるのは `flag_event.py verdict` か `promote_event.py --verdict`
+  - 一覧の既定フィルタは「(確定 or **manual** or 未評価) かつ 非artificial」（`lambda/common/events.py`の
+    `list_page()`）。**`manual`＝手動昇格は確定と同格に既定一覧へ出る**——`promote_event.py`で
+    昇格したものは震度0でも一覧の先頭に並ぶ。表示震度は `effective_intensity`。
   - **`api`の`/event`はCloudFrontで長期キャッシュしている**（確定済みは1年相当、速報のみは
     無効化。`terraform/custom_domain.tf`の`aws_cloudfront_cache_policy.api_event`、
     `lambda/api/handler.py`の`EVENT_CONFIRMED_CACHE_S`。Electabuzz PR#29と同じ「閲覧人数が
@@ -150,6 +157,17 @@ aws cloudfront create-invalidation \
 側が付与している。S3とCloudFrontで混ぜるとエッジ↔S3間の再検証が毎回発生する
 （試した順序・実測・元の不具合の経緯は`terraform/dashboard.tf`のコメントと
 [docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md](docs/log/2026-08-06-dashboard-cloudfront-cache-layering.md)参照）。
+
+## ローカル環境（direnv・AWSプロファイル・.venv）
+
+このリポジトリでのAWS操作は`namazu-admin`プロファイルを使う。direnvで自動化してある。
+
+- `.envrc`・`.venv`は`.gitignore`対象で本体（`git worktree list`の先頭に出る非worktreeの
+  チェックアウト）にしかない。実体（`AWS_PROFILE`設定・`.venv`のactivate）は本体の`.envrc`
+  にだけ書く。
+- worktree側の`.envrc`は**`source_up`の1行だけ**でよい。direnvが親ディレクトリを遡って
+  本体の`.envrc`を見つけて読む——中身を複製しないので本体の設定を変えれば全worktreeに
+  自動で伝播する。書いたら`direnv allow <worktreeのパス>`を忘れずに。
 
 ## 開発の約束（グローバル設定に加えて）
 

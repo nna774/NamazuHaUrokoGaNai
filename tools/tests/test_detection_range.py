@@ -37,3 +37,14 @@ def test_zone_of_orders_near_core_far():
     assert "近すぎ" in dr.zone_of(a, b, 4.5, rp * 0.3)
     assert "投げる価値あり" in dr.zone_of(a, b, 4.5, rp * 1.0)
     assert "遠すぎ" in dr.zone_of(a, b, 4.5, rp * 3.0)
+
+
+def test_worth_notifying_always_wants_worth_asking_and_near():
+    assert dr.worth_notifying("投げる価値あり(境界帯)", 3.0) is True
+    assert dr.worth_notifying("近すぎ(ほぼ確実に捕れる・優先度低)", 1.0) is True
+
+
+def test_worth_notifying_far_needs_notable_magnitude():
+    far = "遠すぎ(恐らく埋没・埋没側の実例集めが目的の時だけ)"
+    assert dr.worth_notifying(far, dr.FAR_BUT_NOTABLE_MAG) is True
+    assert dr.worth_notifying(far, dr.FAR_BUT_NOTABLE_MAG - 0.1) is False

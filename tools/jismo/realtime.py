@@ -78,3 +78,20 @@ class RealtimeIntensity:
         fy = fftconvolve(np.asarray(ay, float), self.taps)[: len(ay)]
         fz = fftconvolve(np.asarray(az, float), self.taps)[: len(az)]
         return np.sqrt(fx * fx + fy * fy + fz * fz)
+
+
+def intensity_timeline(gal: np.ndarray, fs: float, step_seconds: float = 0.5,
+                       ) -> tuple[np.ndarray, np.ndarray]:
+    """3軸加速度 gal[N,3] に対し、一定間隔でサンプリングした計測震度の時系列を返す。
+
+    returns: (経過時間[秒] の配列, 計測震度の配列)。窓が溜まる(0.3秒)までは出さない。
+    """
+    ri = RealtimeIntensity(fs)
+    step_n = max(1, int(round(step_seconds * fs)))
+    ts, vals = [], []
+    for i in range(gal.shape[0]):
+        ri.push(gal[i, 0], gal[i, 1], gal[i, 2])
+        if ri.ready() and (i + 1) % step_n == 0:
+            ts.append(i / fs)
+            vals.append(ri.current_intensity())
+    return np.array(ts), np.array(vals)

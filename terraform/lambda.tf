@@ -106,6 +106,42 @@ resource "aws_lambda_permission" "watchdog_from_events" {
   source_arn    = aws_cloudwatch_event_rule.watchdog.arn
 }
 
+# --- quake_scan（地震候補スキャン: 気象庁の地震一覧を定期的に見て、事後解析すべき
+# 候補をSlackへ知らせる。判定・保存は自動化しない。docs/auto_judge.md） ---
+resource "aws_lambda_function" "quake_scan" {
+  function_name    = "${local.name}-quake-scan"
+  role             = aws_iam_role.lambda.arn
+  handler          = "handler.handler"
+  runtime          = "python3.12"
+  filename         = "${local.build_dir}/quake_scan.zip"
+  source_code_hash = try(filebase64sha256("${local.build_dir}/quake_scan.zip"), null)
+  timeout          = 30
+  memory_size      = 256
+
+  environment {
+    variables = local.common_env
+  }
+}
+
+resource "aws_cloudwatch_event_rule" "quake_scan" {
+  name                = "${local.name}-quake-scan"
+  description         = "地震候補スキャンを定期起動する"
+  schedule_expression = var.quake_scan_schedule
+}
+
+resource "aws_cloudwatch_event_target" "quake_scan" {
+  rule = aws_cloudwatch_event_rule.quake_scan.name
+  arn  = aws_lambda_function.quake_scan.arn
+}
+
+resource "aws_lambda_permission" "quake_scan_from_events" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.quake_scan.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.quake_scan.arn
+}
+
 # --- api ---
 resource "aws_lambda_function" "api" {
   function_name    = "${local.name}-api"

@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))          # jismo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lambda"))  # common
 
 import awsenv  # noqa: E402  上の sys.path 追加が要る
+from common.events import VERDICTS  # noqa: E402  判定の語彙は events.py を単一の出所にする
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -89,6 +90,9 @@ def main(argv=None) -> int:
     p.add_argument("--post", type=float, default=90.0, help="onset より後に保存する秒数（既定90）")
     p.add_argument("--device", type=int, help="デバイスID（既定: rawのファイル名から推定）")
     p.add_argument("--note", help="イベントに付けるメモ（任意）")
+    p.add_argument("--verdict", choices=VERDICTS,
+                   help="事後解析の判定（detection_events.csv と同じ語彙。"
+                        "手順書では判定が出た時点で必ず付ける）")
     p.add_argument("--bucket", help="データバケット（既定: NAMZ_BUCKET / terraform）")
     p.add_argument("--table", default=os.environ.get("NAMZ_EVENTS_TABLE"),
                    help="イベントのDynamoDBテーブル名（既定: 環境変数 NAMZ_EVENTS_TABLE）")
@@ -158,6 +162,8 @@ def main(argv=None) -> int:
     else:
         print(f"# 非校正センサ(axes={gal.shape[1]})のため計測震度は計算不可。"
               f"peak(raw)={peak_gal:.3f}  波形のみ保存する")
+    if args.verdict:
+        print(f"# verdict: {args.verdict}")
     if args.note:
         print(f"# note: {args.note}")
 
@@ -180,7 +186,7 @@ def main(argv=None) -> int:
                         ContentType="application/json")
     events.record_manual_event(device_id, onset_us, intensity, peak_gal,
                                waveform_prefix=f"{s3util.EVENTS_PREFIX}/{eid}/",
-                               note=args.note)
+                               note=args.note, verdict=args.verdict)
     print(f"昇格完了: {eid}  波形{copied}バッチを events/ へ保存、DynamoDBに記録(manual)")
     return 0
 

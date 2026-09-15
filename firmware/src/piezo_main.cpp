@@ -201,6 +201,10 @@ static bool performPullOta(const String& targetVersion) {
 
   WiFiClientSecure client;
   client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
+  // 本線(main.cpp)と同じ理由・同じ制約(read/writeはclient.setTimeout()では
+  // 変えられずhttpUpdate内部の既定値のまま)。docs/log/
+  // 2026-08-31-device2-ota-pull-wdt-panic.md・2026-09-06-device1-hostbyname-patch-rollout.md参照。
+  client.setHandshakeTimeout(4);
   httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
   httpUpdate.onProgress([](int, int) {
     esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う
@@ -249,9 +253,17 @@ static void uploaderTask(void*) {
   bool restartRequested = false;  // サーバからのリモート再起動要求（docs/remote_restart.md）
   for (;;) {
     Batch* b = nullptr;
+    bool drained = false;
     while (xQueueReceive(gBatchQueue, &b, 0) == pdTRUE) {
       gUploader->enqueue(b);
+      drained = true;
     }
+    // 吸い出した端から即座にLittleFSへ退避する（常時spill化、本線main.cppと同じ
+    // 理由・同じNAMZ_ALWAYS_SPILLで既定無効）。ファイルI/Oのみでpump()の
+    // ネットワークI/Oより前なのでブロックしない。
+#ifdef NAMZ_ALWAYS_SPILL
+    if (drained) gUploader->flushToSpill();
+#endif
     // 送信直前に稼働時間・ヒープヘッダを更新（Uploaderは値をコピーせずポインタを
     // 保持するため、pump()がPOSTする直前の値を確実に使わせるにはこの位置で書く
     // 必要がある。本線main.cppと同じ理由）。

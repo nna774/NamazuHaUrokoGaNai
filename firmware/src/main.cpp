@@ -542,6 +542,17 @@ static bool performPullOta(const String& targetVersion) {
 
   WiFiClientSecure client;
   client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
+  // TLSハンドシェイクの締切が既定120秒のまま残っており、onProgress()が一度も
+  // 呼ばれないままWDT(20秒)が先に発火してパニックする実機不具合を踏んだ
+  // (docs/log/2026-08-31-device2-ota-pull-wdt-panic.md、
+  // 2026-09-06-device1-hostbyname-patch-rollout.md)。Uploaderと同じ4秒に縮める
+  // ——単発の遅延をHTTP_UPDATE_FAILED(既存の穏当な失敗パス、60秒バックオフで
+  // 再試行)に変える。read/writeの締切は`client.setTimeout()`では変えられない
+  // ——httpUpdate.update()の内部でHTTPClient::connect()が独自の既定値(接続
+  // 5000ms、以後8000ms=HTTPUpdateの_httpClientTimeout既定値)で必ず上書きする
+  // ため(グローバルhttpUpdateにこれを変える公開APIは無い)。どちらもWDTには
+  // 十分収まる値なので対処不要と判断した
+  client.setHandshakeTimeout(4);
   httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
   httpUpdate.onProgress([](int, int) {
     esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う(otaOnProgressと同じ理由)
@@ -602,11 +613,28 @@ static void checkAndPerformPullOta(const String& target) {
 // 待機自体をハング扱いされると困る。Uploader::enqueue()自体はmutexで守られており
 // 送信タスク側のpump()/flushToSpill()と安全に並行できる（batch-uplink側の変更、
 // docs/log/2026-08-11-uploader-task-split-design.md）。
+// enqueue()直後にflushToSpill()を毎回呼び、RAMキューに積んだ端から即座に
+// LittleFSへ退避する（常時spill化）。組み立て完了〜送信成功までRAM上にしか
+// 無い区間をほぼ無くし、WDTパニック等の瞬時再起動でその区間のバッチが消える
+// 窓を塞ぐのが狙い（docs/log/2026-08-30-esp32-hidden-features-survey.mdの
+// RTC memory検討から派生）。docs/design.md「送信の信頼性」の検討済み案一覧に
+// 「常時spill化」は一度保留と記録されているが、あれは別問題（2026-08-07の
+// 70分ブロッキング、既にタイムアウト予算で対処済み）への対症療法として
+// 見送られたもので、瞬時パニックでのRAM損失はタイムアウト予算では塞げない
+// 別の窓。健全時に常時LittleFS I/Oが乗るコストは変わらず残る——採用未確定な
+// ため既定では無効にし、build_flags の NAMZ_ALWAYS_SPILL で切り替える（専用env
+// ではなく環境変数トグル、`NAMZ_ALWAYS_SPILL=1 pio run -e esp32dev`。理由は
+// firmware/flags_from_env.py、docs/log/2026-09-07-always-spill-env-var-toggle.md）。
+// flushToSpill()はファイルI/Oのみでネットワークを触らないため、このタスクを
+// 分けた本来の目的（送信タスクのブロックに巻き込まれない）は損なわない。
 static void batchDrainTask(void*) {
   for (;;) {
     Batch* b = nullptr;
     if (xQueueReceive(gBatchQueue, &b, portMAX_DELAY) == pdTRUE) {
       gUploader->enqueue(b);
+#ifdef NAMZ_ALWAYS_SPILL
+      gUploader->flushToSpill();
+#endif
     }
   }
 }

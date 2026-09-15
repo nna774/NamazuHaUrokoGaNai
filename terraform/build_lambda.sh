@@ -21,13 +21,17 @@ mkdir -p "$BUILD"
 
 build_one() {
   fn="$1"
-  shift
-  extra_pkgs="$*"   # numpy に加えて同梱する追加パッケージ（関数ごと）
+  extra_pkgs="$2"   # numpy に加えて同梱する追加パッケージ（関数ごと）
+  shift 2
+  extra_tools="$*"  # tools/ 直下から追加で同梱するファイル（関数ごと。例: quake_scan）
   stage="$BUILD/$fn"
   mkdir -p "$stage"
   cp "$LAMBDA/$fn/handler.py" "$stage/handler.py"
   cp -r "$LAMBDA/common" "$stage/common"
   cp -r "$JISMO" "$stage/jismo"
+  for f in $extra_tools; do
+    cp "$REPO/tools/$f" "$stage/$f"
+  done
   # numpy(+追加) を同梱（Lambda実行環境=Python3.12/x86_64 向け manylinux wheel を明示指定。
   # ローカルのpythonが3.12以外でも正しい版を掴むよう --python-version等を渡す）
   "$PY" -m pip install --quiet \
@@ -49,6 +53,10 @@ build_one() {
 
 # detect は確定報の波形クイックルック PNG 描画に Pillow を要する。他はnumpyのみ。
 for fn in ingest api watchdog; do
-  build_one "$fn"
+  build_one "$fn" ""
 done
 build_one detect Pillow
+# quake_scan は tools/ の候補抽出ロジック(scan_quakes・detection_range・station)と
+# 回帰の学習データを同梱する。station.py が numpy/scipy に依存しないおかげで
+# scipy(detectlab.py)を持ち込まずに済む。
+build_one quake_scan "" scan_quakes.py detection_range.py station.py detection_events.csv

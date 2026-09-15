@@ -18,6 +18,13 @@ BUCKET_US = 30_000_000  # 30秒
 # 直近イベントの活動終端から onset がこの時間[us]以内なら同一セッションに延長する。
 MERGE_GAP_US = 60_000_000  # 60秒
 
+# 事後解析の判定（`tools/detection_events.csv` の verdict 列と同じ語彙を使う。
+# 語彙を分けると対応表が要るので揃える）。
+#   good     … probable detection 以上（揺れが見えた）
+#   warning  … 微妙／要検討・境界線上
+#   critical … 完全埋没
+VERDICTS = ("good", "warning", "critical")
+
 _table_cache = None
 
 
@@ -121,12 +128,14 @@ def record_cloud_detection(device_id, onset_us, intensity, peak_gal, waveform_pr
 
 
 def record_manual_event(device_id, onset_us, intensity, peak_gal,
-                         waveform_prefix=None, note=None):
+                         waveform_prefix=None, note=None, verdict=None):
     """手動で raw→events に昇格したイベントを記録する。
 
     `manual` フラグを立て、評価済み(`checked`)として一覧の既定にも出す（既定フィルタは
     manual を確定と同格に扱う）。自動確定ではないので `cloud_confirmed` は立てない。
     セッションマージはせず onset から決まる固定 id を使う（再実行は同じ id に上書き=冪等）。
+
+    verdict を渡すと事後解析の判定も一緒に記録する（`set_verdict` 参照）。
     """
     eid = event_id(device_id, onset_us)
     tbl = _table()
@@ -148,6 +157,10 @@ def record_manual_event(device_id, onset_us, intensity, peak_gal,
         item["waveform_prefix"] = waveform_prefix
     if note is not None:
         item["note"] = note
+    if verdict is not None:
+        _validate_verdict(verdict)
+        item["verdict"] = verdict
+        item["verdict_source"] = "human"
     tbl.put_item(Item=item)
     return eid
 
@@ -187,6 +200,38 @@ def set_artificial(eid: str, value: bool = True) -> None:
     set_field(eid, "artificial", bool(value))
 
 
+def _validate_verdict(verdict: str) -> None:
+    if verdict not in VERDICTS:
+        raise ValueError(f"verdict は {'/'.join(VERDICTS)} のいずれか: {verdict!r}")
+
+
+def set_verdict(eid: str, verdict: str | None, source: str = "human") -> None:
+    """事後解析の判定を記録する（verdict=None で削除）。
+
+    `checked`（detectが評価したか）や `cloud_confirmed`（自動確定したか）とは別物で、
+    **人（またはスクリプト）が波形を見て出した結論**を持つ。`docs/post_hoc_detection.md`
+    の手順3.5で `tools/detection_events.csv` に書く verdict と同じ値を入れること。
+
+    `source` は "human"（人が判定した）か "auto"（一次判定が自動で付けた）。**一覧の
+    既定フィルタはこの値を見ていない**——埋没を隠すかどうかは表示側の判断で、
+    機械が陰性を大量に保存し始めた時に初めて必要になる（→ docs/auto_judge.md）。
+    """
+    if verdict is None:
+        _table().update_item(
+            Key={"event_id": eid},
+            UpdateExpression="REMOVE #v, #s",
+            ExpressionAttributeNames={"#v": "verdict", "#s": "verdict_source"},
+        )
+        return
+    _validate_verdict(verdict)
+    _table().update_item(
+        Key={"event_id": eid},
+        UpdateExpression="SET #v = :v, #s = :s",
+        ExpressionAttributeNames={"#v": "verdict", "#s": "verdict_source"},
+        ExpressionAttributeValues={":v": verdict, ":s": source},
+    )
+
+
 def set_waveform_prefix(eid: str, prefix: str) -> None:
     """波形を events/ へ保存したことを記録（フラグは変えない）。"""
     _table().update_item(
@@ -224,6 +269,10 @@ def list_page(page: int = 0, size: int = 20, show_all: bool = False,
     show_all=False（既定）では「確定済み or 未評価(pending)」だけ出し、detectが評価して
     確定しなかったイベント（速報は来たが地震でなかった = checked かつ未確定）と、
     人工地震（artificial）としてフラグ付けしたものを隠す。
+
+    **`verdict` では絞らない。** 事後解析で「完全埋没」と判定したイベントも既定で出す——
+    「調べたが何も見えなかった」は「まだ調べていない」と区別されるべき記録で、隠すと
+    その区別が消えるため（→ docs/auto_judge.md、docs/log/2026-09-06-event-verdict.md）。
 
     device_id を指定すると、そのデバイスのイベントだけに絞る（既定は全デバイス。
     波形と違いイベントは混ぜても壊れないので、絞り込みは任意）。

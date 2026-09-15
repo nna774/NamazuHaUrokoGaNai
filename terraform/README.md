@@ -1,15 +1,16 @@
 # terraform — AWSリソース
 
-S3(raw 90日/events 永久)・DynamoDB×2(events/devices)・Lambda×4・S3→detect通知・
-EventBridge→watchdog定期起動・CloudFrontダッシュボード・IAM。
+S3(raw 90日/events 永久)・DynamoDB×4(events/devices/device_temp/quake_scan)・
+Lambda×5・S3→detect通知・EventBridge→watchdog/quake_scan定期起動・
+CloudFrontダッシュボード・IAM。
 
 ## 構成
 
 | ファイル | 内容 |
 |----------|------|
 | `s3.tf` | データバケット。raw/ は lifecycle で90日expire、events/ は対象外で永久＋削除系操作をバケットポリシーでDeny。バケット全体でversioning有効。raw/作成で detect起動 |
-| `dynamodb.tf` | イベントテーブル（`deletion_protection_enabled`+PITR）＋デバイス生存台帳（PAY_PER_REQUEST） |
-| `lambda.tf` | ingest/detect/api/watchdog。ingest・api に Function URL(認証NONE)、watchdog は EventBridge 定期起動 |
+| `dynamodb.tf` | イベントテーブル（`deletion_protection_enabled`+PITR）＋デバイス生存台帳＋温度時系列＋地震候補スキャンの状態（いずれもPAY_PER_REQUEST） |
+| `lambda.tf` | ingest/detect/api/watchdog/quake_scan。ingest・api に Function URL(認証NONE)、watchdog・quake_scan は EventBridge 定期起動 |
 | `iam.tf` | Lambda実行ロール（S3/DynamoDB/logs） |
 | `dashboard.tf` | 非公開S3 + CloudFront(OAC)。認証なし配信 |
 

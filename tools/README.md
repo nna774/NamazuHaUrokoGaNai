@@ -136,6 +136,25 @@ python flag_event.py confirm 0001-59577127 0002-59577127   # 一覧の既定表�
 python flag_event.py unconfirm 0001-59577127               # 取り消す
 ```
 
+### 事後解析の判定（`verdict`）
+
+事後解析で出した判定をイベント自身に持たせる。語彙は `detection_events.csv` の
+verdict 列と同じ（`good` / `warning` / `critical`）で、**両方に同じ値を書く**
+（手順は [docs/post_hoc_detection.md](../docs/post_hoc_detection.md) の手順3.5）。
+
+```bash
+python flag_event.py verdict critical 0001-59616930 0002-59616930  # 完全埋没だった
+python flag_event.py verdict good --source auto 0001-59622394      # 一次判定が付ける場合
+python flag_event.py unverdict 0001-59616930                       # 消す
+```
+
+**一覧の既定フィルタは verdict を見ていない。** 埋没と判定したイベントも既定で出る——
+「調べたが何も見えなかった」は「まだ調べていない」と区別されるべき記録だからだ
+（→ [docs/log/2026-09-06-event-verdict.md](../docs/log/2026-09-06-event-verdict.md)）。
+機械が陰性を大量に保存し始めたら `verdict_source == "auto"` で絞る余地を残してある。
+
+`promote_event.py` にも `--verdict` があり、昇格と同時に付けられる。
+
 `promote_event.py` は、自動検知に満たない弱い揺れや振り返りたい時間帯を、raw の保持期限
 （90日）で消える前に手動で events/ へ昇格（永久保存）する。`manual` フラグが立ち、一覧の
 既定にも確定と同格で出る。保存区間から計測震度も計算して記録する。
@@ -326,6 +345,20 @@ python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 
 [docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md](../docs/log/2026-08-27-sanriku-oki-m6.1-post-hoc-detection.md)、
 [docs/log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md](../docs/log/2026-08-26-fukushima-oki-m4.5-post-hoc-detection.md)）。
 
+**`--intensity`を付けると計測震度の時系列パネルが最下段に追加される（重ね描きモード限定）。**
+STA/LTA・直線性・直線性の一致度はいずれも検知アルゴリズムの中間量でスケールに震度としての
+意味は無いが、このパネルは`jismo.realtime.intensity_timeline()`（ファームと数値照合済みの
+FIR・60秒移動窓、既定0.5秒間隔でサンプリング）による計測震度そのものを同じ時間軸に描く。
+検出できた地震は4段とも同時に反応し、埋没した地震は4段ともフラットなまま、という対比が
+一枚の図で分かる（実例: [docs/log/2026-09-08-detectlab-intensity-panel.md](../docs/log/2026-09-08-detectlab-intensity-panel.md)）。
+単体窓のプロット（`--device`1個）には付かない。`--intensity-step SEC`（既定0.5）で
+サンプリング間隔を変えられる。同じ計算を単発でCSV等に使いたい時は`tools/intensity_timeline.py`
+（複数`--event`を渡すだけの薄いラッパー）を直接呼んでもよい。
+
+各系列のピーク計測震度がJMA震度階級でいくつに当たるかも併記される（ピーク点にドット、
+ラベルはデータの形に依存しない固定位置にまとめる——ピーク点そのものに文字を置くと
+上のパネルにはみ出したり複数機のピークが重なったりして読みにくかったため）。
+
 **`--eew`指定時、P窓・S窓に加えてS窓終了から180秒ぶんの「コーダ想定域」窓も自動で出る。**
 ピーク振幅は到達"瞬間"の窓の中に来るとは限らず、実体波からコーダへの減衰で窓の直後に
 来ることがあるため（`docs/post_hoc_detection.md`「P窓・S窓が示すのは〜」参照）。
@@ -347,6 +380,8 @@ python detectlab.py --event 0001-59577127 0002-59577127 --from-raw --minutes 10 
 | `--rect-win` | `3` | 直線性の移動窓[秒] |
 | `--corr-win` | `2` | 2機重ね描き時の直線性一致度パネルに使う移動相関の窓[秒] |
 | `--corr-bin SEC` | `20` | 直線性の一致度をこの秒数のbinでテキスト集計して常に出す（`--eew`指定時は背景の値も併記） |
+| `--intensity` | 無効 | 計測震度の時系列パネルを最下段に追加（重ね描きモード限定） |
+| `--intensity-step SEC` | `0.5` | `--intensity`のサンプリング間隔[秒] |
 | `--eew "lat,lon,depth,時刻"` | なし | 震源との照合。P/S到達窓＋SNR/直線性 |
 | `--station "lat,lon"` | 湯沢町 | 観測点座標（`--eew` 用） |
 | `--dump-csv PATH` | なし | 取得した生窓を `t_us,x,y,z` CSVで保存 |

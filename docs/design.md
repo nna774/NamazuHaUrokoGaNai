@@ -273,6 +273,26 @@ TlsMemPool導入と静的RAM削減を経て小さいスロット数で再挑戦�
 `postBatch()`/`sendAlert()`はどちらもボディを読まないため実際には到達しない
 コードパスと判明し、対処不要と分かった。
 
+**pull型OTA取得(`performPullOta()`)にも同じ形の穴があった。** `WiFiClientSecure`の
+TLSハンドシェイクの締切が既定**120秒**のまま`httpUpdate.update()`を呼んでおり、
+`onProgress()`によるWDT給餌は「進捗があった時」にしか効かないため、ハンドシェイクが
+WDT(20秒)より長く詰まると`onProgress()`が一度も呼ばれないままパニックする
+（[log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md)
+で発見、[log/2026-09-06-device1-hostbyname-patch-rollout.md](log/2026-09-06-device1-hostbyname-patch-rollout.md)
+でesp32dev環境でも再現)。`performPullOta()`は`HTTP_UPDATE_FAILED`を60秒バックオフで
+再試行する穏当な失敗パスを既に持っていたため、対処は`client.setHandshakeTimeout(4)`
+(秒、`Uploader`と同じ値)を`httpUpdate.update()`より前に呼ぶだけで済んだ——単発の
+遅延をハードパニックではなくその失敗パスに変える。
+
+**read/writeの締切は`client.setTimeout()`では変えられない。** `httpUpdate.update()`
+内部で`HTTPClient::connect()`が独自の既定値(接続5000ms、以後は`HTTPUpdate`の
+`_httpClientTimeout`既定値8000ms)で必ず上書きする——グローバル`httpUpdate`インスタンス
+にこれを変える公開APIは無い。当初`client.setTimeout(4)`も一緒に呼んでいたが、実際には
+何の効果も持たないdeadコードだったと[コードレビューで指摘され判明し](log/2026-09-06-ota-pull-timeout-budget-fix.md)、
+削除した。幸い接続5秒・read/write8秒とも既にWDT(20秒)に十分収まる値のため、対処不要と
+判断した——効いていたのは`setHandshakeTimeout(4)`だけで、それで実害の原因(120秒の
+無制限待ち)は塞げている。
+
 **既知の未解決問題**: 接続を使い回す(`setReuse(true)`)実装のため、前回
 レスポンスのボディを読み残したまま次のヘッダ読み取りに入ると誤読しうる。
 誤読時は`client_.stop()`で次回強制的に繋ぎ直され自己修復するため実害は
@@ -287,9 +307,21 @@ TlsMemPool導入と静的RAM削減を経て小さいスロット数で再挑戦�
   実装できると分かったが、`NamzWire`・ingest双方への変更が要るため保留
 - **mbedTLS専用固定プール化**: タイムアウト予算の見直しで当面の問題は
   解消したため、予備案のまま棚上げ
-- **常時spill化**: flash摩耗は問題にならないと試算済みだが、健全時のI/O
-  負荷が乗る上にタイムアウト無制限という根本原因を直さない対症療法になる
-  ため保留（根本対策=上記のタイムアウト予算を先に実施）
+- **常時spill化**: 元々は2026-08-07の70分ブロッキング障害への対症療法として
+  検討し、健全時のI/O負荷・根本原因(タイムアウト無制限)を直さない点を理由に
+  保留した。**別の目的（WDTパニック等の瞬時再起動でRAM上のバッチが消える窓を
+  塞ぐ、タイムアウト予算では塞げない）で2026-08-30に実験実装し、`platformio.ini`
+  のビルドフラグ`NAMZ_ALWAYS_SPILL`で切り替えられるようにした
+  （`batchDrainTask`の`enqueue()`直後に`flushToSpill()`を追加、未定義=既定では
+  呼ばれない）。テスト機(device_id 4294967295)への実機書き込みでenqueue直後の
+  即時spill・POST成功・heap安定を3サイクル確認できたが、長時間運用でのflash
+  摩耗・I/O負荷の実測はまだ。健全時に常時LittleFS I/Oが乗るコスト自体は変わらず
+  残っており、採用は未確定——実測したい時は専用envではなく環境変数で切り替える
+  （`NAMZ_ALWAYS_SPILL=1 pio run -e esp32dev`、`python firmware/flags_from_env.py`
+  で一覧できる。専用envを増やすと複数の実機トグルが並んだ時に組み合わせが
+  指数的に増えるため、[log/2026-09-07-always-spill-env-var-toggle.md](log/2026-09-07-always-spill-env-var-toggle.md)で
+  この方式に切り替えた）**
+  （[log/2026-08-30-batch-spill-before-send.md](log/2026-08-30-batch-spill-before-send.md)）
 
 このあたりの推理の紆余曲折（複数の仮説とその反証・実機再現実験）を辿りたい
 場合は[log/2026-08-08-device1-outage-and-deploy-drift.md](log/2026-08-08-device1-outage-and-deploy-drift.md)・
