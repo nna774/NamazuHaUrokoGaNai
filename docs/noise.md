@@ -185,6 +185,19 @@
   まさに検出限界の境界帯で、出るかどうかは方位・放射パターンと当日の背景ノイズ次第で
   逆転しうることを示す事例（詳細・図:
   [log/2026-09-06-aomori-touhou-oki-m4.7-post-hoc-detection.md](log/2026-09-06-aomori-touhou-oki-m4.7-post-hoc-detection.md)）。
+- **2026-09-14 20:00 福島県沖 M4.3 深さ50km（震源距離259km）**: リアルタイム閾値未達で
+  正式イベントは立たず。標準設定（3軸・1-10Hz）ではSTA/LTA peak device1=2.09・device2=2.40と
+  閾値に遠く届かず、低帯域(0.5-2Hz)・水平2軸でもdevice1=3.90・device2=3.75と僅差で未達だった。
+  ただしS窓（20:00:57-20:01:13）で**両機とも**「地震らしい」判定（device1 SNR=1.63/直線性=0.61、
+  device2 SNR=2.30/直線性=0.81）が同時に出て、対応する機間の直線性相関binもt=[60,100)sで
+  frac0.36→0.45（背景frac0.20の2倍超）と2区間連続で明確に上昇——単独機のノイズでは説明しにくい
+  一致だが、STA/LTAが閾値に届いていないため**warning（微妙、境界帯の実信号あり）**とした。
+  同日別時刻の宮城県沖M4.1（震源距離323km）・福島県沖M4.4（16:33・302km）はどちらも
+  同種の一致が見られず完全埋没——震源距離が同程度の境界帯でも、方位・放射パターン次第で
+  結果が割れることを示す3件セットの参考点（詳細・図:
+  [log/2026-09-14-fukushima-oki-m4.3-2000-post-hoc-detection.md](log/2026-09-14-fukushima-oki-m4.3-2000-post-hoc-detection.md)、
+  [log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md](log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md)、
+  [log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md](log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md)）。
 
 ## 実務結論
 
