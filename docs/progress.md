@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-09-15 | **UPSセットでCR→OK(充電完了)への切り替わりを初めて観測した。** 放電試験後に空近くから中断無しで充電させたところ翌日3.38VでOK点灯・停止を確認、OK点灯中に負荷を一瞬繋ぐとCRへ戻ることも確認しCR/OKが固定表示でなく動的に再評価されると分かった。2026-09-10〜11のセッションで3.59VのままCRが4時間動かなかったのは、無瞬断切替テスト等でUSBを何度も抜き差ししたことで完了判定(タイマー/電流積算依存の可能性)が一度も完了に到達しなかった「充電中の踊り場」だったと解釈できることも分かった | [log/2026-09-15-ups-charge-completion-ok-observed.md](log/2026-09-15-ups-charge-completion-ok-observed.md) |
 | 2026-09-14 | **UPSセットの放電試験を実施した。** 想定していた「2.5V付近でモジュール側保護が効いて止まる」は外れ、実際は出力が1.8Vまで低下(ブースト昇圧ICのUVLOで内部ダイオード素通し状態)する挙動で、電池が本当に負荷から切り離されたかは未判別のまま念のため手動で負荷を撤去した。あわせて「充電直後の3.59Vは真の満充電OCVより高く、3日休ませると3.5V程度に落ち着く」というリラクゼーションの影響も判明した | [log/2026-09-14-ups-discharge-test.md](log/2026-09-14-ups-discharge-test.md) |
 | 2026-09-10 | **UPSセット(LFUPSMA+LS-BLFP18A-S)の初回通電試験を実施した。** 無瞬断切替を確認、USB給電断で充放電ICごとLEDが消灯することを確認し「両方消灯=バッテリー駆動中」の3値信号が使える見込みが立った。充電電圧は21:45(3.59V)以降ほぼ頭打ちでCR→OKへの切り替わりは未確認のまま持ち越し——想定してた終止電圧3.6〜3.65Vより実際は3.59V付近の可能性が出てきた | [log/2026-09-10-ups-first-power-on-test.md](log/2026-09-10-ups-first-power-on-test.md) |
 | 2026-09-08 | **地震候補スキャン(docs/auto_judge.md)を実装した（`terraform apply`は未実行）。** PR #212をマージし新Lambda `quake_scan`・状態管理`lambda/common/quake_scan.py`・watchdogへの停滞検知ブロック・`detection_range.py`の`worth_notifying()`を実装。副産物として震源ジオメトリ計算(`hypocentral_km`等)を`detectlab.py`(scipy依存)から`tools/station.py`(依存なし)に切り出し、`scan_quakes.py`系がscipyを持ち込まずLambdaに同梱できるようにした。pytest 268件通過・`terraform plan`で5追加/5変更/0削除を確認 | [log/2026-09-08-quake-scan-implementation.md](log/2026-09-08-quake-scan-implementation.md) |
