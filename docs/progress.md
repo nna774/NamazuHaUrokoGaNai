@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-09-15 | **自宅回線の上流輻輳時に発生したdevice2の再起動を調査、自動回収coredumpをsymbolizeして原因を確定した。** 通常のバッチ送信(`Uploader::postBatch()`)のTLSハンドシェイク待ちでTASK_WDT(20秒)が発火した自己回復イベントで、既に入っている接続/ハンドシェイク/ヘッダ読み取り各3秒(最悪合計12秒)のWDT予算設計(2026-08-29実装)があっても、輻輳の性質次第では超過しうると判明。coredump自動送信・自動リブートは設計通り機能しており、新規のコード修正は不要と判断した | [log/2026-09-15-device2-postbatch-tls-handshake-wdt.md](log/2026-09-15-device2-postbatch-tls-handshake-wdt.md) |
 | 2026-09-14 | **福島県沖M4.4(16:33・震源距離302km・境界帯)を事後解析し「完全埋没(critical)」と判定した。** 標準・低帯域xyともSTA/LTA閾値未達。device2低帯域のみ4.83で閾値超過したが該当binの機間相関が背景以下で固有ノイズと判断。`0001/0002-59645706`で手動イベント化・detection_events.csvに追記 | [log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md](log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md) |
 | 2026-09-14 | **宮城県沖M4.1(震源距離323km・レンジ上端超過)を事後解析し「完全埋没(critical)」と判定した。** 標準・低帯域xyともSTA/LTA閾値未達、SNR・直線性・機間相関のいずれにも地震らしい上昇なし。`0001/0002-59646110`で手動イベント化・detection_events.csvに追記 | [log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md](log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md) |
 | 2026-09-14 | **福島県沖M4.3(20:00・震源距離259km・境界帯)を事後解析し「微妙(warning)」と判定した。** STA/LTAは標準・低帯域とも閾値未達だが、低帯域xyのS窓〜コーダ前半で両機のSNR/直線性・機間相関が同時に背景の約2倍まで上昇——境界帯で実信号ありと判断した初の実例。`0001/0002-59646120`で手動イベント化・detection_events.csvに追記、detection_range.mdも再生成 | [log/2026-09-14-fukushima-oki-m4.3-2000-post-hoc-detection.md](log/2026-09-14-fukushima-oki-m4.3-2000-post-hoc-detection.md) |
