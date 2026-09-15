@@ -61,6 +61,41 @@ def test_handle_coredump_stores_to_s3(fake_s3, monkeypatch):
     assert ingest.SLACK_MENTION in text
 
 
+def test_handle_coredump_includes_pump_trace_when_header_present(fake_s3, monkeypatch):
+    notifier = FakeNotifier()
+    monkeypatch.setattr(ingest.notify, "from_env", lambda: notifier)
+
+    resp = ingest._handle_coredump(
+        b"\x7fELFdummy",
+        "2",
+        {
+            "x-namz-fw-version": "326488d",
+            "x-namz-pump-trace": "started_us=1789471248667862;heap_free=71384;"
+            "heap_maxblock=45044;wifi=3;spill=0;ram_queued=1",
+        },
+    )
+
+    assert resp["statusCode"] == 200
+    _title, text, _fields = notifier.calls[0]
+    assert "送信詰まり" in text
+    assert "heap_free=71384" in text
+    assert "2026-09-15" in text  # started_usをJSTへ変換した日付
+
+
+def test_handle_coredump_omits_pump_trace_when_header_absent(fake_s3, monkeypatch):
+    notifier = FakeNotifier()
+    monkeypatch.setattr(ingest.notify, "from_env", lambda: notifier)
+
+    ingest._handle_coredump(b"\x7fELFdummy", "2", {"x-namz-fw-version": "326488d"})
+
+    _title, text, _fields = notifier.calls[0]
+    assert "送信詰まり" not in text
+
+
+def test_format_pump_trace_falls_back_to_raw_on_parse_error():
+    assert ingest._format_pump_trace("not-a-valid-trace") == "not-a-valid-trace"
+
+
 def test_handle_coredump_acks_even_if_notify_fails(fake_s3, monkeypatch):
     monkeypatch.setattr(ingest.notify, "from_env", lambda: FakeNotifier(fail=True))
 

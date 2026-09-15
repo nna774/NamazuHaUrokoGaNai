@@ -42,8 +42,15 @@ void captureIfPresent(const char* queueDir, size_t maxQueuedFiles);
 // （WDTには頼らない、millis()ベースの自前デッドライン）。
 // TLS接続はこの関数の中でしか張らない——呼び出し時点でTlsMemPoolの
 // 「単一TLS接続前提」を満たせるよう、必ずgUploader生成より前に呼ぶこと。
+//
+// extraHeaderName/Value: 両方非nullptrの時だけ、送るコアダンプ全件に同じ追加
+// ヘッダを1本付ける（既定nullptrで従来通り追加しない）。呼び出し側が「前回起動は
+// pump()が詰まったまま終わった」等の診断情報をRTC memoryから読んだ時に使う想定
+// （このレポ固有の用途のため、意味づけはCoredumpQueue自身は持たずただ運ぶだけ。
+// docs/log/2026-09-15-device2-postbatch-tls-handshake-wdt.md）。
 void drainToCloud(const char* queueDir, const char* ingestUrl, const char* hmacSecret,
                    uint32_t deviceId, const char* fwVersion, const char* caCertPem,
-                   uint32_t perFileTimeoutMs, uint32_t totalBudgetMs);
+                   uint32_t perFileTimeoutMs, uint32_t totalBudgetMs,
+                   const char* extraHeaderName = nullptr, const char* extraHeaderValue = nullptr);
 
 }  // namespace coredumpqueue

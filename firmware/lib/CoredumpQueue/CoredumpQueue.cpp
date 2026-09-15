@@ -156,7 +156,8 @@ void captureIfPresent(const char* queueDir, size_t maxQueuedFiles) {
 
 void drainToCloud(const char* queueDir, const char* ingestUrl, const char* hmacSecret,
                    uint32_t deviceId, const char* fwVersion, const char* caCertPem,
-                   uint32_t perFileTimeoutMs, uint32_t totalBudgetMs) {
+                   uint32_t perFileTimeoutMs, uint32_t totalBudgetMs,
+                   const char* extraHeaderName, const char* extraHeaderValue) {
   static constexpr size_t kMaxNames = 64;
   String names[kMaxNames];
   size_t count = 0;
@@ -217,6 +218,9 @@ void drainToCloud(const char* queueDir, const char* ingestUrl, const char* hmacS
     http.addHeader("X-Namz-Signature", sig.c_str());
     http.addHeader("X-Namz-Fw-Version", fwVersion);
     http.addHeader("Content-Type", "application/octet-stream");
+    if (extraHeaderName != nullptr && extraHeaderValue != nullptr) {
+      http.addHeader(extraHeaderName, extraHeaderValue);
+    }
 
     int code = http.POST(buf, size);
     http.end();

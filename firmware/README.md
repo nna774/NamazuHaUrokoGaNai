@@ -287,3 +287,26 @@ EOF
 `ota/<env>/<その版>.elf`がS3にあればそのまま使い（`.elf`保存より前の古い版なら
 無いので、上記の「再ビルドしてバイト比較」に切り替える）、S3キーの`fw_version`
 （＝アップロード時点のfirmware）は無視する。
+
+### 送信で詰まっていたかどうか(RtcPumpTrace)
+
+coredumpのバックトレースは「どの関数で止まっていたか」は教えてくれるが、
+「いつから・どれくらいの時間止まっていたか」は分からない
+（[docs/log/2026-09-15-device2-postbatch-tls-handshake-wdt.md](../docs/log/2026-09-15-device2-postbatch-tls-handshake-wdt.md)で
+実際に`Uploader::postBatch()`のTLSハンドシェイク待ちでTASK_WDTパニックした事例を
+symbolizeした際に判明した限界）。
+
+これを補うため、`main.cpp`は`gUploader->pump()`を呼ぶ直前に、その時点の状態
+（起動からの経過時刻・heap空き/最大ブロック・WiFi状態・spill/RAMキュー件数）を
+RTC memory（`RTC_NOINIT_ATTR`、WDTパニック等のソフトリセットでは消えず、電源断
+でのみ消える）へ書き、`pump()`が戻ってきたら「終わった」印を付ける。次回起動時に
+「まだ終わっていない」印のまま残っていれば、前回はまさに`pump()`の中で（＝ほぼ
+送信のネットワークI/Oで）止まったまま再起動したと分かる——ただし`pump()`の内部
+（TCP接続とTLSハンドシェイクの区別等）はUploader(batch-uplink)側にあって外から
+見えないため、「pump()呼び出し全体の前後」という粒度に留まる。
+
+この情報は見つかった時だけ`X-Namz-Pump-Trace`ヘッダとして`/coredump`アップロード
+に相乗りする（ヘッダが無ければ「前回のpump()は完走していた」の意味）。
+`lambda/ingest`が読んで、コアダンプ回収のSlack通知に「送信詰まり」の1行として
+そのまま出す。RTC memory自体は今回の送信でしか報告できないベストエフォートの
+値なので、LittleFS退避（coredump本体）のような再試行は無い。
