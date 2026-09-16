@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-09-17 | **友人の地震計アプリを見て思いついた事後解析の拡張2案（3D相対変位図・S-P時間からの震源距離自動推定）を使い捨てスクリプトで試作・評価し、`docs/post_hoc_detection.md`に「検討中の拡張」として記録した。** 3D変位は震源距離163km・M4.8では軌跡が絡まって読めず近い/強い地震向き。S-P自動推定は2イベントで検証したがSピッカーが機能せずどちらも距離を大きく外した（弱い地震ではP自体もS波と誤認識）。信頼度指標も外れていても100%と出る点も確認。どちらも本体未着手 | [log/2026-09-17-friend-app-inspired-post-hoc-ideas.md](log/2026-09-17-friend-app-inspired-post-hoc-ideas.md) |
 | 2026-09-15 | **自宅回線の上流輻輳時に発生したdevice2の再起動を調査、自動回収coredumpをsymbolizeして原因を確定した。** 通常のバッチ送信(`Uploader::postBatch()`)のTLSハンドシェイク待ちでTASK_WDT(20秒)が発火した自己回復イベントで、既に入っている接続/ハンドシェイク/ヘッダ読み取り各3秒(最悪合計12秒)のWDT予算設計(2026-08-29実装)があっても、輻輳の性質次第では超過しうると判明。coredump自動送信・自動リブートは設計通り機能しており、新規のコード修正は不要と判断した | [log/2026-09-15-device2-postbatch-tls-handshake-wdt.md](log/2026-09-15-device2-postbatch-tls-handshake-wdt.md) |
 | 2026-09-14 | **福島県沖M4.4(16:33・震源距離302km・境界帯)を事後解析し「完全埋没(critical)」と判定した。** 標準・低帯域xyともSTA/LTA閾値未達。device2低帯域のみ4.83で閾値超過したが該当binの機間相関が背景以下で固有ノイズと判断。`0001/0002-59645706`で手動イベント化・detection_events.csvに追記 | [log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md](log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md) |
 | 2026-09-14 | **宮城県沖M4.1(震源距離323km・レンジ上端超過)を事後解析し「完全埋没(critical)」と判定した。** 標準・低帯域xyともSTA/LTA閾値未達、SNR・直線性・機間相関のいずれにも地震らしい上昇なし。`0001/0002-59646110`で手動イベント化・detection_events.csvに追記 | [log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md](log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md) |
