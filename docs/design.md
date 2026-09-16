@@ -89,8 +89,11 @@ detect は raw オブジェクトの到着ごとに起動し、毎回 120秒窓�
   ので、`detect_core.clamp_stride` がそこで切り詰める。実際には「震度を丸ごと評価したい
   イベント長 D」に対して `stride <= 110 - D` を満たす必要があり、上限に張り付けるのは
   避けるべき。stride 30秒なら80秒以内のイベントがどこかの窓に丸ごと収まる。
-- 間引くのは**窓の再評価だけ**。速報波形の永久保存（`_preserve_prompt_waveforms`）は
-  S3 GET を伴わないので毎バッチ回す。
+- 間引くのは**窓の再評価だけ**。イベント波形の後追いバックフィル
+  （`common/event_backfill.backfill_pending_events`）は S3 GET を伴わないので毎バッチ回す。
+  揺れが収まって`_confirm`の再発火が止まった後も判定できるよう、watchdog Lambdaの
+  定期起動からも同じ関数を呼ぶ（ingestが止まった場合の保険。
+  docs/log/2026-09-17-event-post-window-backfill-mechanism-fix.md）。
 - 速報（デバイス側 `kAlertIntensity`）は別経路で即時に飛ぶので、確定報が数十秒
   遅れても通知が遅れるわけではない。**遅らせてよいのは確定側だけ**という非対称がある。
 
