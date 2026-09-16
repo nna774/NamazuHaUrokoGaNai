@@ -220,6 +220,29 @@ def _handle_alert(raw: bytes, auth_device: str):
     return _resp(200, "alert ok")
 
 
+def _format_pump_trace(raw_header: str) -> str:
+    """X-Namz-Pump-Traceヘッダ(`k=v;k=v;...`)を人が読める1行に整形する。
+    ファームのRtcPumpTrace(RTC memory、WDTパニック等のソフトリセットでは消えない)を
+    起動時にそのまま運んでいるだけの値で、壊れていても通知全体を落とす理由には
+    ならないためパース失敗時は生値をそのまま返す
+    (docs/log/2026-09-15-device2-postbatch-tls-handshake-wdt.md)。"""
+    try:
+        fields = dict(kv.split("=", 1) for kv in raw_header.split(";") if kv)
+        started_us = int(fields.get("started_us", "0"))
+        started = (
+            dt.datetime.fromtimestamp(started_us / 1e6, JST).strftime("%Y-%m-%d %H:%M:%S JST")
+            if started_us > 0
+            else "時刻不明(NTP未同期)"
+        )
+        return (
+            f"開始={started} heap_free={fields.get('heap_free', '?')} "
+            f"heap_maxblock={fields.get('heap_maxblock', '?')} wifi={fields.get('wifi', '?')} "
+            f"spill={fields.get('spill', '?')} ram_queued={fields.get('ram_queued', '?')}"
+        )
+    except Exception:  # noqa: BLE001
+        return raw_header
+
+
 def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
     # コアダンプ本体はwire formatを持たない生バイナリなので、device_idは(認証済みの)
     # X-Namz-Deviceヘッダだけが情報源(バッチ/速報のような本文とのdevice_id一致検証は
@@ -234,6 +257,15 @@ def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
     # 再起動（≒クラッシュ発生）時刻とほぼ同一とみなせる。
     collected_at = dt.datetime.fromtimestamp(uploaded_at_us / 1e6, JST).strftime("%Y-%m-%d %H:%M:%S JST")
 
+    # pump()呼び出し前後で詰まっていたか(ファームのRtcPumpTrace、RTC memory由来)。
+    # 前回起動がgUploader->pump()の途中で終わった時だけファームが付ける
+    # (docs/log/2026-09-15-device2-postbatch-tls-handshake-wdt.md)。無い方が普通
+    # (パニック位置が送信以外だった/pump()自体は完走していた)なので任意扱い。
+    pump_trace_header = headers.get("x-namz-pump-trace")
+    pump_trace_line = (
+        f"\n*送信詰まり*: {_format_pump_trace(pump_trace_header)}" if pump_trace_header else ""
+    )
+
     # 通知は主経路ではないので、S3保存が済んでいれば失敗してもACK(200)は返す
     # （_handle_batchのdevices.get_device失敗時と同じ扱い）。
     try:
@@ -245,7 +277,8 @@ def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
             f"{SLACK_MENTION}device *{device_id:04d}* (fw={fw_version}) の起動時にコアダンプが"
             "見つかり、S3へ保存した。再起動原因の調査に使える。\n"
             f"*回収時刻*: {collected_at}\n"
-            f"*S3キー*: {key}",
+            f"*S3キー*: {key}"
+            f"{pump_trace_line}",
         )
     except Exception as e:  # noqa: BLE001
         print(f"coredump notify failed: {e!r}")

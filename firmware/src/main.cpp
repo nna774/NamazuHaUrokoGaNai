@@ -11,6 +11,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_attr.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
@@ -185,6 +186,28 @@ static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
                                                    sHeapMinfreeBuf,
                                                    sResetReasonBuf, sSpillCountBuf,
                                                    sRamQueuedBuf};
+
+// RTC memory（WDTパニック等のソフトリセットでは消えず、電源断でのみ消える）に
+// 「gUploader->pump()呼び出し直前の状態」を記録しておく診断用途。次回起動時に
+// inFlightがtrueのまま残っていれば「前回はpump()の途中で終わった=送信で詰まって
+// いた」と分かり、詰まっていた瞬間のheap/wifi/backlog状態ごとcoredump通知に
+// 相乗りさせられる(docs/log/2026-09-15-device2-postbatch-tls-handshake-wdt.md)。
+// pump()の内部(接続確立/TLSハンドシェイクの区別)はUploader(batch-uplink)側に
+// あって外から見えないため、「pump()呼び出しの前後」という粒度に留まる。
+struct RtcPumpTrace {
+  uint32_t magic;
+  bool inFlight;
+  uint64_t startedUs;  // timesync::isSynced()なら絶対時刻[us]、未同期なら0
+  uint32_t heapFreeBytes;
+  uint32_t heapMaxblockBytes;
+  int wifiStatus;
+  uint32_t spillCount;
+  uint32_t ramQueued;
+};
+static constexpr uint32_t kRtcPumpTraceMagic = 0x4e415a50;  // "NAZP"
+RTC_NOINIT_ATTR RtcPumpTrace gRtcPumpTrace;
+// coredump本体を送る際の /coredump へのPOSTに乗せる追加ヘッダ名（値はsetup()で組む）。
+static constexpr const char* kPumpTraceHeader = "X-Namz-Pump-Trace";
 
 // spillも満杯なら最古のバッチから捨てる（無制限にRAMへ積み増してクラッシュするのを防ぐ）。
 // gIdentity（NVS由来）が要るので静的初期化ではなくsetup()内で構築する。
@@ -692,7 +715,16 @@ static void uploaderTask(void*) {
     snprintf(sHeapMinfreeBuf, sizeof(sHeapMinfreeBuf), "%u", (unsigned)ESP.getMinFreeHeap());
     snprintf(sSpillCountBuf, sizeof(sSpillCountBuf), "%u", (unsigned)gUploader->spillCount());
     snprintf(sRamQueuedBuf, sizeof(sRamQueuedBuf), "%u", (unsigned)gUploader->ramQueued());
+    gRtcPumpTrace.magic = kRtcPumpTraceMagic;
+    gRtcPumpTrace.inFlight = true;
+    gRtcPumpTrace.startedUs = timesync::isSynced() ? timesync::nowUs() : 0;
+    gRtcPumpTrace.heapFreeBytes = (uint32_t)ESP.getFreeHeap();
+    gRtcPumpTrace.heapMaxblockBytes = (uint32_t)ESP.getMaxAllocHeap();
+    gRtcPumpTrace.wifiStatus = (int)WiFi.status();
+    gRtcPumpTrace.spillCount = (uint32_t)gUploader->spillCount();
+    gRtcPumpTrace.ramQueued = (uint32_t)gUploader->ramQueued();
     gUploader->pump();
+    gRtcPumpTrace.inFlight = false;
     esp_task_wdt_reset();
 #ifdef NAMZ_TLS_ALLOC_PROBE
     tlsallocprobe::printIfChanged();
@@ -866,11 +898,29 @@ void setup() {
   // TLS接続だけが存在する状態を保てる。新しいtaskは作らず同期呼び出しにする
   // (docs/log/2026-08-29-coredump-auto-upload-plan.md)。WiFi接続に失敗していれば
   // 何もせず、次回起動での再試行に委ねる。
+  // 前回起動でgUploader->pump()が戻らないまま終わった(=送信で詰まっていた)場合、
+  // その時点の状態(RtcPumpTrace)をcoredump通知に相乗りさせるヘッダを組む。読んだら
+  // 一度きりの報告とみなしてすぐinFlightを下ろす——このRTC値はLittleFSの退避と
+  // 違いここでの送信に失敗しても再試行できないため、ベストエフォート
+  // (docs/log/2026-09-15-device2-postbatch-tls-handshake-wdt.md)。
+  static char sPumpTraceHeaderBuf[160];
+  const char* pumpTraceHeaderValue = nullptr;
+  if (gRtcPumpTrace.magic == kRtcPumpTraceMagic && gRtcPumpTrace.inFlight) {
+    snprintf(sPumpTraceHeaderBuf, sizeof(sPumpTraceHeaderBuf),
+             "started_us=%llu;heap_free=%u;heap_maxblock=%u;wifi=%d;spill=%u;ram_queued=%u",
+             (unsigned long long)gRtcPumpTrace.startedUs, (unsigned)gRtcPumpTrace.heapFreeBytes,
+             (unsigned)gRtcPumpTrace.heapMaxblockBytes, gRtcPumpTrace.wifiStatus,
+             (unsigned)gRtcPumpTrace.spillCount, (unsigned)gRtcPumpTrace.ramQueued);
+    pumpTraceHeaderValue = sPumpTraceHeaderBuf;
+    gRtcPumpTrace.inFlight = false;
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
     coredumpqueue::drainToCloud(kCoredumpQueueDir, gIdentity.ingestUrl.c_str(),
                                 gIdentity.hmacSecret.c_str(), gIdentity.deviceId, kFwVersion,
                                 reinterpret_cast<const char*>(amazon_root_ca1_pem_start),
-                                kCoredumpPerFileTimeoutMs, kCoredumpTotalBudgetMs);
+                                kCoredumpPerFileTimeoutMs, kCoredumpTotalBudgetMs,
+                                kPumpTraceHeader, pumpTraceHeaderValue);
   }
   NAMZ_HEAP_CHECKPOINT("after coredump drain");
 
