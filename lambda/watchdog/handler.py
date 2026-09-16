@@ -12,6 +12,11 @@ last_ingest_at_us を見る。
 - 地震候補スキャン(lambda/quake_scan、docs/auto_judge.md)が最後に成功実行してから
   NAMZ_QUAKE_SCAN_STUCK_AFTER_S を超えていたら「停滞」を通知（デバイスと違い単一の
   ジョブなのでループの外で1回だけ判定する）。
+- イベント波形のバックフィル（common/event_backfill.py）も同じ「時間経過そのものが
+  条件」という性質を持つので、ここに相乗りさせている。detect Lambda（生バッチ到着の
+  たび）からも同じ関数を呼ぶが、そちらは新しい生データが届き続けることに依存する。
+  揺れが収まった後もデバイスは平時通りバッチを送り続けるので通常はdetect側で片付くが、
+  ingest自体が止まった場合はそちらも止まる——ここでの定期実行が保険になる。
 
 状態遷移の判定は devices.evaluate()/evaluate_lag()・quake_scan.evaluate_stuck() に
 集約（DynamoDB 抜きでテストできる）。
@@ -23,9 +28,14 @@ import datetime as dt
 import os
 import time
 
+import boto3
+
 from batch_uplink import devices, notify
 
-from common import ota_watch, quake_scan, watchdog_mute
+from common import event_backfill, ota_watch, quake_scan, watchdog_mute
+
+s3 = boto3.client("s3")
+BUCKET = os.environ["NAMZ_BUCKET"]
 
 # 生存とみなす最終受信からの猶予[s]。バッチは30秒間隔なので、既定300秒＝約10バッチ落ち。
 OFFLINE_AFTER_S = float(os.environ.get("NAMZ_OFFLINE_AFTER_S", "300"))
@@ -86,6 +96,7 @@ def _device_field(did: int) -> str:
 
 def handler(event, context):
     now_us = int(time.time() * 1e6)
+    event_backfill.backfill_pending_events(s3, BUCKET, now_us)
     offline_after = int(OFFLINE_AFTER_S * 1e6)
     renotify_after = int(OFFLINE_RENOTIFY_S * 1e6)
     lag_after = int(LAG_AFTER_S * 1e6)

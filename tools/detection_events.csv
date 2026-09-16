@@ -27,3 +27,7 @@ miyakejima-oki-m4.3,三宅島近海,2026-09-13,33.8,139.4,20,,4.3,critical,完�
 toyama-tobu-m2.9,富山県東部,2026-09-13,36.4,137.6,0,,2.9,critical,完全埋没(標準はSTA/LTA閾値未達・低帯域xyでdevice2のみ4.90超過するが機間相関は背景をわずかに上回る程度で有意でなく固有ノイズと判断。震源距離123kmはレンジ境界帯),log/2026-09-13-toyama-tobu-m2.9-post-hoc-detection.md
 tsugaru-kaikyo-m4.5,津軽海峡,2026-09-13,41.5,141.3,120,,4.5,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・低帯域でdevice2のみ4.19超過するが機間相関は背景以下で固有ノイズと判断),log/2026-09-13-tsugaru-kaikyo-m4.5-post-hoc-detection.md
 chichijima-oki-m4.6,父島近海,2026-09-13,26.5,142.9,10,,4.6,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・P窓後半で機間相関が一時的に背景を上回るがSTA/LTA・SNRは同時上昇せず単発と判断。震源距離1221kmと今回最遠),log/2026-09-13-chichijima-oki-m4.6-post-hoc-detection.md
+fukushima-oki-m4.3-2000,福島県沖,2026-09-14,37.5,141.6,50,,4.3,warning,微妙(標準・低帯域ともSTA/LTA閾値未達だが低帯域xyのS窓〜コーダ前半で両機のSNR/直線性・機間相関が同時に上昇。震源距離259kmはレンジ境界帯),log/2026-09-14-fukushima-oki-m4.3-2000-post-hoc-detection.md
+miyagi-oki-m4.1,宮城県沖,2026-09-14,38.2,142.1,30,,4.1,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・SNR/直線性/機間相関いずれも地震らしい上昇なし。震源距離323kmはレンジ上端超過),log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md
+fukushima-oki-m4.4-1633,福島県沖,2026-09-14,37.2,142.2,20,,4.4,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・device2低帯域のみ4.83超過するが機間相関は背景以下で固有ノイズと判断。震源距離302kmはレンジ境界帯),log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md
+ibaraki-nanbu-m4.8,茨城県南部,2026-09-17,36.1,140.1,70,,4.8,good,確定検知(cloud_confirmed I=2.0/2.0。理論P/S窓では埋没気味だがコーダ想定域でSNR7.5/10.4・直線性0.81/0.82・機間相関も明瞭),log/2026-09-17-ibaraki-nanbu-m4.8-post-hoc-detection.md
