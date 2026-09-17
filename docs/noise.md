@@ -198,6 +198,17 @@
   [log/2026-09-14-fukushima-oki-m4.3-2000-post-hoc-detection.md](log/2026-09-14-fukushima-oki-m4.3-2000-post-hoc-detection.md)、
   [log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md](log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md)、
   [log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md](log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md)）。
+- **2026-09-17 06:11 茨城県南部 M3.1 深さ50km（震源距離143km、レンジ内境界帯）**:
+  リアルタイム閾値未達で正式イベントは立たず。標準設定・低帯域xyどちらもSNRが
+  P窓・S窓・コーダ想定域を通じて終始1.0前後（ノイズと無区別）、機間相関も到達窓付近で
+  背景水準を上回らなかった。device2低帯域のみSTA/LTA=4.05で閾値超過したが、onset候補は
+  コーダ想定域の外（発生+531秒）で直線性0.34と低く、孤立した機体固有ノイズと判断。
+  **完全埋没**（詳細・図: [log/2026-09-17-ibaraki-nanbu-m3.1-0611-post-hoc-detection.md](log/2026-09-17-ibaraki-nanbu-m3.1-0611-post-hoc-detection.md)）。
+- **2026-09-16 17:21 栃木県北部 M2.7 深さ0km（震源距離54km、「近すぎほぼ確実に捕れる」
+  目安の内側）**: リアルタイム閾値未達で正式イベントは立たず。近距離にもかかわらず
+  標準・低帯域xyどちらもSTA/LTA閾値未達、SNRが終始1.0前後でノイズと無区別、機間相関も
+  背景水準のまま。**完全埋没**——マグニチュードが小さいと近距離でも埋没しうることを示す
+  実例（詳細・図: [log/2026-09-16-tochigi-hokubu-m2.7-1721-post-hoc-detection.md](log/2026-09-16-tochigi-hokubu-m2.7-1721-post-hoc-detection.md)）。
 
 ## 実務結論
 
