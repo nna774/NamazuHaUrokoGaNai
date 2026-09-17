@@ -31,3 +31,5 @@ fukushima-oki-m4.3-2000,福島県沖,2026-09-14,37.5,141.6,50,,4.3,warning,微�
 miyagi-oki-m4.1,宮城県沖,2026-09-14,38.2,142.1,30,,4.1,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・SNR/直線性/機間相関いずれも地震らしい上昇なし。震源距離323kmはレンジ上端超過),log/2026-09-14-miyagi-oki-m4.1-post-hoc-detection.md
 fukushima-oki-m4.4-1633,福島県沖,2026-09-14,37.2,142.2,20,,4.4,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・device2低帯域のみ4.83超過するが機間相関は背景以下で固有ノイズと判断。震源距離302kmはレンジ境界帯),log/2026-09-14-fukushima-oki-m4.4-1633-post-hoc-detection.md
 ibaraki-nanbu-m4.8,茨城県南部,2026-09-17,36.1,140.1,70,,4.8,good,確定検知(cloud_confirmed I=2.0/2.0。理論P/S窓では埋没気味だがコーダ想定域でSNR7.5/10.4・直線性0.81/0.82・機間相関も明瞭),log/2026-09-17-ibaraki-nanbu-m4.8-post-hoc-detection.md
+ibaraki-nanbu-m3.1-0611,茨城県南部,2026-09-17,36.1,139.9,50,,3.1,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・P窓/S窓/コーダ想定域のSNRが終始1.0前後でノイズ水準・機間相関も背景水準のまま。device2低帯域のみ4.05超過するがコーダ想定域外の孤立ピークで直線性0.34と低く固有ノイズと判断。震源距離143kmはレンジ内境界帯),log/2026-09-17-ibaraki-nanbu-m3.1-0611-post-hoc-detection.md
+tochigi-hokubu-m2.7-1721,栃木県北部,2026-09-16,36.8,139.4,0,,2.7,critical,完全埋没(標準・低帯域xyともSTA/LTA閾値未達・SNRが終始1.0前後でノイズと無区別・機間相関も背景水準のまま。震源距離54kmと近距離だがM2.7という規模の小ささで埋没した実例),log/2026-09-16-tochigi-hokubu-m2.7-1721-post-hoc-detection.md

@@ -1,6 +1,6 @@
 # 検出限界の目安表（自動生成）
 
-`tools/detection_range.py`で`tools/detection_events.csv`（32件、うちgood=12件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
+`tools/detection_range.py`で`tools/detection_events.csv`（34件、うちgood=12件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
 
 回帰式（verdict=good のみでフィット）: `log10(震源距離[km]) = 1.2470 + 0.2363 * M`
 
@@ -36,8 +36,10 @@
 | `gunma-kitabu-m3.2` | 群馬県北部 | 2026-08-29 | 3.2 | 44km | warning | 0.43 |
 | `fukushima-aizu-m3.5` | 福島県会津 | 2026-09-03 | 3.5 | 53km | good | 0.45 |
 | `fukushima-aizu-m3.2` | 福島県会津 | 2026-09-10 | 3.2 | 53km | warning | 0.53 |
+| `tochigi-hokubu-m2.7-1721` | 栃木県北部 | 2026-09-16 | 2.7 | 54km | critical | 0.70 |
 | `toyama-tobu-m2.9` | 富山県東部 | 2026-09-13 | 2.9 | 123km | critical | 1.44 |
 | `ibaraki-nanbu-m3.4` | 茨城県南部 | 2026-08-26 | 3.4 | 143km | warning | 1.27 |
+| `ibaraki-nanbu-m3.1-0611` | 茨城県南部 | 2026-09-17 | 3.1 | 143km | critical | 1.50 |
 | `ibaraki-hokubu-m3.8` | 茨城県北部 | 2026-08-08 | 3.8 | 161km | good | 1.15 |
 | `fukushima-nakadori-m3.3` | 福島県中通り | 2026-08-31 | 3.3 | 163km | critical | 1.53 |
 | `ibaraki-nanbu-m4.8` | 茨城県南部 | 2026-09-17 | 4.8 | 163km | good | 0.68 |
