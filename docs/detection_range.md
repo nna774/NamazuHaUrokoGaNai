@@ -1,6 +1,6 @@
 # 検出限界の目安表（自動生成）
 
-`tools/detection_range.py`で`tools/detection_events.csv`（37件、うちgood=13件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
+`tools/detection_range.py`で`tools/detection_events.csv`（38件、うちgood=13件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
 
 回帰式（verdict=good のみでフィット）: `log10(震源距離[km]) = 1.2466 + 0.2364 * M`
 
@@ -57,6 +57,7 @@
 | `fukushima-oki-m4.5` | 福島県沖 | 2026-08-26 | 4.5 | 271km | warning | 1.32 |
 | `fukushima-oki-m4.0-1` | 福島県沖(旧) | 2026-07-24 | 4.0 | 273km | good | 1.75 |
 | `miyagi-oki-m3.8` | 宮城県沖 | 2026-09-04 | 3.8 | 281km | critical | 2.01 |
+| `fukushima-oki-m4.5-0730` | 福島県沖 | 2026-09-22 | 4.5 | 299km | critical | 1.46 |
 | `fukushima-oki-m4.4-1633` | 福島県沖 | 2026-09-14 | 4.4 | 302km | critical | 1.56 |
 | `miyagi-oki-m4.1` | 宮城県沖 | 2026-09-14 | 4.1 | 323km | critical | 1.96 |
 | `miyakejima-oki-m4.3` | 三宅島近海 | 2026-09-13 | 4.3 | 353km | critical | 1.92 |
