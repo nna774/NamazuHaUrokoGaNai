@@ -243,6 +243,14 @@
               <option value="24">24時間</option>
             </select>
           </label>
+          <label id="device-battery-hours-label">電池電圧の期間:
+            <select id="device-battery-hours">
+              <option value="1">1時間</option>
+              <option value="3">3時間</option>
+              <option value="6" selected>6時間</option>
+              <option value="24">24時間</option>
+            </select>
+          </label>
         </div>
         <h3 id="device-title"></h3>
         <table id="device-info"></table>
@@ -255,6 +263,15 @@
           <p class="muted">センサ内蔵温度計の生値からの参考換算[℃]。校正値ではないため
             <strong>絶対値は当てにならない</strong>。架台の熱ドリフトとの相関を見る
             相対変化の目安として見ること。</p>
+        </div>
+        <!-- UPSバッテリー電圧を送っていない機体(未配線・NAMZ_BATTERY_ADC未有効)では
+             データが0件になるので、refreshDeviceBattery()がセクションごと隠す。 -->
+        <div id="device-battery-section" style="display:none">
+          <h4>UPSバッテリー電圧</h4>
+          <div id="device-battery-status" class="muted status-line"></div>
+          <canvas id="device-battery-canvas"></canvas>
+          <p class="muted">LFUPSMAのB+/B-パッドから分圧経由でESP32のADCが読んだ実測値
+            (docs/ups.md §4)。UPSを実装した機体のみ出る。</p>
         </div>
       </div>
     </section>

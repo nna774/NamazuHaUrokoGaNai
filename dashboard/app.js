@@ -1488,6 +1488,81 @@ async function refreshDeviceTemp(id) {
   }
 }
 
+// UPSバッテリー電圧トレンドの折れ線。drawTempChartとほぼ同型(1系列・実時間軸)だが、
+// 値がmV(整数)で来るのでV表示に変換する点だけ違う。
+function drawBatteryChart(cv, points) {
+  const { ctx, w, h } = fitCanvas(cv);
+  ctx.clearRect(0, 0, w, h);
+  const pad = PAD;
+  const plotW = w - pad * 2, plotH = h - pad * 2;
+
+  if (!points.length) {
+    ctx.fillStyle = '#888';
+    ctx.fillText('データなし', pad, h / 2);
+    return;
+  }
+
+  const val = p => p.mv / 1000;  // mV -> V
+  const vals = points.map(val);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (lo === hi) { lo -= 0.05; hi += 0.05; }
+  const margin = (hi - lo) * 0.1 || 0.05;
+  lo -= margin; hi += margin;
+  const t0 = points[0].t, t1 = points[points.length - 1].t;
+  const tr = Math.max(1, t1 - t0);
+  const X = t => pad + ((t - t0) / tr) * plotW;
+  const Y = v => pad + plotH - ((v - lo) / (hi - lo)) * plotH;
+
+  ctx.fillStyle = '#888'; ctx.font = '11px system-ui';
+  ctx.fillText(hi.toFixed(2) + 'V', 2, Y(hi) + 4);
+  ctx.fillText(lo.toFixed(2) + 'V', 2, Y(lo) + 4);
+
+  ctx.strokeStyle = '#2980b9';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = X(p.t), y = Y(val(p));
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+
+  // 横軸の時刻目盛り（drawTempChartと同じ間引き方）
+  const nticks = Math.max(2, Math.min(6, Math.floor(plotW / 80)));
+  ctx.font = '11px system-ui';
+  for (let k = 0; k < nticks; k++) {
+    const f = k / (nticks - 1);
+    const x = pad + f * plotW;
+    ctx.strokeStyle = 'rgba(128,128,128,.18)';
+    ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, pad + plotH); ctx.stroke();
+    ctx.fillStyle = '#888';
+    ctx.textAlign = k === 0 ? 'left' : k === nticks - 1 ? 'right' : 'center';
+    const d = new Date((t0 + f * (t1 - t0)) / 1000);
+    ctx.fillText(d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }), x, h - 8);
+  }
+  ctx.textAlign = 'left';
+}
+
+// tempと違いサーバ側に「このデバイスは対応しているか」の事前フラグが無い
+// (UPS未配線の機体はNAMZ_BATTERY_ADC自体がビルドで無効、ヘッダが来ないだけ)ので、
+// 常に取得を試み、0件ならセクションごと隠す。
+async function refreshDeviceBattery(id) {
+  const section = document.getElementById('device-battery-section');
+  const status = document.getElementById('device-battery-status');
+  const hours = document.getElementById('device-battery-hours').value;
+  try {
+    status.textContent = '取得中…';
+    const data = await apiGet(`/devices/${encodeURIComponent(id)}/battery?hours=${hours}`);
+    const points = data.points || [];
+    section.style.display = points.length ? '' : 'none';
+    if (!points.length) return;
+    drawBatteryChart(document.getElementById('device-battery-canvas'), points);
+    status.textContent = `${points.length} 点（直近${hours}時間）`;
+  } catch (e) {
+    section.style.display = '';
+    status.textContent = 'エラー: ' + e.message;
+  }
+}
+
 async function showDevice(id) {
   currentDeviceId = id;
   const title = document.getElementById('device-title');
@@ -1509,6 +1584,7 @@ async function showDevice(id) {
   document.getElementById('device-temp-section').style.display = hasTemp ? '' : 'none';
   document.getElementById('device-temp-hours-label').style.display = hasTemp ? '' : 'none';
   if (hasTemp) refreshDeviceTemp(id);
+  refreshDeviceBattery(id);  // 対応有無はレスポンスの0件で判定する(refreshDeviceBattery参照)
 }
 
 // --- ハッシュルーティング ---
@@ -1578,10 +1654,12 @@ function eventHash(id, includeZoom = true) {
     + `${eventsDeviceHash()}&r=${r}&ax=${axesStr('event')}${t}`;
 }
 
-// デバイス詳細ハッシュ。温度の表示期間(h)を持たせ、リロード・共有URLで復元される。
+// デバイス詳細ハッシュ。温度(h)・電池電圧(bh)それぞれの表示期間を持たせ、
+// リロード・共有URLで復元される。
 function deviceHash(id) {
   const h = document.getElementById('device-temp-hours').value;
-  return `device/${encodeURIComponent(id)}?h=${h}`;
+  const bh = document.getElementById('device-battery-hours').value;
+  return `device/${encodeURIComponent(id)}?h=${h}&bh=${bh}`;
 }
 
 function showEventsMode(detail) {
@@ -1614,6 +1692,7 @@ function route() {
     showView('devices');
     showDevicesMode(true);
     if (params.h) document.getElementById('device-temp-hours').value = params.h;
+    if (params.bh) document.getElementById('device-battery-hours').value = params.bh;
     showDevice(decodeURIComponent(path.slice('device/'.length)));
   } else if (path === 'devices') {
     showView('devices');
@@ -1735,6 +1814,11 @@ window.addEventListener('load', () => {
     if (currentDeviceId == null) return;
     history.replaceState(null, '', '#' + deviceHash(currentDeviceId));
     refreshDeviceTemp(currentDeviceId);
+  };
+  document.getElementById('device-battery-hours').onchange = () => {
+    if (currentDeviceId == null) return;
+    history.replaceState(null, '', '#' + deviceHash(currentDeviceId));
+    refreshDeviceBattery(currentDeviceId);
   };
   // タイトルクリックで全操作状態を既定に戻す（ライブ・1分窓・自動更新・±100gal・全軸）。
   // イベント側のフィルタ・ページも既定へ。既に既定ならハッシュが変わらないので直接 route する。
