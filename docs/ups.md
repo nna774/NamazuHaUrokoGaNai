@@ -77,6 +77,11 @@ LFUPSMAの`CR`/`OK`ステータスLEDノードを分圧して読む案（§2参�
 - オープンドレイン(LED経由でGNDへ沈める方式)かどうか
 - 分圧が必要な場合、ESP32のGPIO/ADC耐圧3.3Vを超えない値まで落とす必要がある
 
+**2026-09-27、CR/OK LED読みに代わる案として、B+/B-パッドを直接ADCで読む設計に
+着手した。** LED読みが抱える上記3つの未知数を丸ごと迂回でき、かつ三値判定ではなく
+実電圧が取れる。配線図・firmware・クラウド側まで実装済みだが、実機の分圧回路は
+まだ組んでいない（設計のみ、詳細は次項）。
+
 ## 5. 未解決事項
 
 - device2の実消費電流を実測していない（§3、未解消のまま持ち越し）
@@ -121,4 +126,15 @@ LFUPSMAの`CR`/`OK`ステータスLEDノードを分圧して読む案（§2参�
 - 放電試験で判別できなかった「ブースト出力停止時に電池が本当に負荷から切り離されるか」
   は未解決のまま運用に入った。過放電で起きるのは劣化であり発火等の危険ではない
   （LiFePO4選定理由）ことと、予備セルがあることから、リスクは許容と判断した
-- firmware側の変更要否・電源状態(§4)をテレメトリとして送るかどうかは決めていない
+- **電源状態のテレメトリ化は、CR/OK LED読みではなくB+/B-直読みのADC方式で実装した**
+  （[log/2026-09-27-ups-battery-adc-design.md](log/2026-09-27-ups-battery-adc-design.md)）。
+  配線: LFUPSMAのB+/B-→100kΩ+100kΩ分圧(+0.1µF)→ESP32 GPIO39(ADC1_CH3)、図は
+  [img/ups-battery-adc-wiring.svg](img/ups-battery-adc-wiring.svg)。firmwareはopt-in
+  ビルドフラグ`NAMZ_BATTERY_ADC`（既定無効、`NAMZ_BATTERY_ADC=1 pio run -e adxl355`で
+  ビルド成功確認済み）で`X-Namz-Battery-Mv`ヘッダを毎バッチ送る。クラウド側は
+  `lambda/common/battery.py`(DynamoDBオンデマンド、`device_temp.py`と同型)に記録し、
+  `/devices/<id>/battery?hours=<n>`・ダッシュボードのデバイス詳細ページで折れ線表示。
+  **未着手のまま残っているのはハードウェアだけ**: 実機で分圧回路を組んでB+/B-へ
+  接続する配線作業と、テスターとADC読みを突き合わせて`kBatteryDividerRatio`(仮値2.0)
+  を実測較正すること。`terraform apply`でのDynamoDBテーブル作成もまだ（テーブルは
+  安価だが未実施、コード側は準備済み）。

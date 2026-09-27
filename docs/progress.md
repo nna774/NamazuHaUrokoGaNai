@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-09-27 | **UPSバッテリー電圧のADC計測・送信経路を設計・実装した(実機配線はまだ)。** LFUPSMAのB+/B-→100kΩ+100kΩ分圧→GPIO39、opt-inビルドフラグ`NAMZ_BATTERY_ADC`でビルド成功確認済み。クラウド側の保存先はCloudWatchカスタムメトリクス→DynamoDBオンデマンド(`device_temp.py`と同型の`battery.py`)へ作り直した——CloudWatchは「メトリクス種別×次元」ごとに送信頻度非依存の固定費がかかると分かったため | [log/2026-09-27-ups-battery-adc-design.md](log/2026-09-27-ups-battery-adc-design.md) |
 | 2026-09-25 | **UPSセットの物理的な固定とdevice2への実接続を完了し、稼働開始した。** 専用筐体は使わずバッテリーボックス・LFUPSMA基板を既存のコンクリートブロック設置にそのまま固定、USB-C電源専用ケーブルでESP32のUSB-Cポートへ接続。極性確認は充電器での電圧測定ではなく黒線とUSB-Cシェルの導通で行った（充電器では0.8VしかでなかったがCC negotiation起因でESP32側とは無関係と判明）。放電試験で未確認だった過放電保護の有無はリスク許容の上で運用に入った | [log/2026-09-25-ups-device2-installed.md](log/2026-09-25-ups-device2-installed.md) |
 | 2026-09-22 | **茨城県南部M3.8(15:34・震源距離139km)を事後解析し「probable detection(good)」と判定した。** 自動検知は無かったが、標準設定で両機STA/LTA閾値超過(4.67/5.42)・S窓SNR/直線性とも地震らしい判定・S波到達binで機間相関が背景の倍以上に上昇と根拠が揃っていた。`0001/0002-59668629`で手動イベント化・相互リンク・detection_events.csv追記・detection_range.md再生成済み | [log/2026-09-22-ibaraki-nanbu-m3.8-1534-post-hoc-detection.md](log/2026-09-22-ibaraki-nanbu-m3.8-1534-post-hoc-detection.md) |
 | 2026-09-17 | **友人の地震計アプリを見て思いついた事後解析の拡張2案（3D相対変位図・S-P時間からの震源距離自動推定）を使い捨てスクリプトで試作・評価し、`docs/post_hoc_detection.md`に「検討中の拡張」として記録した。** 3D変位は震源距離163km・M4.8では軌跡が絡まって読めず近い/強い地震向き。S-P自動推定は2イベントで検証したがSピッカーが機能せずどちらも距離を大きく外した（弱い地震ではP自体もS波と誤認識）。信頼度指標も外れていても100%と出る点も確認。どちらも本体未着手 | [log/2026-09-17-friend-app-inspired-post-hoc-ideas.md](log/2026-09-17-friend-app-inspired-post-hoc-ideas.md) |
