@@ -128,7 +128,10 @@ LFUPSMAの`CR`/`OK`ステータスLEDノードを分圧して読む案（§2参�
   （LiFePO4選定理由）ことと、予備セルがあることから、リスクは許容と判断した
 - **電源状態のテレメトリ化は、CR/OK LED読みではなくB+/B-直読みのADC方式で実装した**
   （[log/2026-09-27-ups-battery-adc-design.md](log/2026-09-27-ups-battery-adc-design.md)）。
-  配線: LFUPSMAのB+/B-→100kΩ+100kΩ分圧(+0.1µF)→ESP32 GPIO39(ADC1_CH3)、図は
+  配線: LFUPSMAのB+/B-→10kΩ+10kΩ分圧→直列保護抵抗Rs1kΩ→ESP32 GPIO39(ADC1_CH3)、
+  C1(0.1µF)はADCピン直前でRs×C1のRCフィルタを兼ねる。ADCが見る実効ソース
+  インピーダンスは6kΩ(ESP32 ADCの推奨上限10kΩ以下に収まる、2026-09-28に
+  100kΩ+100kΩから引き下げ・Rs追加のレビュー指摘を反映)。図は
   [img/ups-battery-adc-wiring.svg](img/ups-battery-adc-wiring.svg)。firmwareはopt-in
   ビルドフラグ`NAMZ_BATTERY_ADC`（既定無効、`NAMZ_BATTERY_ADC=1 pio run -e adxl355`で
   ビルド成功確認済み）で`X-Namz-Battery-Mv`ヘッダを毎バッチ送る。クラウド側は

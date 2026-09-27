@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-09-28 | **UPSバッテリー電圧ADC設計(未配線)へのレビュー指摘3点を反映した。** R1/R2を100kΩ+100kΩ→10kΩ+10kΩへ下げソースインピーダンスを推奨上限内に収め、直列保護抵抗Rs(1kΩ)を追加、C1の位置をADCピン直前へ移動してRCフィルタも兼ねさせた。漏れ電流は10倍(183µA)になるがESP32本体の消費電流と比べ無視できると判断。ADC個体差対策(eFuse較正)は`analogReadMilliVolts()`採用で既に対応済みと確認 | [log/2026-09-28-ups-battery-adc-review-fixes.md](log/2026-09-28-ups-battery-adc-review-fixes.md) |
 | 2026-09-27 | **UPSバッテリー電圧のADC計測・送信経路を設計・実装した(実機配線はまだ)。** LFUPSMAのB+/B-→100kΩ+100kΩ分圧→GPIO39、opt-inビルドフラグ`NAMZ_BATTERY_ADC`でビルド成功確認済み。クラウド側の保存先はCloudWatchカスタムメトリクス→DynamoDBオンデマンド(`device_temp.py`と同型の`battery.py`)へ作り直した——CloudWatchは「メトリクス種別×次元」ごとに送信頻度非依存の固定費がかかると分かったため | [log/2026-09-27-ups-battery-adc-design.md](log/2026-09-27-ups-battery-adc-design.md) |
 | 2026-09-25 | **UPSセットの物理的な固定とdevice2への実接続を完了し、稼働開始した。** 専用筐体は使わずバッテリーボックス・LFUPSMA基板を既存のコンクリートブロック設置にそのまま固定、USB-C電源専用ケーブルでESP32のUSB-Cポートへ接続。極性確認は充電器での電圧測定ではなく黒線とUSB-Cシェルの導通で行った（充電器では0.8VしかでなかったがCC negotiation起因でESP32側とは無関係と判明）。放電試験で未確認だった過放電保護の有無はリスク許容の上で運用に入った | [log/2026-09-25-ups-device2-installed.md](log/2026-09-25-ups-device2-installed.md) |
 | 2026-09-22 | **茨城県南部M3.8(15:34・震源距離139km)を事後解析し「probable detection(good)」と判定した。** 自動検知は無かったが、標準設定で両機STA/LTA閾値超過(4.67/5.42)・S窓SNR/直線性とも地震らしい判定・S波到達binで機間相関が背景の倍以上に上昇と根拠が揃っていた。`0001/0002-59668629`で手動イベント化・相互リンク・detection_events.csv追記・detection_range.md再生成済み | [log/2026-09-22-ibaraki-nanbu-m3.8-1534-post-hoc-detection.md](log/2026-09-22-ibaraki-nanbu-m3.8-1534-post-hoc-detection.md) |

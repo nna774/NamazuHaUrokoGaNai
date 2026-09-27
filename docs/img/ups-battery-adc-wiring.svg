@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" font-family="sans-serif">
-  <rect x="0" y="0" width="900" height="520" fill="white"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="sans-serif">
+  <rect x="0" y="0" width="900" height="560" fill="white"/>
 
   <text x="450" y="28" text-anchor="middle" font-size="18" font-weight="bold" fill="black">
-    UPSバッテリー電圧分圧回路（LFUPSMA B+/B- → GPIO39, R1=R2=100kΩ, C1=0.1µF）
+    UPSバッテリー電圧分圧回路（LFUPSMA B+/B- → GPIO39, R1=R2=10kΩ, Rs=1kΩ, C1=0.1µF）
   </text>
   <text x="450" y="48" text-anchor="middle" font-size="12" fill="#555">
-    未実装・設計案（2026-09-27）。実機未検証、分圧比・部品定数とも仮値
+    未実装・設計案（2026-09-28改訂。ソースインピーダンス低減+ADC入力保護のレビュー指摘を反映）
   </text>
 
   <!-- LFUPSMA module -->
@@ -28,62 +28,71 @@
   <text x="830" y="65" font-size="14" fill="#c0392b">B+（セル電圧、満充電時 約3.6〜3.65V）</text>
 
   <line x1="200" y1="230" x2="230" y2="230" stroke="black" stroke-width="2"/>
-  <line x1="230" y1="230" x2="230" y2="460" stroke="black" stroke-width="2"/>
-  <line x1="230" y1="460" x2="820" y2="460" stroke="black" stroke-width="2"/>
-  <text x="830" y="465" font-size="14" fill="black">GND（B-とESP32 GND共通）</text>
+  <line x1="230" y1="230" x2="230" y2="500" stroke="black" stroke-width="2"/>
+  <line x1="230" y1="500" x2="820" y2="500" stroke="black" stroke-width="2"/>
+  <text x="830" y="505" font-size="14" fill="black">GND（B-とESP32 GND共通）</text>
 
-  <!-- divider stack at x=440 -->
+  <!-- divider stack at x=400 -->
   <!-- top rail -> R1 -->
-  <line x1="440" y1="60" x2="440" y2="110" stroke="black" stroke-width="2"/>
-  <rect x="428" y="110" width="24" height="90" fill="none" stroke="black" stroke-width="2"/>
-  <text x="462" y="145" font-size="14" fill="black">R1</text>
-  <text x="462" y="163" font-size="14" fill="black">100kΩ</text>
+  <line x1="400" y1="60" x2="400" y2="110" stroke="black" stroke-width="2"/>
+  <rect x="388" y="110" width="24" height="90" fill="none" stroke="black" stroke-width="2"/>
+  <text x="422" y="145" font-size="14" fill="black">R1</text>
+  <text x="422" y="163" font-size="14" fill="black">10kΩ</text>
 
-  <!-- R1 -> Node A (ADC point) -->
-  <line x1="440" y1="200" x2="440" y2="230" stroke="black" stroke-width="2"/>
-  <circle cx="440" cy="230" r="4" fill="black"/>
-  <text x="440" y="215" text-anchor="middle" font-size="12" fill="#555"></text>
+  <!-- R1 -> Node A (分圧中点) -->
+  <line x1="400" y1="200" x2="400" y2="230" stroke="black" stroke-width="2"/>
+  <circle cx="400" cy="230" r="4" fill="black"/>
+  <text x="400" y="215" text-anchor="middle" font-size="11" fill="#555">Node A(分圧中点)</text>
 
   <!-- Node A -> R2 -> GND rail -->
-  <line x1="440" y1="230" x2="440" y2="260" stroke="black" stroke-width="2"/>
-  <rect x="428" y="260" width="24" height="90" fill="none" stroke="black" stroke-width="2"/>
-  <text x="462" y="295" font-size="14" fill="black">R2</text>
-  <text x="462" y="313" font-size="14" fill="black">100kΩ</text>
-  <line x1="440" y1="350" x2="440" y2="460" stroke="black" stroke-width="2"/>
+  <line x1="400" y1="230" x2="400" y2="260" stroke="black" stroke-width="2"/>
+  <rect x="388" y="260" width="24" height="90" fill="none" stroke="black" stroke-width="2"/>
+  <text x="422" y="295" font-size="14" fill="black">R2</text>
+  <text x="422" y="313" font-size="14" fill="black">10kΩ</text>
+  <line x1="400" y1="350" x2="400" y2="500" stroke="black" stroke-width="2"/>
 
-  <!-- C1 in parallel with R2, drawn as a side branch from Node A to GND rail -->
-  <line x1="440" y1="230" x2="560" y2="230" stroke="black" stroke-width="2"/>
-  <line x1="560" y1="230" x2="560" y2="300" stroke="black" stroke-width="2"/>
-  <line x1="535" y1="300" x2="585" y2="300" stroke="black" stroke-width="3"/>
-  <line x1="535" y1="312" x2="585" y2="312" stroke="black" stroke-width="3"/>
-  <line x1="560" y1="312" x2="560" y2="460" stroke="black" stroke-width="2"/>
-  <text x="595" y="310" font-size="14" fill="black">C1 0.1µF</text>
-  <text x="595" y="327" font-size="11" fill="#555">(サンプリング安定化)</text>
+  <!-- Node A -> Rs (直列保護抵抗) -> Node B -->
+  <line x1="400" y1="230" x2="560" y2="230" stroke="black" stroke-width="2"/>
+  <rect x="560" y="218" width="70" height="24" fill="none" stroke="black" stroke-width="2"/>
+  <text x="595" y="205" text-anchor="middle" font-size="14" fill="black">Rs 1kΩ</text>
+  <text x="595" y="255" text-anchor="middle" font-size="10" fill="#555">(ADC入力保護・兼RCフィルタの直列脚)</text>
+  <line x1="630" y1="230" x2="700" y2="230" stroke="#1e8449" stroke-width="3"/>
+  <circle cx="700" cy="230" r="4" fill="#1e8449"/>
+  <text x="700" y="215" text-anchor="middle" font-size="11" fill="#1e8449">Node B(ADC入力点)</text>
 
-  <!-- Node A -> GPIO39 -->
-  <text x="440" y="220" text-anchor="middle" font-size="11" fill="#555">Node A (ADC入力点)</text>
-  <line x1="440" y1="230" x2="700" y2="230" stroke="#1e8449" stroke-width="3"/>
-  <rect x="700" y="205" width="150" height="50" fill="none" stroke="#1e8449" stroke-width="2"/>
-  <text x="775" y="228" text-anchor="middle" font-size="14" fill="#1e8449" font-weight="bold">GPIO39</text>
-  <text x="775" y="245" text-anchor="middle" font-size="11" fill="#1e8449">(ADC1_CH3, ESP32)</text>
+  <!-- C1 at Node B (直前、ピン側) -->
+  <line x1="700" y1="230" x2="700" y2="300" stroke="black" stroke-width="2"/>
+  <line x1="675" y1="300" x2="725" y2="300" stroke="black" stroke-width="3"/>
+  <line x1="675" y1="312" x2="725" y2="312" stroke="black" stroke-width="3"/>
+  <line x1="700" y1="312" x2="700" y2="500" stroke="black" stroke-width="2"/>
+  <text x="735" y="310" font-size="14" fill="black">C1 0.1µF</text>
+  <text x="735" y="327" font-size="11" fill="#555">(ADCピン直前でRs×C1のRCフィルタ)</text>
+
+  <!-- Node B -> GPIO39 -->
+  <line x1="700" y1="230" x2="700" y2="180" stroke="#1e8449" stroke-width="3"/>
+  <rect x="625" y="130" width="150" height="50" fill="none" stroke="#1e8449" stroke-width="2"/>
+  <text x="700" y="153" text-anchor="middle" font-size="14" fill="#1e8449" font-weight="bold">GPIO39</text>
+  <text x="700" y="170" text-anchor="middle" font-size="11" fill="#1e8449">(ADC1_CH3, ESP32)</text>
 
   <!-- ESP32 GND -->
-  <line x1="775" y1="255" x2="775" y2="300" stroke="black" stroke-width="2"/>
-  <line x1="775" y1="300" x2="700" y2="300" stroke="black" stroke-width="2"/>
-  <line x1="700" y1="300" x2="700" y2="460" stroke="black" stroke-width="2"/>
-  <text x="785" y="303" font-size="11" fill="#555">ESP32 GND(TTGO T-Display)</text>
+  <line x1="700" y1="130" x2="700" y2="90" stroke="black" stroke-width="2"/>
+  <line x1="700" y1="90" x2="780" y2="90" stroke="black" stroke-width="2"/>
+  <text x="785" y="93" font-size="11" fill="#555">※実配線ではESP32のGNDピンへ別途配線(図は模式)</text>
 
   <!-- legend / notes -->
   <text x="60" y="400" font-size="12" fill="#555">
-    ・2:1分圧（100kΩ+100kΩ）: 満充電3.65V時でもNode Aは約1.83Vに収まり、ESP32 ADCの耐圧3.3Vに対し十分な余裕。
+    ・R1=R2を100kΩ→10kΩへ変更: ADCが見るソースインピーダンスをR1‖R2+Rs=5kΩ+1kΩ=6kΩまで下げ、ESP32 ADCの推奨上限(概ね10kΩ以下)に収めた。
   </text>
   <text x="60" y="418" font-size="12" fill="#555">
-    ・GPIO39を選ぶ理由: WiFi使用中も生きるADC1系統かつ入力専用。GPIO37/38は個体によりピンヘッダ未搭載、GPIO34/35はTTGO内蔵回路・ボタンで占有済み。
+    ・Rs(1kΩ)を追加: LFUPSMA側の未知の異常出力に対するADCピンの過電流保護。DC定常状態ではCに電流が流れずRsに電流も流れないため、分圧比(2:1)は変わらない。
   </text>
   <text x="60" y="436" font-size="12" fill="#555">
-    ・常時分圧のまま(有効/無効切替なし): 漏れ電流は3.65V/200kΩ≒18µA、1800mAhセルに対し無視できる。
+    ・C1をADCピン直前(Node B)へ移動: Rs×C1=100µsのRC時定数がADC内蔵サンプルホールドキャパシタより十分大きく、直前で電圧を安定させてから読ませる形になる。
   </text>
-  <text x="450" y="490" text-anchor="middle" font-size="11" fill="#c0392b">
-    未検証: 実機での分圧比較正（テスターとADC読みの突き合わせ）が要る。docs/ups.md §4/§5参照。
+  <text x="60" y="454" font-size="12" fill="#555">
+    ・常時分圧のまま(有効/無効切替なし): 漏れ電流は3.65V/20kΩ≒183µA、1800mAhセルおよびESP32本体の消費電流(数十〜数百mA)に対し無視できる。
+  </text>
+  <text x="450" y="530" text-anchor="middle" font-size="11" fill="#c0392b">
+    未検証: 実機での分圧比較正（テスターとADC読みの突き合わせ）が要る。analogReadMilliVolts()でeFuse較正込みの値を使うが個体差の残差は残る。docs/ups.md §4/§5参照。
   </text>
 </svg>

@@ -91,7 +91,13 @@ static constexpr int kPinCsAdxl355 = 32;
 static constexpr uint32_t kSpiClockHz = 8000000;  // 8MHz（ADXL355の上限10MHzにも収まる）
 
 // --- UPSバッテリー電圧(ADC、設計案・実機未配線。docs/img/ups-battery-adc-wiring.svg) ---
-// LFUPSMAのB+/B-パッドから100kΩ+100kΩの2:1分圧で取り出し、GPIO39(ADC1_CH3)で読む。
+// LFUPSMAのB+/B-パッドから10kΩ+10kΩの2:1分圧で取り出し、直列保護抵抗Rs=1kΩ経由で
+// GPIO39(ADC1_CH3)へ入れる(ADCピン直前にC1=0.1µF、Rs×C1のRCフィルタも兼ねる)。
+// R1/R2は当初100kΩ+100kΩだったが、ESP32 ADCの推奨ソースインピーダンス上限
+// (概ね10kΩ以下)に対しR1‖R2=50kΩは高すぎるとのレビュー指摘を受けて10kΩ+10kΩへ
+// 下げた(2026-09-28)。ADCが見る実効インピーダンスはR1‖R2+Rs=6kΩ。DC定常状態では
+// Rsに電流が流れないため分圧比(2:1)自体は変わらない。漏れ電流は3.65V/20kΩ≒183µA
+// (旧構成の10倍だが、ESP32本体の消費電流(数十〜数百mA)に対しては無視できる)。
 // ADC1系統にする理由: ADC2はWiFi使用中は使えない(ESP32既知の制約)。
 // GPIO39を選ぶ理由: 37/38は個体によってピンヘッダに出ていないため避け、34/35は
 // TTGO T-Display内蔵のJSTバッテリー回路・右ボタンで占有されている(未使用だが
@@ -100,7 +106,9 @@ static constexpr uint32_t kSpiClockHz = 8000000;  // 8MHz（ADXL355の上限10MH
 #ifdef NAMZ_BATTERY_ADC
 static constexpr int kPinBatteryAdc = 39;
 // 分圧比の逆数(ADCで読んだmVに掛けると分圧前の電池電圧mVに戻る)。
-// 100kΩ+100kΩの2:1分圧なので2.0。実機較正(テスターとの突き合わせ)前の仮値。
+// 10kΩ+10kΩの2:1分圧なので2.0(Rsは分圧比に影響しない、上記コメント参照)。
+// 実機較正(テスターとの突き合わせ)前の仮値——analogReadMilliVolts()がeFuse較正
+// 込みの値を返すが、個体差の残差は残るため最終的にはここも実測補正が要る。
 static constexpr float kBatteryDividerRatio = 2.0f;
 #endif
 
