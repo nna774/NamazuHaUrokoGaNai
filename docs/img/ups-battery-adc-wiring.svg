@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="sans-serif">
-  <rect x="0" y="0" width="900" height="560" fill="white"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" font-family="sans-serif">
+  <rect x="0" y="0" width="1200" height="560" fill="white"/>
 
-  <text x="450" y="28" text-anchor="middle" font-size="18" font-weight="bold" fill="black">
+  <text x="600" y="28" text-anchor="middle" font-size="18" font-weight="bold" fill="black">
     UPSバッテリー電圧分圧回路（LFUPSMA B+/B- → GPIO39, R1=R2=10kΩ, Rs=1kΩ, C1=0.1µF）
   </text>
-  <text x="450" y="48" text-anchor="middle" font-size="12" fill="#555">
+  <text x="600" y="48" text-anchor="middle" font-size="12" fill="#555">
     未実装・設計案（2026-09-28改訂。ソースインピーダンス低減+ADC入力保護のレビュー指摘を反映）
   </text>
 
@@ -92,7 +92,7 @@
   <text x="60" y="454" font-size="12" fill="#555">
     ・常時分圧のまま(有効/無効切替なし): 漏れ電流は3.65V/20kΩ≒183µA、1800mAhセルおよびESP32本体の消費電流(数十〜数百mA)に対し無視できる。
   </text>
-  <text x="450" y="530" text-anchor="middle" font-size="11" fill="#c0392b">
+  <text x="600" y="530" text-anchor="middle" font-size="11" fill="#c0392b">
     未検証: 実機での分圧比較正（テスターとADC読みの突き合わせ）が要る。analogReadMilliVolts()でeFuse較正込みの値を使うが個体差の残差は残る。docs/ups.md §4/§5参照。
   </text>
 </svg>
