@@ -1,6 +1,6 @@
 # terraform — AWSリソース
 
-S3(raw 90日/events 永久)・DynamoDB×4(events/devices/device_temp/quake_scan)・
+S3(raw 90日/events 永久)・DynamoDB×5(events/devices/device_temp/device_battery/quake_scan)・
 Lambda×5・S3→detect通知・EventBridge→watchdog/quake_scan定期起動・
 CloudFrontダッシュボード・IAM。
 

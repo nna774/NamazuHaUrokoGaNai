@@ -19,8 +19,8 @@ import boto3
 
 from batch_uplink import auth, devices, notify
 
-from common import (device_meta, device_temp, dynamo_update, events, metrics, ota_watch,
-                     s3util, watchdog_mute, wire)
+from common import (battery, device_meta, device_temp, dynamo_update, events, metrics,
+                     ota_watch, s3util, watchdog_mute, wire)
 from jismo.rounding import scale_ordinal
 
 s3 = boto3.client("s3")
@@ -144,6 +144,17 @@ def _handle_batch(raw: bytes, auth_device: str, headers: dict[str, str]):
             metrics.record_backlog(b.meta.device_id, int(spill_count_raw), int(ram_queued_raw))
         except Exception as e:  # noqa: BLE001
             print(f"metrics.record_backlog failed: {e!r}")
+
+    # UPSバッテリー電圧ヘッダ(X-Namz-Battery-Mv、docs/ups.md §5)をDynamoDBへ記録する。
+    # device_tempと同じ設計(共通common/battery.py)——CloudWatchカスタムメトリクスは
+    # 種別ごとに送信頻度非依存の固定費がかかるため撤回した。書き込みはバッチ受信のたび
+    # (device_tempと同じ頻度)で間引き不要、オンデマンドDynamoDBの従量費は無視できる。
+    battery_mv_raw = headers.get("x-namz-battery-mv", "")
+    if battery_mv_raw:
+        try:
+            battery.record(b.meta.device_id, b.meta.batch_start_us, int(battery_mv_raw))
+        except Exception as e:  # noqa: BLE001
+            print(f"battery.record failed: {e!r}")
 
     # リモート再起動要求・pull型OTA更新許可をレスポンスへ反映。上で取得したitemを使い回す
     # （このバッチ書き込みはpending_restart_requested_at_us/pending_ota_versionに触れない

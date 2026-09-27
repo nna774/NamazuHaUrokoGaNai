@@ -75,3 +75,29 @@ resource "aws_dynamodb_table" "device_temp" {
     enabled        = true
   }
 }
+
+# UPSバッテリー電圧の時系列。device_tempと同じ設計・同じ理由(lambda/common/battery.py)。
+# 当初CloudWatchカスタムメトリクスで実装したが、メトリクス種別ごとの固定費(送信頻度に
+# 依存しない)が種別を増やすたび積み上がるため撤回し、device_tempに倣ってDynamoDBへ
+# 寄せた(docs/log/2026-09-27-ups-battery-adc-design.md)。
+resource "aws_dynamodb_table" "device_battery" {
+  name         = "${local.name}-device-battery"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "device_id"
+  range_key    = "batch_start_us"
+
+  attribute {
+    name = "device_id"
+    type = "N"
+  }
+
+  attribute {
+    name = "batch_start_us"
+    type = "N"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+}
