@@ -18,6 +18,9 @@
 #include <esp_timer.h>
 #include <time.h>
 
+#ifdef NAMZ_BATTERY_ADC
+#include "Battery.h"
+#endif
 #include "Batch.h"
 #include "CoredumpQueue.h"
 #include "DeviceIdentity.h"
@@ -145,6 +148,14 @@ static constexpr const char* kRamQueuedHeader = "X-Namz-Ram-Queued";
 static char sSpillCountBuf[16];
 static char sRamQueuedBuf[16];
 
+#ifdef NAMZ_BATTERY_ADC
+// UPSバッテリー電圧[mV](分圧比込みで実電圧に戻した値、config.h kPinBatteryAdc/
+// kBatteryDividerRatio参照)。センサ値ではなく「今のデバイス状態」なのでheap/uptime
+// と同じくヘッダで運ぶ(docs/ups.md §5「テレメトリとして送るかどうか」への回答の一つ)。
+static constexpr const char* kBatteryMvHeader = "X-Namz-Battery-Mv";
+static char sBatteryMvBuf[16];
+#endif
+
 // 直前の再起動理由(esp_reset_reason())。WDT panic説（docs/log/2026-08-08-
 // wdt-panic-hypothesis.md）とヒープ枯渇説を実機データで切り分けるための可観測性。
 // 起動時に1回だけ確定し以後変わらない値だが、kExtraRequestHeaderValues[]の要素は
@@ -180,12 +191,20 @@ static const char* kExtraRequestHeaderNames[] = {kFwVersionHeader, kUptimeHeader
                                                   kHeapFreeHeader, kHeapMaxblockHeader,
                                                   kHeapMinfreeHeader,
                                                   kResetReasonHeader, kSpillCountHeader,
-                                                  kRamQueuedHeader, nullptr};
+                                                  kRamQueuedHeader,
+#ifdef NAMZ_BATTERY_ADC
+                                                  kBatteryMvHeader,
+#endif
+                                                  nullptr};
 static const char* kExtraRequestHeaderValues[] = {kFwVersion, sUptimeBuf,
                                                    sHeapFreeBuf, sHeapMaxblockBuf,
                                                    sHeapMinfreeBuf,
                                                    sResetReasonBuf, sSpillCountBuf,
-                                                   sRamQueuedBuf};
+                                                   sRamQueuedBuf,
+#ifdef NAMZ_BATTERY_ADC
+                                                   sBatteryMvBuf,
+#endif
+};
 
 // RTC memory（WDTパニック等のソフトリセットでは消えず、電源断でのみ消える）に
 // 「gUploader->pump()呼び出し直前の状態」を記録しておく診断用途。次回起動時に
@@ -715,6 +734,10 @@ static void uploaderTask(void*) {
     snprintf(sHeapMinfreeBuf, sizeof(sHeapMinfreeBuf), "%u", (unsigned)ESP.getMinFreeHeap());
     snprintf(sSpillCountBuf, sizeof(sSpillCountBuf), "%u", (unsigned)gUploader->spillCount());
     snprintf(sRamQueuedBuf, sizeof(sRamQueuedBuf), "%u", (unsigned)gUploader->ramQueued());
+#ifdef NAMZ_BATTERY_ADC
+    snprintf(sBatteryMvBuf, sizeof(sBatteryMvBuf), "%u",
+             (unsigned)battery::readMillivolts(kPinBatteryAdc, kBatteryDividerRatio));
+#endif
     gRtcPumpTrace.magic = kRtcPumpTraceMagic;
     gRtcPumpTrace.inFlight = true;
     gRtcPumpTrace.startedUs = timesync::isSynced() ? timesync::nowUs() : 0;
@@ -844,6 +867,9 @@ void setup() {
   loadDeviceIdentity(gIdentity);
   gDisplay.begin(gIdentity.deviceId);
   pinMode(kPinButtonFlip, INPUT_PULLUP);
+#ifdef NAMZ_BATTERY_ADC
+  battery::begin(kPinBatteryAdc);
+#endif
 
   gSpi.begin(kPinSck, kPinMiso, kPinMosi, kPinCsSensor);
   if (!gSensor.begin()) {

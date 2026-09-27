@@ -6,11 +6,12 @@ locals {
   dash_bucket = "${var.project}-dashboard-${data.aws_caller_identity.current.account_id}"
 
   lambda_env = {
-    NAMZ_BUCKET            = local.data_bucket
-    NAMZ_EVENTS_TABLE      = aws_dynamodb_table.events.name
-    NAMZ_DEVICES_TABLE     = aws_dynamodb_table.devices.name
-    NAMZ_DEVICE_TEMP_TABLE = aws_dynamodb_table.device_temp.name
-    NAMZ_QUAKE_SCAN_TABLE  = aws_dynamodb_table.quake_scan.name
+    NAMZ_BUCKET               = local.data_bucket
+    NAMZ_EVENTS_TABLE         = aws_dynamodb_table.events.name
+    NAMZ_DEVICES_TABLE        = aws_dynamodb_table.devices.name
+    NAMZ_DEVICE_TEMP_TABLE    = aws_dynamodb_table.device_temp.name
+    NAMZ_DEVICE_BATTERY_TABLE = aws_dynamodb_table.device_battery.name
+    NAMZ_QUAKE_SCAN_TABLE     = aws_dynamodb_table.quake_scan.name
     # online/offline の境目。api の /devices と watchdog の欠測判定で揃える。
     NAMZ_OFFLINE_AFTER_S = tostring(var.offline_after_seconds)
     # データ遅延の警告値。watchdog の遅延判定と api の /devices（ダッシュボードの

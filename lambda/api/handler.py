@@ -8,6 +8,7 @@ Lambda Function URL (payload v2.0)。
       &from=<us>&to=<to>          任意。保存済み波形からこの区間だけ切り出して返す
                                   （ダッシュボードのズームが狭い区間のrawを取り直す用）
 - GET /devices/<id>/temp?hours=<n> センサ内蔵温度の時系列（デバイス詳細ページ用）
+- GET /devices/<id>/battery?hours=<n> UPSバッテリー電圧の時系列（デバイス詳細ページ用）
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import numpy as np
 
 from batch_uplink import devices
 
-from common import device_temp, events, metrics, s3util, store, watchdog_mute, wire
+from common import battery, device_temp, events, metrics, s3util, store, watchdog_mute, wire
 from jismo.rounding import intensity_scale
 
 s3 = boto3.client("s3")
@@ -45,6 +46,9 @@ MAX_RECENT_MINUTES = 30.0
 # S3スキャンほど窓を絞る必要はないが、上限はUIの選択肢(24時間)に合わせて置いておく。
 MAX_TEMP_HOURS = 24.0
 MAX_TEMP_POINTS = 300
+# /devices/<id>/battery も同じ理由・同じ値（device_tempと同型のDynamoDB Query）。
+MAX_BATTERY_HOURS = 24.0
+MAX_BATTERY_POINTS = 300
 # クラウド確定済み(meta.json あり)イベントのCloudFrontキャッシュ秒数。
 # 波形は書き込み後不変なので実質半永久(1年)にしてよい。note/checked等の手動編集
 # (flag_event.py)を反映させたい時は、待つのではなく手元で
@@ -90,6 +94,9 @@ def handler(event, context):
         m = re.search(r"/devices/(\d{1,10})/temp$", path)  # 個別デバイスの温度（より具体的な方を先に）
         if m:
             return _device_temp(int(m.group(1)), q)
+        m = re.search(r"/devices/(\d{1,10})/battery$", path)
+        if m:
+            return _device_battery(int(m.group(1)), q)
         m = re.search(r"/devices/(\d{1,10})$", path)
         if m:
             return _device(int(m.group(1)))
@@ -381,6 +388,21 @@ def _device_temp(device_id: int, q):
     # （校正値ではないので絶対値は当てにならない。ドリフトの相対変化用）。
     points = [{"t": int(it["batch_start_us"]), "raw": int(it["raw"]),
               "c": wire.temp_c_for(int(it["sensor_type"]), int(it["raw"]))} for it in items]
+    return _json(200, {"device_id": device_id, "hours": hours, "points": points})
+
+
+def _device_battery(device_id: int, q):
+    try:
+        hours = float(q.get("hours", "6"))
+    except (TypeError, ValueError):
+        hours = 6.0
+    if not math.isfinite(hours):
+        hours = 6.0
+    hours = max(0.1, min(hours, MAX_BATTERY_HOURS))  # 巨大値によるDynamoDB Query暴走を防ぐ
+    end_us = int(time.time() * 1e6)
+    start_us = int(end_us - hours * 3600 * 1e6)
+    items = battery.query_range(device_id, start_us, end_us, max_points=MAX_BATTERY_POINTS)
+    points = [{"t": int(it["batch_start_us"]), "mv": int(it["battery_mv"])} for it in items]
     return _json(200, {"device_id": device_id, "hours": hours, "points": points})
 
 

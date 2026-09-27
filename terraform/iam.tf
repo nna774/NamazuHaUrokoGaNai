@@ -51,6 +51,7 @@ data "aws_iam_policy_document" "lambda" {
       aws_dynamodb_table.events.arn,
       aws_dynamodb_table.devices.arn,
       aws_dynamodb_table.device_temp.arn,
+      aws_dynamodb_table.device_battery.arn,
       aws_dynamodb_table.quake_scan.arn,
     ]
   }
