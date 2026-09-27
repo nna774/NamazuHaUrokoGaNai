@@ -1,6 +1,6 @@
 # 検出限界の目安表（自動生成）
 
-`tools/detection_range.py`で`tools/detection_events.csv`（38件、うちgood=13件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
+`tools/detection_range.py`で`tools/detection_events.csv`（39件、うちgood=13件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
 
 回帰式（verdict=good のみでフィット）: `log10(震源距離[km]) = 1.2466 + 0.2364 * M`
 
@@ -37,6 +37,7 @@
 | `fukushima-aizu-m3.5` | 福島県会津 | 2026-09-03 | 3.5 | 53km | good | 0.45 |
 | `fukushima-aizu-m3.2` | 福島県会津 | 2026-09-10 | 3.2 | 53km | warning | 0.53 |
 | `tochigi-hokubu-m2.7-1721` | 栃木県北部 | 2026-09-16 | 2.7 | 54km | critical | 0.71 |
+| `aizu-fukushima-m2.9-0846` | 福島県会津 | 2026-09-25 | 2.9 | 74km | critical | 0.86 |
 | `toyama-tobu-m2.9` | 富山県東部 | 2026-09-13 | 2.9 | 123km | critical | 1.44 |
 | `ibaraki-nanbu-m3.8-1534` | 茨城県南部 | 2026-09-22 | 3.8 | 139km | good | 1.00 |
 | `ibaraki-nanbu-m3.4` | 茨城県南部 | 2026-08-26 | 3.4 | 143km | warning | 1.27 |
