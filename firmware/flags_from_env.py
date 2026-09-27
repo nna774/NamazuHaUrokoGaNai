@@ -22,6 +22,10 @@ TOGGLES = {
         "常時spill化。バッチのenqueue()直後にflushToSpill()を呼び、組み立て完了〜"
         "送信成功までRAM上にしか無い区間を無くす(docs/design.md「送信の信頼性」)。"
     ),
+    "NAMZ_BATTERY_ADC": (
+        "UPSバッテリー電圧のADC読み取りを有効化。GPIO39分圧経由(docs/img/"
+        "ups-battery-adc-wiring.svg)。実機配線がある機体(device2)でのみ有効化すること。"
+    ),
 }
 
 
