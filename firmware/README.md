@@ -116,6 +116,18 @@ pio run -e pmw3901-bringup-c3 -t upload && pio device monitor
 pio run -e pmw3360-bringup-c3 -t upload && pio device monitor
 ```
 
+### UPSバッテリー電圧ADCの机上確認（[docs/ups.md](../docs/ups.md) §4/§5）
+
+同じく本線とは無関係の使い捨てブリングアップ(`battery_main.cpp`)。ただし他の
+ブリングアップと違い、main.cppが実際に使う`Battery.h`/`config.h`をそのまま呼ぶ
+（別ロジックを書くと検証の意味が薄れるため）。device2の運用中セルに触れる前に、
+docs/ups.md §2で温存している予備の18650(LiFePO4)と検証機(無印ESP32)へ仮組みした
+分圧回路(docs/img/ups-battery-adc-wiring.svg)で確認する想定。
+
+```bash
+pio run -e battery-bringup -t upload && pio device monitor
+```
+
 ### OTA更新（USBを繋がず無線で焼く）
 
 詳細は [docs/ota.md](../docs/ota.md)。HTTPSプル型（デバイスが自分で取得しにいく）。
