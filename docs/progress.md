@@ -5,6 +5,7 @@
 
 | 日付 | 何が決まったか | 詳細 |
 |---|---|---|
+| 2026-10-01 | **地震候補スキャンの閾値、2回目の定期見直し（n=6→n=13）でも3値とも現状維持と判断した。** 前回(09-12)からの新規「遠すぎ」ゾーン該当7件はすべて`critical`で成功例は増えず、`FAR_BUT_NOTABLE_MAG`(M≥4.0)を動かす根拠は無し。窓28時間・失敗検知32時間もDynamoDB `_state`で連日成功・停滞通知ゼロを確認し維持。コード内コメント・Lambdaのリマインド文言のn数も更新 | [log/2026-10-01-quake-scan-threshold-review.md](log/2026-10-01-quake-scan-threshold-review.md) |
 | 2026-09-28 | **福島県会津M2.9(16:24・震源距離73km・境界帯)を事後解析し「完全埋没(critical)」と判定した。** 3日前(09-25 08:46)の同震央M2.9と同じ結果。標準・低帯域xyともSNRが終始0.9〜1.2台でノイズと無区別、低帯域xyでdevice2のみSTA/LTA閾値超過(4.27)したが対応する機間相関が背景以下で孤立ノイズと判断。`0001/0002-59686008`で手動イベント化・相互リンク済み | [log/2026-09-28-aizu-fukushima-m2.9-1624-post-hoc-detection.md](log/2026-09-28-aizu-fukushima-m2.9-1624-post-hoc-detection.md) |
 | 2026-09-29 | **茨城県南部M4.9(04:45・震源距離143km・最大震度4)を事後解析し「good(確定検知)」と確認した。** 両機とも速報・確定報が自動で完走済み(確定震度1.2/1.2)。`related_events`が空だったため`0001/0002-59687491`を相互リンクし、既に発報済みの書き換えのためCloudFront invalidationも実施。保存範囲終端(onset+93秒)付近で機間直線性一致度が背景水準まで下がっていることを確認し延長は不要と判断 | [log/2026-09-29-ibaraki-nanbu-m4.9-0445-post-hoc-detection.md](log/2026-09-29-ibaraki-nanbu-m4.9-0445-post-hoc-detection.md) |
 | 2026-09-25 | **福島県会津M2.9(08:46・震源距離74km・境界帯)を事後解析し「完全埋没(critical)」と判定した。** 標準・低帯域xyともP窓/S窓/コーダ想定域SNRが終始0.9〜1.0台でノイズと無区別。低帯域xyでdevice1のみSTA/LTA閾値超過(4.26)したが、onset候補が到達窓から大きく外れた孤立ピークで対応する機間相関も背景水準と判明し却下。`0001/0002-59676452`で手動イベント化・相互リンク・detection_events.csv追記・detection_range.md再生成済み | [log/2026-09-25-aizu-fukushima-m2.9-0846-post-hoc-detection.md](log/2026-09-25-aizu-fukushima-m2.9-0846-post-hoc-detection.md) |
