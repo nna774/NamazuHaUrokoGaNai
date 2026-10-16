@@ -271,6 +271,15 @@
   0.21)、閾値超過ピークは到達と無関係な時刻の孤立ピーク。**微妙／要検討（warning）**
   （詳細・図:
   [log/2026-10-08-ibaraki-hokubu-m4-0714-post-hoc-detection.md](log/2026-10-08-ibaraki-hokubu-m4-0714-post-hoc-detection.md)）。
+- **2026-10-16 12:35 カムチャツカ半島付近 M6.9 深さ160km（震源距離2131km、記録中最遠・最深）**:
+  熊本地震(870km)・浦河沖M6.0(645km)を大きく超える最遠記録。標準設定（3軸・1-10Hz）のみで、
+  低帯域を試す前に両機ともSTA/LTAが発生+297〜298秒の1〜2秒窓で同時に閾値4を超過
+  （device1=4.92・device2=6.10）、直線性も同時に0.6台まで上昇、機間相関もそのbinだけ
+  背景(frac0.14)の5倍以上(frac0.76)に跳ねた。P窓・S窓単位の平均SNRは窓(82秒)に対し過渡が
+  数秒と短く「微妙」止まりだが、瞬間一致の根拠は明瞭。**probable detection（good、弱め）**。
+  マグニチュード・深さが十分大きければ、`detection_range.md`の回帰表（M7.5=984kmまで）を
+  2倍以上超える距離でも検出できることを示す外挿域の実例になった（詳細・図:
+  [log/2026-10-16-kamchatka-oki-m6.9-post-hoc-detection.md](log/2026-10-16-kamchatka-oki-m6.9-post-hoc-detection.md)）。
 
 ## 実務結論
 
