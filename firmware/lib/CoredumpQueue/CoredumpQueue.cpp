@@ -67,7 +67,7 @@ void sortNames(String* names, size_t count) {
 
 }  // namespace
 
-void captureIfPresent(const char* queueDir, size_t maxQueuedFiles) {
+void captureIfPresent(const char* queueDir, size_t maxQueuedFiles, uint64_t crashAtUs) {
   // LittleFSは今回コアダンプが見つかるかどうかに関わらず必ずマウントする。
   // 以前は「見つかった時だけ」begin()していたため、今回何も見つからない
   // (=早期return)起動ではLittleFSが一切マウントされず、後段のdrainToCloud()が
@@ -94,7 +94,12 @@ void captureIfPresent(const char* queueDir, size_t maxQueuedFiles) {
 
   uint32_t seq = nextSequence();
   char path[80];
-  snprintf(path, sizeof(path), "%s/%010lu.bin", queueDir, (unsigned long)seq);
+  if (crashAtUs > 0) {
+    snprintf(path, sizeof(path), "%s/%010lu-%llu.bin", queueDir, (unsigned long)seq,
+             (unsigned long long)crashAtUs);
+  } else {
+    snprintf(path, sizeof(path), "%s/%010lu.bin", queueDir, (unsigned long)seq);
+  }
 
   File out = LittleFS.open(path, "w");
   if (!out) {
@@ -218,6 +223,13 @@ void drainToCloud(const char* queueDir, const char* ingestUrl, const char* hmacS
     http.addHeader("X-Namz-Signature", sig.c_str());
     http.addHeader("X-Namz-Fw-Version", fwVersion);
     http.addHeader("Content-Type", "application/octet-stream");
+    // ファイル名は"<seq10桁>[-<crash_at_us>].bin"
+    char crashAtBuf[24];
+    if (names[i].length() > 11 && names[i][10] == '-') {
+      snprintf(crashAtBuf, sizeof(crashAtBuf), "%llu",
+               (unsigned long long)strtoull(names[i].c_str() + 11, nullptr, 10));
+      http.addHeader("X-Namz-Crash-At-Us", crashAtBuf);
+    }
     if (extraHeaderName != nullptr && extraHeaderValue != nullptr) {
       http.addHeader(extraHeaderName, extraHeaderValue);
     }

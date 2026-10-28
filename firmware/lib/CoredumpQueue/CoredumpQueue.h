@@ -30,7 +30,9 @@ namespace coredumpqueue {
 // LittleFS自体のマウント(LittleFS.begin(true))もここで行う
 // （現状Uploader::begin()が唯一のマウント元だったが、それより早く動く必要が
 // あるため独立して呼ぶ。二重mount自体は無害な想定——実機で確認すること）。
-void captureIfPresent(const char* queueDir, size_t maxQueuedFiles);
+// crashAtUs: クラッシュ直前に生きていた壁時計[us]（不明なら0）。ファイル名に
+// 埋めて持ち回り、drainToCloud()が X-Namz-Crash-At-Us として送る。
+void captureIfPresent(const char* queueDir, size_t maxQueuedFiles, uint64_t crashAtUs = 0);
 
 // WiFi接続後、gUploader生成より前に1回呼ぶ。queueDir内のファイルを古い順に
 // 1件ずつ ingestUrl + "/coredump" へPOSTし、200系が返ったものだけ削除する。
