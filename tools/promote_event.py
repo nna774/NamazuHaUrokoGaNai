@@ -2,7 +2,7 @@
 """raw/ の一部を手動でイベント化(昇格)して永久保存する手元用CLI。
 
 自動検知(detect)の閾値に満たない弱い揺れや、あとで振り返りたい時間帯を、raw の保持期限
-(90日)で消える前に events/ へ退避する。`manual` フラグが立ち、ダッシュボード一覧の
+(60日)で消える前に events/ へ退避する。`manual` フラグが立ち、ダッシュボード一覧の
 既定にも出る（確定と同格の扱い）。震度は保存区間から計測震度を計算して記録する。
 
 書き込み系なので、api(参照専用)ではなく手元からAWS認証情報で S3/DynamoDB を直接操作する
@@ -128,7 +128,7 @@ def main(argv=None) -> int:
             if (bs := _batch_start_of(k)) is not None
             and start_us - 30_000_000 <= bs <= end_us]
     if not keys:
-        raise SystemExit("該当する raw バッチが無い。時刻・保持期限(90日)・バケットを確認しろ")
+        raise SystemExit("該当する raw バッチが無い。時刻・保持期限(60日)・バケットを確認しろ")
     device_id = args.device if args.device is not None else _device_of(keys[0])
     if device_id is None:
         raise SystemExit("デバイスIDを推定できない。--device で指定しろ")
