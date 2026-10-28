@@ -32,5 +32,12 @@ GPIO5/6は3.3V・GND(基板の反対側の辺)から遠く配線が長くなる�
 （ESP32-C3のI2Cは任意のGPIOに割り当てられる。避けるのはストラップのGPIO2・BOOTのGPIO9）。
 `mlx90393_main.cpp`のピン番号を`-DMLX90393_SDA_PIN`/`-DMLX90393_SCL_PIN`で上書きできるようにし、
 `[env:mlx90393-bringup-c3-gpio34]`（SDA=GPIO3、SCL=GPIO4）を足した。既定(5/6)は変えていない。
-この作業用Macではコンパイルを確認できなかった(arm64でRosettaが無く、インストール済みの`toolchain-riscv32-esp`がx86_64版で
-`Bad CPU type in executable`になる。コード側のエラーではない)。配線図(svg)はGPIO5/6のまま。
+この作業用Mac(arm64・Rosettaなし)では公式`espressif32@7.0.1`のままだとビルドできない
+(`toolchain-riscv32-esp`(8.4.0+2021r2)がx86_64版のみで`Bad CPU type in executable`。xtensa側はarm64ネイティブ)。
+そのため`[env:mlx90393-bringup-c3-gpio34]`だけは`platform`をpioarduino版(55.03.311、arm64ネイティブのC3 toolchain)に
+明示pinした。`pio run -e mlx90393-bringup-c3-gpio34`はSUCCESS(Flash 33.1%)で、コンパイルコマンドに
+`-DMLX90393_SDA_PIN=3 -DMLX90393_SCL_PIN=4`が入っていることも確認した。既存の`mlx90393-bringup-c3`は公式pinのまま。
+実機への書き込み・動作(status=0x00)は未確認。
+
+注意: pioarduino版でビルドすると、追跡対象の`firmware/certs/amazon_root_ca1.pem.piobkp`が消える
+（`board_build.embed_txtfiles`の処理の副作用とみられる）。`git checkout -- firmware/certs/`で戻すこと。
