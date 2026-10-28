@@ -62,6 +62,9 @@ python event_summary.py --from "2026-10-29 00:07:30" --to "2026-10-29 00:14:00" 
 python mag_check.py --port /dev/cu.usbmodem101 --seconds 60 --save cap.csv --out mag.png   # 回しながら取る
 python mag_check.py --csv cap.csv                                                         # 取ったCSVを解析し直す
 
+# WiFiを動かした窓とOFFの窓でMLX90393の出力がどれだけ違うか(firmwareのmlx90393-wifitest-c3-gpio34)
+python mag_wifi_effect.py --port /dev/cu.usbmodem1101 --seconds 420 --save wifi.csv
+
 # 確定イベントに人工地震（テスト等）フラグを立てる/降ろす（DynamoDBを直接更新）
 export NAMZ_EVENTS_TABLE=namz-events   # or --table
 python flag_event.py mark   0001-59462454        # このイベントを人工地震に
