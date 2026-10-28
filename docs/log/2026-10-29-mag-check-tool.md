@@ -25,3 +25,12 @@
   ピンを切る・消磁・別個体を検討する（issue #250）。
 
 テストは`tools/tests/test_mag_check.py`（合成データでフィット・網羅度・ドリフトを検証）。
+
+## 追記: C3の配線をGPIO3/4に寄せられるようにした
+
+GPIO5/6は3.3V・GND(基板の反対側の辺)から遠く配線が長くなるため、同じ辺にあるGPIO3/4で使えるようにした
+（ESP32-C3のI2Cは任意のGPIOに割り当てられる。避けるのはストラップのGPIO2・BOOTのGPIO9）。
+`mlx90393_main.cpp`のピン番号を`-DMLX90393_SDA_PIN`/`-DMLX90393_SCL_PIN`で上書きできるようにし、
+`[env:mlx90393-bringup-c3-gpio34]`（SDA=GPIO3、SCL=GPIO4）を足した。既定(5/6)は変えていない。
+この作業用Macではコンパイルを確認できなかった(arm64でRosettaが無く、インストール済みの`toolchain-riscv32-esp`がx86_64版で
+`Bad CPU type in executable`になる。コード側のエラーではない)。配線図(svg)はGPIO5/6のまま。

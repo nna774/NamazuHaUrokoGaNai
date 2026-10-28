@@ -14,6 +14,8 @@
 //   無印ESP32 DevKit: SDA -> GPIO21, SCL -> GPIO22 (ESP32既定のWireピン)
 //   ESP32-C3 SuperMini: SDA -> GPIO5, SCL -> GPIO6（GPIO2/GPIO9(ストラップ・BOOT)を
 //     避けた空きピン、チップ仕様なので基板差の影響を受けない）。
+//     3.3V/GND側の辺に寄せたい時は[env:mlx90393-bringup-c3-gpio34]: SDA -> GPIO3, SCL -> GPIO4
+//     （GPIO0〜4はこの辺。GPIO2はストラップなので避ける。図解のSDA/SCLをGPIO3/4へ読み替える）
 //     図解: docs/img/mlx90393-esp32c3-wiring.svg（SS49Eと同じ実機、2026-08-27に
 //     写真で確認済みの実物ピン配置。SDA/SCLは基板の反対側の辺にあるため配線が
 //     長くなる点に注意）
@@ -28,13 +30,19 @@
 namespace {
 MLX90393 sensor;
 constexpr uint32_t kSampleIntervalMs = 20;  // ~50Hz。OSR/DIGFILT既定値での実効変換時間に合わせて後で調整
+// ピン番号はビルドフラグ -DMLX90393_SDA_PIN=n -DMLX90393_SCL_PIN=n で上書きできる
+// （C3 SuperMiniで3.3V/GND側の辺にあるGPIO3/4へ寄せる[env:mlx90393-bringup-c3-gpio34]用）。
+#ifndef MLX90393_SDA_PIN
 #ifdef CONFIG_IDF_TARGET_ESP32C3
-constexpr int kSdaPin = 5;
-constexpr int kSclPin = 6;
+#define MLX90393_SDA_PIN 5
+#define MLX90393_SCL_PIN 6
 #else
-constexpr int kSdaPin = 21;
-constexpr int kSclPin = 22;
+#define MLX90393_SDA_PIN 21
+#define MLX90393_SCL_PIN 22
 #endif
+#endif
+constexpr int kSdaPin = MLX90393_SDA_PIN;
+constexpr int kSclPin = MLX90393_SCL_PIN;
 }  // namespace
 
 void setup() {
