@@ -362,6 +362,13 @@ LittleFS(`/coredump/`、保持`kMaxCoredumpFiles`件のリングバッファ)へ
 [log/2026-08-29-coredump-auto-upload-design-continued.md](log/2026-08-29-coredump-auto-upload-design-continued.md)、
 実装の詳細は[log/2026-08-30-coredump-auto-upload-implementation-wrapup.md](log/2026-08-30-coredump-auto-upload-implementation-wrapup.md)参照。
 
+S3キー・通知の「回収時刻」は受信時刻で、回線が詰まっている間は送れずキューに溜まる
+ためクラッシュ時刻と一致しない。クラッシュ直前の壁時計はRTC memoryの
+`gRtcLastAlive`(uploaderTaskが毎周更新)から取り、`captureIfPresent()`がファイル名
+`<seq>-<crash_at_us>.bin`に埋め、`drainToCloud()`が`X-Namz-Crash-At-Us`で送る。
+ingestは通知の「クラッシュ推定時刻」とS3オブジェクトメタデータ`crash-at-us`にする
+([log/2026-10-28-coredump-crash-time.md](log/2026-10-28-coredump-crash-time.md))。
+
 ## 時刻同期
 
 - esp_sntp で起動時 + 定期同期。測定中に時刻が飛ばないよう slew 調整（`sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH)`）

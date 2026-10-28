@@ -220,6 +220,14 @@ def _handle_alert(raw: bytes, auth_device: str):
     return _resp(200, "alert ok")
 
 
+def _parse_crash_at_us(raw: str | None) -> int:
+    """X-Namz-Crash-At-Usを整数[us]にする。無い・壊れている場合は0(不明)。"""
+    try:
+        return max(int(raw), 0) if raw else 0
+    except ValueError:
+        return 0
+
+
 def _format_pump_trace(raw_header: str) -> str:
     """X-Namz-Pump-Traceヘッダ(`k=v;k=v;...`)を人が読める1行に整形する。
     ファームのRtcPumpTrace(RTC memory、WDTパニック等のソフトリセットでは消えない)を
@@ -251,11 +259,21 @@ def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
     fw_version = headers.get("x-namz-fw-version", "unknown")
     uploaded_at_us = int(time.time() * 1e6)
     key = s3util.coredump_key(device_id, fw_version, uploaded_at_us)
-    s3.put_object(Bucket=BUCKET, Key=key, Body=raw, ContentType="application/octet-stream")
+    # 回線が詰まっている間は送れずキューに溜まるので、回収時刻はクラッシュ時刻と
+    # 一致しない。クラッシュ直前の最終生存時刻はファームがヘッダで運んでくる。
+    crash_at_us = _parse_crash_at_us(headers.get("x-namz-crash-at-us"))
+    put_kwargs = {"Metadata": {"crash-at-us": str(crash_at_us)}} if crash_at_us else {}
+    s3.put_object(Bucket=BUCKET, Key=key, Body=raw, ContentType="application/octet-stream",
+                  **put_kwargs)
 
-    # ファームは起動直後・WiFi接続後すぐアップロードするので、回収時刻は
-    # 再起動（≒クラッシュ発生）時刻とほぼ同一とみなせる。
     collected_at = dt.datetime.fromtimestamp(uploaded_at_us / 1e6, JST).strftime("%Y-%m-%d %H:%M:%S JST")
+
+    crash_at_line = (
+        "\n*クラッシュ推定時刻*: "
+        + dt.datetime.fromtimestamp(crash_at_us / 1e6, JST).strftime("%Y-%m-%d %H:%M:%S JST")
+        if crash_at_us
+        else ""
+    )
 
     # pump()呼び出し前後で詰まっていたか(ファームのRtcPumpTrace、RTC memory由来)。
     # 前回起動がgUploader->pump()の途中で終わった時だけファームが付ける
@@ -276,7 +294,8 @@ def _handle_coredump(raw: bytes, auth_device: str, headers: dict[str, str]):
             "コアダンプを回収した",
             f"{SLACK_MENTION}device *{device_id:04d}* (fw={fw_version}) の起動時にコアダンプが"
             "見つかり、S3へ保存した。再起動原因の調査に使える。\n"
-            f"*回収時刻*: {collected_at}\n"
+            f"*回収時刻*: {collected_at}"
+            f"{crash_at_line}\n"
             f"*S3キー*: {key}"
             f"{pump_trace_line}",
         )

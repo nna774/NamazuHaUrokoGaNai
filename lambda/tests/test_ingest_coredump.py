@@ -82,6 +82,32 @@ def test_handle_coredump_includes_pump_trace_when_header_present(fake_s3, monkey
     assert "2026-09-15" in text  # started_usをJSTへ変換した日付
 
 
+def test_handle_coredump_reports_crash_time_separately_from_collected_time(fake_s3, monkeypatch):
+    notifier = FakeNotifier()
+    monkeypatch.setattr(ingest.notify, "from_env", lambda: notifier)
+
+    ingest._handle_coredump(
+        b"\x7fELFdummy",
+        "2",
+        {"x-namz-fw-version": "841b98f", "x-namz-crash-at-us": "1793191400000000"},
+    )
+
+    _title, text, _fields = notifier.calls[0]
+    assert "*クラッシュ推定時刻*: 2026-10-28 21:43:20 JST" in text
+    assert fake_s3.puts[0]["Metadata"] == {"crash-at-us": "1793191400000000"}
+
+
+def test_handle_coredump_omits_crash_time_when_header_absent_or_broken(fake_s3, monkeypatch):
+    notifier = FakeNotifier()
+    monkeypatch.setattr(ingest.notify, "from_env", lambda: notifier)
+
+    ingest._handle_coredump(b"x", "2", {"x-namz-fw-version": "a"})
+    ingest._handle_coredump(b"x", "2", {"x-namz-fw-version": "a", "x-namz-crash-at-us": "zzz"})
+
+    assert all("クラッシュ推定時刻" not in call[1] for call in notifier.calls)
+    assert all("Metadata" not in put for put in fake_s3.puts)
+
+
 def test_handle_coredump_omits_pump_trace_when_header_absent(fake_s3, monkeypatch):
     notifier = FakeNotifier()
     monkeypatch.setattr(ingest.notify, "from_env", lambda: notifier)
