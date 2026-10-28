@@ -214,18 +214,37 @@ def plot(d: np.ndarray, res: dict, out: str) -> None:
     fig.savefig(out, dpi=110)
 
 
-def capture(port: str, baud: int, seconds: float) -> list[str]:
+def capture(port: str, baud: int, seconds: float, save: str | None = None) -> list[str]:
+    """シリアルから`seconds`秒取る。`save`があれば1行ごとに追記・flushする(長時間でも途中で落ちて消えない)。
+
+    USBが一瞬切れたり、Macのスリープ復帰でポートが閉じても、2秒待って開き直して続ける。
+    """
     try:
         import serial
     except ImportError:
         raise SystemExit("pyserial が要る: pip install pyserial")
     lines: list[str] = []
-    with serial.Serial(port, baud, timeout=1) as ser:
-        end = time.time() + seconds
+    fh = open(save, "w") if save else None
+    end = time.time() + seconds
+    reopen = 0
+    try:
         while time.time() < end:
-            ln = ser.readline().decode("utf-8", "replace")
-            if ln:
-                lines.append(ln)
+            try:
+                with serial.Serial(port, baud, timeout=1) as ser:
+                    while time.time() < end:
+                        ln = ser.readline().decode("utf-8", "replace")
+                        if ln:
+                            lines.append(ln)
+                            if fh:
+                                fh.write(ln)
+                                fh.flush()
+            except (serial.SerialException, OSError) as exc:
+                reopen += 1
+                print(f"# シリアルが切れた({type(exc).__name__}) 2秒後に開き直す [{reopen}回目]", file=sys.stderr)
+                time.sleep(2)
+    finally:
+        if fh:
+            fh.close()
     return lines
 
 
@@ -244,10 +263,7 @@ def main() -> int:
             lines = fh.readlines()
     else:
         print(f"# {args.port} から {args.seconds:g}秒取る。センサを動かしながら待て…", file=sys.stderr)
-        lines = capture(args.port, args.baud, args.seconds)
-        if args.save:
-            with open(args.save, "w") as fh:
-                fh.writelines(lines)
+        lines = capture(args.port, args.baud, args.seconds, args.save)
     d = parse_csv(lines)
     if len(d) < 20:
         raise SystemExit(f"有効なサンプルが少ない({len(d)}件)。statusが0x00以外・配線・ポートを確認しろ。")
