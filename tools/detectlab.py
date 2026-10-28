@@ -464,7 +464,8 @@ def plot(data, band, fs, start_us, ratio, thr, onsets, band_lo, band_hi,
 
 
 def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, precomputed_corr=None,
-                 window_reports=None, intensity_by_dev=None, intensity_step=0.5):
+                 window_reports=None, intensity_by_dev=None, intensity_step=0.5,
+                 origin_label="発生時刻"):
     """複数デバイスのSTA/LTA・直線性を同一時間軸に重ねて描く。
 
     生波形やスペクトログラムは軸の向きが機体ごとに違い重ねる意味が無いので出さない
@@ -581,7 +582,7 @@ def plot_overlay(per_device, thr, arrivals, ref_us, out, show, corr_win=2.0, pre
     axs[1].set_title("直線性 重ね描き（1=直線偏光≒地震の実体波 / 0.5前後=等方ノイズ）",
                      fontsize=9, loc="left")
     ref_dt = datetime.fromtimestamp(ref_us / 1e6, JST)
-    ref_note = "発生時刻" if arrivals else "先頭デバイス窓頭"
+    ref_note = origin_label if arrivals else "先頭デバイス窓頭"
     xlabel = f"t [s]  （{ref_note} {ref_dt:%Y-%m-%d %H:%M:%S} JST からの経過）"
     axs[-1].set_xlabel(xlabel)
 
@@ -699,6 +700,9 @@ def main() -> int:
                         "（z軸の低周波ノイズが大きい時、遠地弱震で有利）")
     p.add_argument("--eew", help='震源で答え合わせ。"緯度,経度,深さkm,発生時刻(JST)" '
                    '例 "37.7,141.7,60,2026-07-24 20:52:59"。P/S到達窓を重ね描き＋SNR/直線性を出す')
+    p.add_argument("--eew-estimated", action="store_true",
+                   help="--eewの時刻が公表値でなく到達からの逆算(推定)の時、重ね描き図の"
+                        "ラベルを「発生時刻」でなく「推定時刻」にする")
     p.add_argument("--station", help='観測点座標 "lat,lon"（既定は NAMZ_STATION_LATLON / 湯沢町）')
     p.add_argument("--device", type=int, nargs="+", default=[1],
                    help="デバイスID（--at 系で必須。既定1）。混ぜて読むと継ぎ目の段差が揺れに"
@@ -735,6 +739,7 @@ def main() -> int:
     # --eew の到達予測窓は全デバイス共通（同一地点に複数機を置く前提。EEWパースも1回でよい）。
     arrivals: list[tuple[str, int, int, str]] = []
     origin_us = None
+    origin_label = "推定時刻" if args.eew_estimated else "発生時刻"
     if args.eew:
         eq_lat, eq_lon, depth, origin_us = parse_eew(args.eew)
         st_lat, st_lon = parse_station(args.station)
@@ -848,7 +853,8 @@ def main() -> int:
                     show=args.show or not args.out, corr_win=args.corr_win,
                     precomputed_corr=precomputed_corr, window_reports=window_reports,
                     intensity_by_dev=intensity_by_dev if args.intensity else None,
-                    intensity_step=args.intensity_step)
+                    intensity_step=args.intensity_step,
+                     origin_label=origin_label)
         return 0
     else:
         device_id = args.device[0]
@@ -881,7 +887,8 @@ def main() -> int:
                         show=args.show or not args.out, corr_win=args.corr_win,
                         precomputed_corr=precomputed_corr, window_reports=window_reports,
                         intensity_by_dev=intensity_by_dev if args.intensity else None,
-                        intensity_step=args.intensity_step)
+                        intensity_step=args.intensity_step,
+                     origin_label=origin_label)
             return 0
 
         data, start_us, fs = load_s3_window(resolve_bucket(args.bucket), end_us, seconds,
