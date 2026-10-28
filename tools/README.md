@@ -167,7 +167,7 @@ python flag_event.py unverdict 0001-59616930                       # 消す
 `promote_event.py` にも `--verdict` があり、昇格と同時に付けられる。
 
 `promote_event.py` は、自動検知に満たない弱い揺れや振り返りたい時間帯を、raw の保持期限
-（90日）で消える前に手動で events/ へ昇格（永久保存）する。`manual` フラグが立ち、一覧の
+（60日）で消える前に手動で events/ へ昇格（永久保存）する。`manual` フラグが立ち、一覧の
 既定にも確定と同格で出る。保存区間から計測震度も計算して記録する。
 
 ```bash
