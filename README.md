@@ -15,7 +15,7 @@ Qiita記事「地震観測用加速度センサ5種の性能比較」
                       └─ 送信タスク(Core0): 30秒バッチPOST / NTP / ローカル退避・バックフィル
                             │ HTTPS (Lambda Function URL, HMAC認証)
                             v
-[ingest Lambda] ─→ S3 raw/YYYY/MM/DD/HH/*.bin  (90日でexpire)
+[ingest Lambda] ─→ S3 raw/YYYY/MM/DD/HH/*.bin  (60日でexpire)
        │            └─→ DynamoDB devices（最終受信を記録＝生存台帳）
        │ (非同期起動)
        v
