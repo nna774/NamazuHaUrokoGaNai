@@ -54,6 +54,10 @@ python scan_quakes.py --days 7 --all     # 直近7日、近すぎ(ほぼ確実�
 # 同地域の検出済み地震をテンプレートにした補助判定(位相ランダム化テンプレートとのz値。感度は低い)
 python template_match.py --template-at "2026-10-08 04:14:22" --target "2026-10-08 04:36" --device 1 2
 
+# 1イベントの要約(最大震度・初動/終了・水平/垂直ピーク)と、P/S窓の3D相対変位図(試作。P/S窓は人間が与える)
+python event_summary.py --from "2026-10-29 00:07:30" --to "2026-10-29 00:14:00" --device 2 \
+  --win P 00:08:23 00:08:27 --win S 00:08:57 00:09:12 --out summary.png
+
 # 確定イベントに人工地震（テスト等）フラグを立てる/降ろす（DynamoDBを直接更新）
 export NAMZ_EVENTS_TABLE=namz-events   # or --table
 python flag_event.py mark   0001-59462454        # このイベントを人工地震に
