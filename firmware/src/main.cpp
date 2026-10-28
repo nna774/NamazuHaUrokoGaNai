@@ -206,6 +206,13 @@ struct RtcPumpTrace {
 };
 static constexpr uint32_t kRtcPumpTraceMagic = 0x4e415a50;  // "NAZP"
 RTC_NOINIT_ATTR RtcPumpTrace gRtcPumpTrace;
+// 直近で生きていた壁時計。coredumpの「クラッシュ時刻」として次回起動時に読む。
+struct RtcLastAlive {
+  uint32_t magic;
+  uint64_t us;
+};
+static constexpr uint32_t kRtcLastAliveMagic = 0x4e414c56;  // "NALV"
+RTC_NOINIT_ATTR RtcLastAlive gRtcLastAlive;
 // coredump本体を送る際の /coredump へのPOSTに乗せる追加ヘッダ名（値はsetup()で組む）。
 static constexpr const char* kPumpTraceHeader = "X-Namz-Pump-Trace";
 
@@ -679,6 +686,10 @@ static void uploaderTask(void*) {
   // 触らない——このタスクが長時間ブロックしても、吸い出しは止まらない。
   for (;;) {
     esp_task_wdt_reset();
+    if (timesync::isSynced()) {
+      gRtcLastAlive.magic = kRtcLastAliveMagic;
+      gRtcLastAlive.us = timesync::nowUs();
+    }
 
     // WiFi再接続
     if (WiFi.status() != WL_CONNECTED) {
@@ -823,7 +834,10 @@ void setup() {
   // coredumpパーティションは単一image・次のパニックで上書きされる仕様なので、
   // 何よりも先にLittleFSへ退避してから空ける
   // (docs/log/2026-08-29-coredump-auto-upload-plan.md)。
-  coredumpqueue::captureIfPresent(kCoredumpQueueDir, kMaxCoredumpFiles);
+  // 前回起動の最終生存時刻を取り出して即座に無効化する(今回の起動の値と混ぜない)。
+  const uint64_t prevAliveUs = gRtcLastAlive.magic == kRtcLastAliveMagic ? gRtcLastAlive.us : 0;
+  gRtcLastAlive.magic = 0;
+  coredumpqueue::captureIfPresent(kCoredumpQueueDir, kMaxCoredumpFiles, prevAliveUs);
 
   // Display/SPI/センサ初期化(フォント読み込み等でヒープを消費する)より前、
   // 起動直後の最も断片化していない時点で確保する。理由はsetupBatchPool()の
