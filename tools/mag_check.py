@@ -49,6 +49,21 @@ def parse_csv(lines) -> np.ndarray:
     return np.array(rows, dtype=float).reshape(-1, 5)
 
 
+def longest_segment(d: np.ndarray, max_gap_s: float = 5.0) -> tuple[np.ndarray, list[tuple[float, float]]]:
+    """時間の隙間(既定5秒超)で区間に分け、最長の連続区間と、隙間の一覧[(開始秒, 長さ秒)]を返す。
+
+    取り込み開始前のバッファの残りが先頭に1点だけ混ざる等で、動いていない静置データが
+    「動いた」と誤判定されたり、継続時間が欠測ぶん伸びたりするのを防ぐ。
+    """
+    if len(d) < 2:
+        return d, []
+    gaps = np.where(np.diff(d[:, 0]) > max_gap_s)[0]
+    info = [(float(d[i, 0] - d[0, 0]), float(d[i + 1, 0] - d[i, 0])) for i in gaps]
+    bounds = np.concatenate([[0], gaps + 1, [len(d)]])
+    k = int(np.argmax(np.diff(bounds)))
+    return d[bounds[k]:bounds[k + 1]], info
+
+
 def fit_sphere(p: np.ndarray) -> tuple[np.ndarray, float, float]:
     """中心c・半径R・残差RMSを最小二乗(線形化)で返す。p は (N,3)。"""
     a = np.c_[2 * p, np.ones(len(p))]
@@ -86,11 +101,16 @@ def drift_per_hour(t: np.ndarray, xyz: np.ndarray) -> np.ndarray:
 
 def analyze(d: np.ndarray) -> dict:
     t, xyz, temp = d[:, 0], d[:, 1:4], d[:, 4]
-    rng = xyz.max(axis=0) - xyz.min(axis=0)
+    p1, p99 = np.percentile(xyz, [1, 99], axis=0)
+    rng = p99 - p1  # 外れ値1〜2点で「動いた」と誤判定しないよう1〜99パーセンタイルで見る
     out: dict = {"n": len(d), "duration_s": float(t[-1] - t[0]), "range": rng,
                  "median": np.median(xyz, axis=0), "std": xyz.std(axis=0),
                  "norm_median": float(np.median(np.linalg.norm(xyz, axis=1))),
                  "temp_median": float(np.median(temp)), "drift_per_h": drift_per_hour(t, xyz)}
+    trange = float(temp.max() - temp.min())
+    out["temp_range"] = trange
+    if trange >= 0.8 and len(d) >= 30:
+        out["temp_coef"] = np.array([np.polyfit(temp, xyz[:, i], 1)[0] for i in range(3)])
     moving = rng.max() > 15.0  # 地磁気ノイズ(数µT)を超えて振れていれば回転データとみなす
     out["moving"] = bool(moving)
     if not moving:
@@ -124,6 +144,14 @@ def report(res: dict) -> str:
         L.append("静置データとして扱う。")
         L.append(f"ドリフト(線形トレンド) x={dr[0]:+.2f} y={dr[1]:+.2f} z={dr[2]:+.2f} µT/時"
                  f"  (測定時間が短いと意味が薄い。数十分以上で見ろ)")
+        total = dr * res["duration_s"] / 3600.0
+        L.append(f"この測定の総変化 x={total[0]:+.2f} y={total[1]:+.2f} z={total[2]:+.2f} µT"
+                 f"  温度の振れ幅 {res['temp_range']:.1f}℃")
+        if "temp_coef" in res:
+            tc = res["temp_coef"]
+            L.append(f"温度との回帰 x={tc[0]:+.2f} y={tc[1]:+.2f} z={tc[2]:+.2f} µT/℃"
+                     f"  (温度で説明できる変化 x={tc[0] * res['temp_range']:+.2f} y={tc[1] * res['temp_range']:+.2f}"
+                     f" z={tc[2] * res['temp_range']:+.2f} µT)")
         lo, hi = EARTH_TOTAL_UT
         n = res["norm_median"]
         if n > hi * 1.6:
@@ -223,6 +251,10 @@ def main() -> int:
     d = parse_csv(lines)
     if len(d) < 20:
         raise SystemExit(f"有効なサンプルが少ない({len(d)}件)。statusが0x00以外・配線・ポートを確認しろ。")
+    d, gaps = longest_segment(d)
+    if gaps:
+        print(f"欠測(5秒超)が{len(gaps)}回あった。最長の連続区間{len(d)}件だけを使う: "
+              + ", ".join(f"t={g[0] / 60:.1f}分に{g[1] / 60:.1f}分" for g in gaps[:5]))
     res = analyze(d)
     print(report(res))
     if args.out:

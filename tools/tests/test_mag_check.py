@@ -57,3 +57,33 @@ def test_static_is_treated_as_drift_data_and_trend_is_per_hour():
     assert not res["moving"]
     assert abs(res["drift_per_h"][0] - 3.6) < 0.1  # 0.001µT/s = 3.6µT/h
     assert "磁化" in mc.report(res)  # ノルム約100µTは地磁気の目安を大きく超える
+
+
+def test_static_reports_temperature_coefficient():
+    n = 600
+    t_s = np.arange(n) * 1.0
+    temp = 22.0 + 4.0 * t_s / t_s[-1]  # 22→26℃
+    x = -42 + 0.5 * (temp - 22.0)  # 0.5µT/℃
+    lines = [f"{int(t * 1000)},0x00,{xi:.3f},-34.000,-86.000,{ti:.2f}" for t, xi, ti in zip(t_s, x, temp)]
+    res = mc.analyze(mc.parse_csv(lines))
+    assert abs(res["temp_coef"][0] - 0.5) < 0.01
+    assert abs(res["temp_coef"][1]) < 0.01
+    assert "温度との回帰" in mc.report(res)
+
+
+def test_longest_segment_drops_orphan_sample_before_gap():
+    n = 200
+    body = [f"{int(420000 + i * 260)},0x00,-2.85,30.00,-24.90,19.0" for i in range(n)]
+    lines = ["0,0x00,-40.0,5.0,-24.0,26.0"] + body  # 先頭に取り込み前の残り1点、その後に長い隙間
+    d, gaps = mc.longest_segment(mc.parse_csv(lines))
+    assert len(d) == n and len(gaps) == 1 and gaps[0][1] > 300
+    res = mc.analyze(d)
+    assert not res["moving"]
+
+
+def test_outlier_does_not_make_static_data_moving():
+    n = 300
+    xyz = np.c_[np.full(n, -2.85), np.full(n, 30.0), np.full(n, -24.9)]
+    xyz[0] = (-40.0, 5.0, -24.0)  # 外れ値1点
+    lines = [f"{i * 260},0x00,{x:.2f},{y:.2f},{z:.2f},19.0" for i, (x, y, z) in enumerate(xyz)]
+    assert not mc.analyze(mc.parse_csv(lines))["moving"]
