@@ -26,6 +26,8 @@
 #include <Arduino.h>
 #include <MLX90393.h>
 #include <Wire.h>
+#include <esp_system.h>
+#include <esp_task_wdt.h>
 
 namespace {
 MLX90393 sensor;
@@ -49,11 +51,18 @@ void setup() {
   Serial.begin(115200);
   Wire.begin(kSdaPin, kSclPin);
   uint8_t status = sensor.begin(0, 0, -1, Wire);  // A1=0, A0=0（既定アドレス）, DRDYピン未使用
-  Serial.printf("# begin status=0x%02x\n", status);
+  Serial.printf("# begin status=0x%02x reset_reason=%d\n", status, static_cast<int>(esp_reset_reason()));
+  // 長時間の取り込みで、ループがSerial出力かI2Cの待ちから戻れず無出力になったことがある
+  // (2026-10-29、Saved PC=esp_cpu_wait_for_intr=割り込み待ちのまま)。無出力のまま固まらないよう
+  // タスクWDT(30秒)で再起動させる。reset_reason(=ESP_RST_TASK_WDT 7等)を起動時に出して後から分かるようにする。
+  esp_task_wdt_config_t wdt = {.timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true};
+  if (esp_task_wdt_reconfigure(&wdt) != ESP_OK) esp_task_wdt_init(&wdt);
+  esp_task_wdt_add(nullptr);
   Serial.println("# t_ms,status,x_uT,y_uT,z_uT,temp_C");
 }
 
 void loop() {
+  esp_task_wdt_reset();
   static uint32_t next_ms = millis();
   uint32_t now = millis();
   if (static_cast<int32_t>(now - next_ms) < 0) return;
