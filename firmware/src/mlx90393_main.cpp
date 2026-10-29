@@ -14,6 +14,8 @@
 //   無印ESP32 DevKit: SDA -> GPIO21, SCL -> GPIO22 (ESP32既定のWireピン)
 //   ESP32-C3 SuperMini: SDA -> GPIO5, SCL -> GPIO6（GPIO2/GPIO9(ストラップ・BOOT)を
 //     避けた空きピン、チップ仕様なので基板差の影響を受けない）。
+//     3.3V/GND側の辺に寄せたい時は[env:mlx90393-bringup-c3-gpio34]: SDA -> GPIO3, SCL -> GPIO4
+//     （GPIO0〜4はこの辺。GPIO2はストラップなので避ける。図解のSDA/SCLをGPIO3/4へ読み替える）
 //     図解: docs/img/mlx90393-esp32c3-wiring.svg（SS49Eと同じ実機、2026-08-27に
 //     写真で確認済みの実物ピン配置。SDA/SCLは基板の反対側の辺にあるため配線が
 //     長くなる点に注意）
@@ -24,28 +26,43 @@
 #include <Arduino.h>
 #include <MLX90393.h>
 #include <Wire.h>
+#include <esp_system.h>
+#include <esp_task_wdt.h>
 
 namespace {
 MLX90393 sensor;
 constexpr uint32_t kSampleIntervalMs = 20;  // ~50Hz。OSR/DIGFILT既定値での実効変換時間に合わせて後で調整
+// ピン番号はビルドフラグ -DMLX90393_SDA_PIN=n -DMLX90393_SCL_PIN=n で上書きできる
+// （C3 SuperMiniで3.3V/GND側の辺にあるGPIO3/4へ寄せる[env:mlx90393-bringup-c3-gpio34]用）。
+#ifndef MLX90393_SDA_PIN
 #ifdef CONFIG_IDF_TARGET_ESP32C3
-constexpr int kSdaPin = 5;
-constexpr int kSclPin = 6;
+#define MLX90393_SDA_PIN 5
+#define MLX90393_SCL_PIN 6
 #else
-constexpr int kSdaPin = 21;
-constexpr int kSclPin = 22;
+#define MLX90393_SDA_PIN 21
+#define MLX90393_SCL_PIN 22
 #endif
+#endif
+constexpr int kSdaPin = MLX90393_SDA_PIN;
+constexpr int kSclPin = MLX90393_SCL_PIN;
 }  // namespace
 
 void setup() {
   Serial.begin(115200);
   Wire.begin(kSdaPin, kSclPin);
   uint8_t status = sensor.begin(0, 0, -1, Wire);  // A1=0, A0=0（既定アドレス）, DRDYピン未使用
-  Serial.printf("# begin status=0x%02x\n", status);
+  Serial.printf("# begin status=0x%02x reset_reason=%d\n", status, static_cast<int>(esp_reset_reason()));
+  // 長時間の取り込みで、ループがSerial出力かI2Cの待ちから戻れず無出力になったことがある
+  // (2026-10-29、Saved PC=esp_cpu_wait_for_intr=割り込み待ちのまま)。無出力のまま固まらないよう
+  // タスクWDT(30秒)で再起動させる。reset_reason(=ESP_RST_TASK_WDT 7等)を起動時に出して後から分かるようにする。
+  esp_task_wdt_config_t wdt = {.timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true};
+  if (esp_task_wdt_reconfigure(&wdt) != ESP_OK) esp_task_wdt_init(&wdt);
+  esp_task_wdt_add(nullptr);
   Serial.println("# t_ms,status,x_uT,y_uT,z_uT,temp_C");
 }
 
 void loop() {
+  esp_task_wdt_reset();
   static uint32_t next_ms = millis();
   uint32_t now = millis();
   if (static_cast<int32_t>(now - next_ms) < 0) return;
