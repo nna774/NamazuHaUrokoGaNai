@@ -216,10 +216,14 @@ def plot(d: np.ndarray, res: dict, out: str) -> None:
     fig.savefig(out, dpi=110)
 
 
-def capture(port: str, baud: int, seconds: float, save: str | None = None) -> list[str]:
+def capture(port: str, baud: int, seconds: float, save: str | None = None,
+            stall_s: float = 20.0) -> list[str]:
     """シリアルから`seconds`秒取る。`save`があれば1行ごとに追記・flushする(長時間でも途中で落ちて消えない)。
 
-    USBが一瞬切れたり、Macのスリープ復帰でポートが閉じても、2秒待って開き直して続ける。
+    - USBが切れたりポートが閉じたら、2秒待って開き直して続ける。
+    - **`stall_s`秒(既定20秒)受信が無い時**は、ポートを開き直す（長く開きっぱなしの読み取りだけが受信できなくなる
+      ことがあり、開き直せば直る）。開き直しても2回続けて出なければ、RTSでデバイスをリセットする。
+    - 開き直し・リセットは保存ファイルに`# stall ...`コメントで残す（後で回数と時刻を数えられる）。
     """
     try:
         import serial
@@ -227,26 +231,49 @@ def capture(port: str, baud: int, seconds: float, save: str | None = None) -> li
         raise SystemExit("pyserial が要る: pip install pyserial")
     lines: list[str] = []
     fh = open(save, "w") if save else None
+
+    def note(msg: str) -> None:
+        stamp = datetime.now().isoformat(timespec="seconds")
+        print(f"# {msg} wall={stamp}", file=sys.stderr, flush=True)
+        if fh:
+            fh.write(f"# {msg} wall={stamp}\n")
+            fh.flush()
+
     end = time.time() + seconds
-    reopen = 0
     last_wall = 0.0
+    errors = 0
+    silent_reopens = 0
     try:
         while time.time() < end:
             try:
                 with serial.Serial(port, baud, timeout=1) as ser:
+                    if silent_reopens >= 2:
+                        note("stall: 開き直しても無受信が続くのでRTSでデバイスをリセット")
+                        ser.dtr = False
+                        ser.rts = True
+                        time.sleep(0.1)
+                        ser.rts = False
+                        silent_reopens = 0
+                    last_rx = time.time()
                     while time.time() < end:
                         ln = ser.readline().decode("utf-8", "replace")
                         if ln:
+                            last_rx = time.time()
+                            silent_reopens = 0
                             lines.append(ln)
                             if fh:
                                 fh.write(ln)
-                                if time.time() - last_wall >= 60:  # 再起動(t_msの巻き戻り)を跨いでも壁時計に合わせられる
+                                if last_rx - last_wall >= 60:  # 再起動(t_msの巻き戻り)を跨いでも壁時計に合わせられる
                                     fh.write(f"# wall={datetime.now().isoformat(timespec='seconds')}\n")
-                                    last_wall = time.time()
+                                    last_wall = last_rx
                                 fh.flush()
+                        elif time.time() - last_rx > stall_s:
+                            silent_reopens += 1
+                            note(f"stall: {stall_s:g}秒無受信。開き直す(連続{silent_reopens}回目)")
+                            break
             except (serial.SerialException, OSError) as exc:
-                reopen += 1
-                print(f"# シリアルが切れた({type(exc).__name__}) 2秒後に開き直す [{reopen}回目]", file=sys.stderr)
+                errors += 1
+                note(f"stall: シリアルが切れた({type(exc).__name__}) 2秒後に開き直す(通算{errors}回目)")
                 time.sleep(2)
     finally:
         if fh:
