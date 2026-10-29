@@ -87,3 +87,10 @@ def test_outlier_does_not_make_static_data_moving():
     xyz[0] = (-40.0, 5.0, -24.0)  # 外れ値1点
     lines = [f"{i * 260},0x00,{x:.2f},{y:.2f},{z:.2f},19.0" for i, (x, y, z) in enumerate(xyz)]
     assert not mc.analyze(mc.parse_csv(lines))["moving"]
+
+
+def test_time_going_backwards_is_treated_as_device_reset():
+    a = [f"{i * 260 + 100000},0x00,-2.85,30.00,-24.90,19.0" for i in range(300)]
+    b = [f"{i * 260},0x00,-3.00,30.00,-24.70,19.0" for i in range(100)]  # 再起動でt_msが0へ戻る
+    d, gaps = mc.longest_segment(mc.parse_csv(a + b))
+    assert len(d) == 300 and len(gaps) == 1 and gaps[0][1] < 0

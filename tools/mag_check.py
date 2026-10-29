@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from datetime import datetime
 
 import numpy as np
 
@@ -57,7 +58,8 @@ def longest_segment(d: np.ndarray, max_gap_s: float = 5.0) -> tuple[np.ndarray, 
     """
     if len(d) < 2:
         return d, []
-    gaps = np.where(np.diff(d[:, 0]) > max_gap_s)[0]
+    dt = np.diff(d[:, 0])
+    gaps = np.where((dt > max_gap_s) | (dt < 0))[0]  # 時刻の逆戻りはデバイスの再起動(WDT等)
     info = [(float(d[i, 0] - d[0, 0]), float(d[i + 1, 0] - d[i, 0])) for i in gaps]
     bounds = np.concatenate([[0], gaps + 1, [len(d)]])
     k = int(np.argmax(np.diff(bounds)))
@@ -227,6 +229,7 @@ def capture(port: str, baud: int, seconds: float, save: str | None = None) -> li
     fh = open(save, "w") if save else None
     end = time.time() + seconds
     reopen = 0
+    last_wall = 0.0
     try:
         while time.time() < end:
             try:
@@ -237,6 +240,9 @@ def capture(port: str, baud: int, seconds: float, save: str | None = None) -> li
                             lines.append(ln)
                             if fh:
                                 fh.write(ln)
+                                if time.time() - last_wall >= 60:  # 再起動(t_msの巻き戻り)を跨いでも壁時計に合わせられる
+                                    fh.write(f"# wall={datetime.now().isoformat(timespec='seconds')}\n")
+                                    last_wall = time.time()
                                 fh.flush()
             except (serial.SerialException, OSError) as exc:
                 reopen += 1
