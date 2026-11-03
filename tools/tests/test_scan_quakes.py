@@ -18,6 +18,12 @@ def test_parse_cod_handles_sign_and_meters_to_km():
     assert sq.parse_cod("garbage") is None
 
 
+def test_parse_cod_converts_degree_minute_notation():
+    # 実際の気象庁list.json(2026-10-29 千葉県北東部M5.5の震源要素更新)。度分表記
+    lat, lon, depth = sq.parse_cod("+3543.3+14042.9-52000/")
+    assert (round(lat, 3), round(lon, 3), depth) == (35.722, 140.715, 52.0)
+
+
 def test_build_candidates_dedupes_by_eid_keeping_first():
     now = datetime.now(sq.JST)
     entries = [
