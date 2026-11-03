@@ -63,7 +63,16 @@ def parse_cod(cod: str) -> tuple[float, float, float] | None:
     if not m:
         return None
     lat, lon, depth_m = (float(x) for x in m.groups())
+    if abs(lat) > 90:
+        # 「顕著な地震の震源要素更新のお知らせ」だけは度分表記("+3543.3+14042.9-52000/")で来る
+        lat, lon = _deg_min(lat), _deg_min(lon)
     return lat, lon, abs(depth_m) / 1000.0
+
+
+def _deg_min(v: float) -> float:
+    """dddmm.m -> 十進の度。"""
+    deg = int(abs(v) // 100)
+    return (deg + (abs(v) - deg * 100) / 60.0) * (1 if v >= 0 else -1)
 
 
 def build_candidates(
