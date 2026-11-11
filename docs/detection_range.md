@@ -1,6 +1,6 @@
 # 検出限界の目安表（自動生成）
 
-`tools/detection_range.py`で`tools/detection_events.csv`（80件、うちgood=33件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
+`tools/detection_range.py`で`tools/detection_events.csv`（81件、うちgood=33件）から生成。**このファイルは手で編集せず、事例を追加したらスクリプトを再実行して上書きすること。**
 
 回帰式（verdict=good のみでフィット）: `log10(震源距離[km]) = 1.1548 + 0.2565 * M`
 
@@ -44,6 +44,7 @@
 | `nagano-hokubu-m2.4-2348` | 長野県北部 | 2026-10-17 | 2.4 | 90km | critical | 1.53 |
 | `toyama-tobu-m2.9` | 富山県東部 | 2026-09-13 | 2.9 | 123km | critical | 1.56 |
 | `saitama-nanbu-m3.2-1032` | 埼玉県南部 | 2026-10-01 | 3.2 | 131km | critical | 1.38 |
+| `ibaraki-nanbu-m3.2-0230` | 茨城県南部 | 2026-11-08 | 3.2 | 134km | critical | 1.42 |
 | `ibaraki-nanbu-m3.8-1534` | 茨城県南部 | 2026-09-22 | 3.8 | 139km | good | 1.03 |
 | `ibaraki-nanbu-m3.4` | 茨城県南部 | 2026-08-26 | 3.4 | 143km | warning | 1.35 |
 | `ibaraki-nanbu-m3.1-0611` | 茨城県南部 | 2026-09-17 | 3.1 | 143km | critical | 1.61 |
