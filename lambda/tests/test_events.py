@@ -90,6 +90,30 @@ def test_device_filter_none_means_all(monkeypatch):
     assert total == 3 and len(items) == 3
 
 
+def test_min_intensity_filter_uses_effective_intensity(monkeypatch):
+    # 確定済みは confirmed_intensity、未確定は max_intensity で比べる。境界値は含む
+    _stub_scan(monkeypatch, [
+        # 速報は大きいが確定震度は小さい → 落ちる
+        {"event_id": "0001-10", "onset_us": 10, "cloud_confirmed": True,
+         "max_intensity": 3.0, "confirmed_intensity": 1.0},
+        # 確定震度がちょうど下限 → 残る
+        {"event_id": "0001-20", "onset_us": 20, "cloud_confirmed": True,
+         "max_intensity": 0.1, "confirmed_intensity": 2.5},
+        # 未評価(速報のみ)は max_intensity で判定 → 残る
+        {"event_id": "0001-30", "onset_us": 30, "max_intensity": 2.6},
+        # 震度欠落は0扱い → 落ちる
+        {"event_id": "0001-40", "onset_us": 40},
+    ])
+    items, total = events.list_page(min_intensity=2.5)
+    assert _ids(items) == ["0001-30", "0001-20"] and total == 2
+
+
+def test_min_intensity_none_means_no_filter(monkeypatch):
+    _stub_scan(monkeypatch, _items())
+    items, total = events.list_page(min_intensity=None)
+    assert total == 2
+
+
 class _FakeTable:
     """DynamoDB Table の最小スタブ（get/put/update: SET #n=:v と REMOVE #n のみ）。"""
 

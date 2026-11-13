@@ -166,6 +166,16 @@
               <option value="all" selected>全機</option>
             </select>
           </label>
+          <label>震度:
+            <select id="events-min" title="表示震度がこの階級以上のイベントだけに絞る">
+              <option value="" selected>すべて</option>
+              <option value="0.5">1以上</option>
+              <option value="1.5">2以上</option>
+              <option value="2.5">3以上</option>
+              <option value="3.5">4以上</option>
+              <option value="4.5">5弱以上</option>
+            </select>
+          </label>
           <label><input type="checkbox" id="events-all"> 全件（非該当も表示）</label>
         </div>
         <div id="events-status" class="muted status-line"></div>

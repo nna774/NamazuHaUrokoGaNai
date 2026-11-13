@@ -165,14 +165,25 @@ def _events(q):
             device_id = int(raw)
         except (TypeError, ValueError):
             return _json(400, {"error": "bad device"})
-    items, total = events.list_page(page, size, show_all=show_all, device_id=device_id)
+    # ?min_intensity=<計測震度> で表示震度がそれ以上のものだけに絞る（震度n以上の下限値を渡す）。
+    min_intensity = None
+    raw = q.get("min_intensity")
+    if raw not in (None, ""):
+        try:
+            min_intensity = float(raw)
+        except (TypeError, ValueError):
+            return _json(400, {"error": "bad min_intensity"})
+        if not math.isfinite(min_intensity):
+            return _json(400, {"error": "bad min_intensity"})
+    items, total = events.list_page(page, size, show_all=show_all, device_id=device_id,
+                                    min_intensity=min_intensity)
     # 一覧・詳細で同じ値を出すため、震度は effective_intensity に統一する。
     for it in items:
         eff = events.effective_intensity(it)
         it["max_intensity"] = eff
         it["scale"] = intensity_scale(eff)
     return _json(200, {"events": items, "page": page, "size": size, "total": total,
-                       "device_id": device_id})
+                       "device_id": device_id, "min_intensity": min_intensity})
 
 
 def _event(q):
