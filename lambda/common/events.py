@@ -263,7 +263,8 @@ def _scan_all() -> list[dict]:
 
 
 def list_page(page: int = 0, size: int = 20, show_all: bool = False,
-              device_id: int | None = None) -> tuple[list[dict], int]:
+              device_id: int | None = None,
+              min_intensity: float | None = None) -> tuple[list[dict], int]:
     """新しい順に並べた page ページ目(0始まり)の size 件と、（フィルタ後の）総件数を返す。
 
     show_all=False（既定）では「確定済み or 未評価(pending)」だけ出し、detectが評価して
@@ -277,6 +278,9 @@ def list_page(page: int = 0, size: int = 20, show_all: bool = False,
     device_id を指定すると、そのデバイスのイベントだけに絞る（既定は全デバイス。
     波形と違いイベントは混ぜても壊れないので、絞り込みは任意）。
 
+    min_intensity を指定すると、表示震度(effective_intensity)がそれ以上のものだけに絞る
+    （「震度n以上」は階級の下限、例: 震度3以上なら 2.5 を渡す）。
+
     件数が数千規模までは全件 scan+ソートで十分。それ以上に育ったら
     時刻レンジGSIでの本格ページングに移行する。
     """
@@ -287,6 +291,8 @@ def list_page(page: int = 0, size: int = 20, show_all: bool = False,
         items = [it for it in items
                  if (it.get("cloud_confirmed") or it.get("manual") or not it.get("checked"))
                  and not it.get("artificial")]
+    if min_intensity is not None:
+        items = [it for it in items if effective_intensity(it) >= min_intensity]
     items.sort(key=lambda x: int(x.get("onset_us", 0)), reverse=True)
     start = max(0, page) * size
     return items[start:start + size], len(items)
