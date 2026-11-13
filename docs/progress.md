@@ -306,3 +306,4 @@
 | 2026-11-12 | **未解析だった11/09〜11/11の5件をまとめて事後解析。** 茨城県沖M4.6(11/11・267km)とM4.5(11/10 14:20・260km)はprobable detectionでgood(後者は前日の同規模・同距離M4.5がwarningだったのと対照的)。房総半島南方沖M4.5・宮城県沖M4.5はレンジ上端でwarning、茨城県北部M3.5はcritical。全件手動昇格・相互リンク済み。 → [ログ](log/2026-11-12-post-hoc-detection-1109-1111.md) |
 | 2026-11-12 | **茨城県南部M3.2(11/08 02:30・震源距離134km)の事後解析。** レンジ内だが標準・低帯域とも完全埋没でcritical。手動昇格・相互リンク済み(0001/0002-59802420)。 → [ログ](log/2026-11-12-ibaraki-nanbu-m3.2-0230-post-hoc-detection.md) |
 | 2026-11-13 | **ダッシュボードのライブ画面の縦軸既定を±100galから自動に変えた(ユーザー要望)。** タイトルクリックのリセット先も自動に。`r=`付きの既存URLは影響なし | [log/2026-11-13-dashboard-y-axis-default-auto.md](log/2026-11-13-dashboard-y-axis-default-auto.md) |
+| 2026-11-13 | **イベント一覧に「震度n以上」の絞り込みを足した。** `/events?min_intensity=`でサーバ側(`list_page`)が表示震度(`effective_intensity`)で絞り、ダッシュボードは「震度」セレクタと`#events?mi=`。ページングを壊さないためサーバ側で絞る判断 | [log/2026-11-13-events-min-intensity-filter.md](log/2026-11-13-events-min-intensity-filter.md) |

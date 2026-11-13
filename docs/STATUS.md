@@ -153,6 +153,8 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
   非該当（detect評価済み・未確定）は隠す。「全件」チェックで非該当も薄字表示。
   「機」列でどのデバイスのイベントか分かり、「機」セレクタで絞り込める（既定は全機、
   `/events?device=<id>`・URLは `#events?d=<id>`）
+  「震度」セレクタで「震度n以上」に絞れる（表示震度=`effective_intensity`で判定、サーバ側で
+  絞るのでページング・総件数も絞り込み後。`/events?min_intensity=<計測震度>`・URLは `#events?mi=`）
 - **イベント詳細**: 独立画面（グラフ上部・一覧と排他でガタつかない、`#event/<id>` 直リンク）。
   グラフ下に情報パネル（発生時刻・デバイス・継続・計測震度・震度・ピーク・a0・状態・検知経路・ID）。
   縦軸レンジ選択（既定自動）
