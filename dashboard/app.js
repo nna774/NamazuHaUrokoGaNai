@@ -1736,12 +1736,12 @@ window.addEventListener('load', () => {
     history.replaceState(null, '', '#' + deviceHash(currentDeviceId));
     refreshDeviceTemp(currentDeviceId);
   };
-  // タイトルクリックで全操作状態を既定に戻す（ライブ・1分窓・自動更新・±100gal・全軸）。
+  // タイトルクリックで全操作状態を既定に戻す（ライブ・1分窓・自動更新・縦軸自動・全軸）。
   // イベント側のフィルタ・ページも既定へ。既に既定ならハッシュが変わらないので直接 route する。
   document.getElementById('home').onclick = () => {
     document.getElementById('minutes').value = '1';
     document.getElementById('autorefresh').checked = true;
-    document.getElementById('yrange').value = '100';
+    document.getElementById('yrange').value = '0';
     for (const a of AXES) document.getElementById(`live-ax-${a}`).checked = true;
     startInput.value = '';
     liveZoom = null;
