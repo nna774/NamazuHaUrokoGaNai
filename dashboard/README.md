@@ -9,7 +9,9 @@
   （気象庁計測震度のFIR近似・追加のサーバ通信なし。詳細は下記）。同じく「1分」表示限定で、
   較正済みの機を2台以上選ぶと**重ね表示**に切り替わる（詳細は下記）
 - **イベント**: 検知イベント一覧（機・震度・計測震度・ピーク・速報/確定フラグ）。クリックで周辺波形。
-  「機」セレクタでデバイス絞り込み（既定は全機。絞り込みは `#events?d=<id>` としてURLに載る）
+  「機」セレクタでデバイス絞り込み（既定は全機。絞り込みは `#events?d=<id>` としてURLに載る）。
+  「震度」セレクタで「震度n以上」に絞り込める（表示震度=`effective_intensity`で判定。
+  `#events?mi=<階級下限の計測震度>` としてURLに載る）
 - **デバイス**: 各デバイスの生存状態（オンライン/欠測・最終受信・データ鮮度・累計バッチ・
   版数・再起動要求・OTA適用状況）。`/devices` を定期取得。欠測の能動通知は watchdog Lambda が
   Slack に飛ばす。行クリックで個別ページ(`#device/<id>`)へ。センサ内蔵温度のトレンド
@@ -70,11 +72,13 @@ x/y/z波形の代わりに複数機を重ねて描く（[docs/device_overlay.md]
   `t`はドラッグ拡大した固定の時間窓（マイクロ秒epoch、`fromUs-toUs`）。
   `d`は単一機表示時のデバイス絞り込み。`overlay`は較正済み機の重ね表示
   （2台以上、詳細は下記「重ね表示」節）。
-- `#events?p=<頁>&all=<0|1>&d=<device_id>`
+- `#events?p=<頁>&all=<0|1>&d=<device_id>&mi=<計測震度>`
   イベント一覧タブ。`p`はページ番号、`all`はartificial/未確定も含めるフィルタ、
-  `d`はデバイス絞り込み（既定`all`は省略）。
-- `#event/<id>?p=&all=&d=&r=&ax=&t=<fromUs>-<toUs>`
-  イベント詳細。`p`/`all`/`d`は戻り先の一覧状態、`r`/`ax`/`t`は詳細波形の縦軸レンジ・
+  `d`はデバイス絞り込み（既定`all`は省略）、`mi`は最小震度の絞り込みで、震度階級の
+  下限の計測震度（震度1以上=0.5、2以上=1.5、…5弱以上=4.5。既定の「すべて」は省略。
+  選択肢に無い値は「すべて」扱い）。
+- `#event/<id>?p=&all=&d=&mi=&r=&ax=&t=<fromUs>-<toUs>`
+  イベント詳細。`p`/`all`/`d`/`mi`は戻り先の一覧状態、`r`/`ax`/`t`は詳細波形の縦軸レンジ・
   軸表示・時間ズーム。
 - `#devices`
   デバイス一覧タブ。
@@ -96,7 +100,7 @@ JSONを見る方が確実で速い（APIは認証なし・読み取り専用。�
 |---|---|
 | `#live?m=<m>&d=<device>&s=<sec>` | `GET /recent?minutes=<m>&device=<device>` （`s`があれば`&start=<sec*1e6>`） |
 | `#live?...&t=<fromUs>-<toUs>`（ドラッグ拡大） | `GET /recent?minutes=<max(0.1,(toUs-fromUs)/60e6)>&start=<fromUs>&device=<device>` |
-| `#events?p=<p>&all=<all>&d=<device>` | `GET /events?page=<p-1>&size=20&all=<all>&device=<device>` |
+| `#events?p=<p>&all=<all>&d=<device>&mi=<mi>` | `GET /events?page=<p-1>&size=20&all=<all>&device=<device>&min_intensity=<mi>` |
 | `#event/<id>?...` | `GET /event?id=<id>` |
 | `#devices` | `GET /devices` |
 | `#device/<id>?h=<h>` | `GET /devices/<id>` （温度トレンドは`GET /devices/<id>/temp?hours=<h>`） |

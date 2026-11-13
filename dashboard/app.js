@@ -1032,11 +1032,13 @@ async function reloadEvents(pageNum = 1) {
   const tbody = document.querySelector('#events-table tbody');
   const page0 = Math.max(0, pageNum - 1);
   const all = document.getElementById('events-all').checked ? '&all=1' : '';
+  const minSel = document.getElementById('events-min').value;
+  const min = minSel ? '&min_intensity=' + encodeURIComponent(minSel) : '';
   await fillEventsDevices();
   try {
     status.textContent = '取得中…';
     const data = await apiGet(`/events?page=${page0}&size=${EVENTS_PAGE_SIZE}${all}`
-      + eventsDeviceParam());
+      + eventsDeviceParam() + min);
     tbody.innerHTML = '';
     for (const ev of data.events) {
       const tr = document.createElement('tr');
@@ -1512,8 +1514,8 @@ async function showDevice(id) {
 }
 
 // --- ハッシュルーティング ---
-// #live?m=<分>&auto=<0|1>&r=<レンジ>&ax=<表示軸> / #events?p=<頁>&all=<0|1>&d=<デバイス>
-// / #event/<id>?p=&all=&d=&r=&ax=&t=<fromUs>-<toUs> を location.hash に持たせ、リロードや共有URLで
+// #live?m=<分>&auto=<0|1>&r=<レンジ>&ax=<表示軸> / #events?p=<頁>&all=<0|1>&d=<デバイス>&mi=<最小計測震度>
+// / #event/<id>?p=&all=&d=&mi=&r=&ax=&t=<fromUs>-<toUs> を location.hash に持たせ、リロードや共有URLで
 // 状態(タブ・表示範囲・自動更新・表示軸・全件フィルタ・ページ)が復元されるようにする。
 // ax は表示中の軸を連結した文字列（例 'xy'=z非表示 / ''=全非表示 / 省略=全表示）。
 function showView(name) {
@@ -1560,10 +1562,23 @@ function eventsDeviceHash() {
   return eventsDeviceId !== 'all' ? `&d=${encodeURIComponent(eventsDeviceId)}` : '';
 }
 
-// 現在のイベント一覧操作状態（ページ・全件フィルタ・デバイス絞り込み）を表すハッシュ
+// イベント一覧の最小震度絞り込みのハッシュ表現（値は計測震度の下限。「すべて」は既定なので省く）
+function eventsMinHash() {
+  const v = document.getElementById('events-min').value;
+  return v ? `&mi=${encodeURIComponent(v)}` : '';
+}
+
+// URLの mi を操作子へ反映する。選択肢に無い値（手書きURL等）は「すべて」へ倒す。
+function setEventsMin(v) {
+  const sel = document.getElementById('events-min');
+  const want = v ? decodeURIComponent(v) : '';
+  sel.value = Array.from(sel.options).some(o => o.value === want) ? want : '';
+}
+
+// 現在のイベント一覧操作状態（ページ・全件フィルタ・デバイス・最小震度の絞り込み）を表すハッシュ
 function eventsHash(pageNum) {
   const all = document.getElementById('events-all').checked ? 1 : 0;
-  return `events?p=${pageNum || 1}&all=${all}${eventsDeviceHash()}`;
+  return `events?p=${pageNum || 1}&all=${all}${eventsDeviceHash()}${eventsMinHash()}`;
 }
 
 // イベント詳細ハッシュ。戻り先の一覧状態(p/all/d)・縦軸レンジ(r)・時間ズーム(t)を持たせ、
@@ -1575,7 +1590,7 @@ function eventHash(id, includeZoom = true) {
   const r = document.getElementById('event-yrange').value;
   const t = includeZoom && eventZoom ? `&t=${Math.round(eventZoom.fromUs)}-${Math.round(eventZoom.toUs)}` : '';
   return `event/${encodeURIComponent(id)}?p=${eventsPageNum}&all=${all}`
-    + `${eventsDeviceHash()}&r=${r}&ax=${axesStr('event')}${t}`;
+    + `${eventsDeviceHash()}${eventsMinHash()}&r=${r}&ax=${axesStr('event')}${t}`;
 }
 
 // デバイス詳細ハッシュ。温度の表示期間(h)を持たせ、リロード・共有URLで復元される。
@@ -1598,6 +1613,7 @@ function route() {
     // 戻り先の一覧状態と詳細の縦軸レンジを操作子へ復元してから描画
     document.getElementById('events-all').checked = params.all === '1';
     eventsDeviceId = params.d ? decodeURIComponent(params.d) : 'all';  // 戻り先の絞り込み
+    setEventsMin(params.mi);
     if (params.p) eventsPageNum = parseInt(params.p, 10);
     if (params.r !== undefined) document.getElementById('event-yrange').value = params.r;
     setAxes('event', params.ax);
@@ -1609,6 +1625,7 @@ function route() {
     showEventsMode(false);
     document.getElementById('events-all').checked = params.all === '1';
     eventsDeviceId = params.d ? decodeURIComponent(params.d) : 'all';
+    setEventsMin(params.mi);
     reloadEvents(params.p ? parseInt(params.p, 10) : 1);
   } else if (path.startsWith('device/')) {
     showView('devices');
@@ -1718,6 +1735,8 @@ window.addEventListener('load', () => {
     eventsDeviceId = e.target.value;
     location.hash = eventsHash(1);
   };
+  // 最小震度も件数が変わるので1ページ目から。
+  document.getElementById('events-min').onchange = () => { location.hash = eventsHash(1); };
   document.getElementById('event-back').onclick = () => { location.hash = eventsHash(eventsPageNum); };
   // デバイスを変えても時間窓（拡大・指定時刻）は保つ。同じ揺れを別の機体で見比べるのが
   // 多点化の主目的で、解除すると比較のたびに時刻を探し直すことになる。
@@ -1748,6 +1767,7 @@ window.addEventListener('load', () => {
     liveOverlayIds = [];
     document.getElementById('events-all').checked = false;
     eventsDeviceId = 'all';
+    document.getElementById('events-min').value = '';
     eventsPageNum = 1;
     const h = liveHash();
     if (location.hash === '#' + h) route(); else location.hash = h;
