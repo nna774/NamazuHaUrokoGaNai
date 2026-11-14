@@ -308,3 +308,4 @@
 | 2026-11-12 | **茨城県南部M3.2(11/08 02:30・震源距離134km)の事後解析。** レンジ内だが標準・低帯域とも完全埋没でcritical。手動昇格・相互リンク済み(0001/0002-59802420)。 → [ログ](log/2026-11-12-ibaraki-nanbu-m3.2-0230-post-hoc-detection.md) |
 | 2026-11-13 | **ダッシュボードのライブ画面の縦軸既定を±100galから自動に変えた(ユーザー要望)。** タイトルクリックのリセット先も自動に。`r=`付きの既存URLは影響なし | [log/2026-11-13-dashboard-y-axis-default-auto.md](log/2026-11-13-dashboard-y-axis-default-auto.md) |
 | 2026-11-13 | **イベント一覧に「震度n以上」の絞り込みを足した。** `/events?min_intensity=`でサーバ側(`list_page`)が表示震度(`effective_intensity`)で絞り、ダッシュボードは「震度」セレクタと`#events?mi=`。ページングを壊さないためサーバ側で絞る判断 | [log/2026-11-13-events-min-intensity-filter.md](log/2026-11-13-events-min-intensity-filter.md) |
+| 2026-11-14 | **pull型OTAの取得を`HTTPUpdate`から自前ループ(`firmware/lib/PullOta`)に置き換えた。** `Update.writeStream()`は4KBセクタが埋まるまでWDTを養えず、受信が細切れ・停滞すると20秒を超えてパニックしていた(device2で2回)。毎周WDTを養い、停滞15秒・全体180秒で既存の失敗パスに落とす。main・piezo両方。実機配信は未 | [log/2026-11-14-ota-pull-own-loop.md](log/2026-11-14-ota-pull-own-loop.md) |

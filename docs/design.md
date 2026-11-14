@@ -276,25 +276,16 @@ TlsMemPool導入と静的RAM削減を経て小さいスロット数で再挑戦�
 `postBatch()`/`sendAlert()`はどちらもボディを読まないため実際には到達しない
 コードパスと判明し、対処不要と分かった。
 
-**pull型OTA取得(`performPullOta()`)にも同じ形の穴があった。** `WiFiClientSecure`の
-TLSハンドシェイクの締切が既定**120秒**のまま`httpUpdate.update()`を呼んでおり、
-`onProgress()`によるWDT給餌は「進捗があった時」にしか効かないため、ハンドシェイクが
-WDT(20秒)より長く詰まると`onProgress()`が一度も呼ばれないままパニックする
-（[log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md)
-で発見、[log/2026-09-06-device1-hostbyname-patch-rollout.md](log/2026-09-06-device1-hostbyname-patch-rollout.md)
-でesp32dev環境でも再現)。`performPullOta()`は`HTTP_UPDATE_FAILED`を60秒バックオフで
-再試行する穏当な失敗パスを既に持っていたため、対処は`client.setHandshakeTimeout(4)`
-(秒、`Uploader`と同じ値)を`httpUpdate.update()`より前に呼ぶだけで済んだ——単発の
-遅延をハードパニックではなくその失敗パスに変える。
-
-**read/writeの締切は`client.setTimeout()`では変えられない。** `httpUpdate.update()`
-内部で`HTTPClient::connect()`が独自の既定値(接続5000ms、以後は`HTTPUpdate`の
-`_httpClientTimeout`既定値8000ms)で必ず上書きする——グローバル`httpUpdate`インスタンス
-にこれを変える公開APIは無い。当初`client.setTimeout(4)`も一緒に呼んでいたが、実際には
-何の効果も持たないdeadコードだったと[コードレビューで指摘され判明し](log/2026-09-06-ota-pull-timeout-budget-fix.md)、
-削除した。幸い接続5秒・read/write8秒とも既にWDT(20秒)に十分収まる値のため、対処不要と
-判断した——効いていたのは`setHandshakeTimeout(4)`だけで、それで実害の原因(120秒の
-無制限待ち)は塞げている。
+**pull型OTA取得(`performPullOta()`)は、ブロッキングAPIに任せずWDTを自前で養う。**
+`HTTPUpdate`の`onProgress()`は4KBセクタの書き込みごとにしか呼ばれず、
+`Update.writeStream()`の中の`Stream::readBytes()`は1バイトごとに8秒待つ`timedRead()`を
+繰り返すうえ、空振りを100ms間隔で最大300回再試行する。受信が停滞・細切れになると
+給餌の間隔がWDT(20秒)を超えてパニックした（ハンドシェイク既定120秒の件は
+[log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md)、
+ボディ受信の件は[log/2026-11-14-ota-pull-own-loop.md](log/2026-11-14-ota-pull-own-loop.md)）。
+いまは`firmware/lib/PullOta`が`HTTPClient`+`Update.write()`の自前ループで毎周WDTを養い、
+受信停滞15秒・全体180秒の締切を持つ。超えたら既存の穏当な失敗パス(60秒バックオフで
+再試行)に落ちる。ハンドシェイクは`client.setHandshakeTimeout(4)`で締める。
 
 **既知の未解決問題**: 接続を使い回す(`setReuse(true)`)実装のため、前回
 レスポンスのボディを読み残したまま次のヘッダ読み取りに入ると誤読しうる。
