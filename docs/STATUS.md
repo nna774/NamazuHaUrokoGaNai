@@ -192,7 +192,7 @@ aws cloudfront create-invalidation --distribution-id E3C0AH1VAIC46E --paths '/ap
       （`tools/provision_device.py provision-h` → `[env:provision]`で焼く）。手元の
       `tools/request_ota.py request <id> <version>`で許可すると、デバイスが
       バッチ送信レスポンスヘッダ（リモート再起動要求と同じ経路。batch-uplink
-      v1.5.0で複数ヘッダ監視に対応）で気づき`HTTPUpdate`で取得する。TLS検証は
+      v1.5.0で複数ヘッダ監視に対応）で気づき`firmware/lib/PullOta`で取得する。TLS検証は
       Amazon Root CA 1を埋め込んで`setCACert()`（既定CAバンドルは実機で機能せず、
       実際の証明書チェーンを確認して1本だけ明示指定した）。失敗時は1分バックオフ
       でリトライし、30分（既定）解消しなければwatchdogがSlack通知する。**2026-08-06、

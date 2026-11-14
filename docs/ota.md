@@ -64,7 +64,7 @@ NAMZ_DEVICES_TABLE=namazu-devices .venv/bin/python tools/request_ota.py cancel 1
 ## 2. 採用した方式: HTTPSプル型（外出先からの更新・無人運用向け）
 
 2026-08-06に実装。デバイスがバッチ送信のたびにサーバへ更新有無を問い合わせ
-（後述のトリガー）、あれば`HTTPUpdate`で取得・書き込みする。運用者が対象デバイスと
+（後述のトリガー）、あれば`HTTPClient`で取得し`Update.write()`で書き込む。運用者が対象デバイスと
 同じLANにいる必要が無いのが利点で、デバイス発信の経路なので後述のネットワーク
 分離の影響も受けない。
 
@@ -187,16 +187,17 @@ ota/<env>/<version>.elf      # crash後のcoredumpシンボル解決用（firmwa
       自分で`esp_task_wdt_reset()`を呼べなくなるため、転送が終わるまで
       ウォッチドッグの監視対象から一時的に外す
    3. `gBatchQueue` の残りを `gUploader` へ吸い出し、`flushToSpill()` でLittleFSへ退避
-2. 取得はArduino-ESP32の`HTTPUpdate`（`httpUpdate.update(client, url)`。内部は
-   `WiFiClientSecure`+`HTTPClient`、書き込みは`Update.h`）。`onProgress`
-   コールバックで毎回`esp_task_wdt_reset()`を呼ぶ（ブロッキングAPIそのままだと
-   進行中にWDTを養えない）。`rebootOnUpdate(false)`にして再起動はこちらで制御する。
-   **既知の制約**: `onProgress`はチャンク書き込みが完了するたびにしか呼ばれず、
-   1回のブロッキング読み取り自体が長引く分はカバーしない。`client`に
-   `setTimeout()`を呼んでいないため既定のソケット読み取りタイムアウト(30秒)が
-   WDT(20秒)より長く残っており、device2実機でTASK_WDT再起動を実際に踏んでいる
-   （[docs/log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md)）。
-   修正方針は未着手。
+2. 取得・書き込みは`firmware/lib/PullOta`の`pullota::fetchAndWrite()`。
+   `HTTPClient`でGETし、ボディを自前のループで`available()`分ずつ読んで
+   `Update.write()`に渡す。ループの毎周で`esp_task_wdt_reset()`を呼び、
+   代わりに締切を2つ自前で持つ: 受信停滞15秒(`kStallTimeoutMs`)と取得全体
+   180秒(`kOverallTimeoutMs`)。どちらかを超えたら`Update.abort()`して失敗を返す。
+   `HTTPUpdate`(`Update.writeStream()`)は使わない——4KBセクタが埋まるまで
+   戻らず、その間WDTを養えないため、受信が細切れ・停滞すると20秒を超えて
+   パニックした（2026-11-14 device2で2回。[docs/log/2026-11-14-ota-pull-own-loop.md](log/2026-11-14-ota-pull-own-loop.md)）。
+   TLSハンドシェイクは`setHandshakeTimeout(4)`で締める（既定120秒、
+   [docs/log/2026-08-31-device2-ota-pull-wdt-panic.md](log/2026-08-31-device2-ota-pull-wdt-panic.md)）。
+   接続5秒・レスポンスヘッダ5秒は`HTTPClient`の既定値のまま。
 3. 成功なら`ESP.restart()`。失敗系は`resumeSamplingAfterOtaFailure()`で測定
    タイマー・WDT登録を復旧して測定続行し、1分のバックオフを置いて次回のバッチ
    送信時のチェックでリトライする（後述、実機で踏んだ不具合）。
@@ -233,8 +234,8 @@ ota/<env>/<version>.elf      # crash後のcoredumpシンボル解決用（firmwa
    出典は https://www.amazontrust.com/repository/AmazonRootCA1.pem
    （有効期限2038-01-17。CAがローテーションされたら要更新）。
 
-**`.sha256`との突き合わせはファーム側では実装していない**（`HTTPUpdate`
-（`Update.h`）自身がESP32イメージのマジック・チェックサムを検証するのと、
+**`.sha256`との突き合わせはファーム側では実装していない**（`Update.h`
+自身がESP32イメージのマジック・チェックサムを検証するのと、
 上記のTLS検証で「正規のCloudFrontから来た完全なデータ」であることは担保
 できる。バージョン文字列を取り違えて誤った版を公開する運用ミス対策としては、
 `.sha256`は`publish_ota.sh`が生成し運用者が手元で目視確認する用途に留めた）。
