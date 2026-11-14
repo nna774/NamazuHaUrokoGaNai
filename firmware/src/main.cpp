@@ -7,7 +7,6 @@
 // シリアルに "t_us,x,y,z" を出すだけ（tools/capture_serial.py 用・Phase1）。
 
 #include <Arduino.h>
-#include <HTTPUpdate.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -23,6 +22,7 @@
 #include "DeviceIdentity.h"
 #include "Display.h"
 #include "NamzWire.h"
+#include "PullOta.h"
 #ifdef NAMZ_SENSOR_FAKE
 #include "FakeSensor.h"
 #elif defined(NAMZ_SENSOR_ADXL355)
@@ -572,26 +572,13 @@ static bool performPullOta(const String& targetVersion) {
 
   WiFiClientSecure client;
   client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
-  // TLSハンドシェイクの締切が既定120秒のまま残っており、onProgress()が一度も
-  // 呼ばれないままWDT(20秒)が先に発火してパニックする実機不具合を踏んだ
-  // (docs/log/2026-08-31-device2-ota-pull-wdt-panic.md、
-  // 2026-09-06-device1-hostbyname-patch-rollout.md)。Uploaderと同じ4秒に縮める
-  // ——単発の遅延をHTTP_UPDATE_FAILED(既存の穏当な失敗パス、60秒バックオフで
-  // 再試行)に変える。read/writeの締切は`client.setTimeout()`では変えられない
-  // ——httpUpdate.update()の内部でHTTPClient::connect()が独自の既定値(接続
-  // 5000ms、以後8000ms=HTTPUpdateの_httpClientTimeout既定値)で必ず上書きする
-  // ため(グローバルhttpUpdateにこれを変える公開APIは無い)。どちらもWDTには
-  // 十分収まる値なので対処不要と判断した
+  // 既定120秒のままだとハンドシェイク中にWDT(20秒)が先に発火する
+  // (docs/log/2026-08-31-device2-ota-pull-wdt-panic.md)。Uploaderと同じ4秒。
   client.setHandshakeTimeout(4);
-  httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
-  httpUpdate.onProgress([](int, int) {
-    esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う(otaOnProgressと同じ理由)
-  });
 
-  t_httpUpdate_return ret = httpUpdate.update(client, url);
-  if (ret != HTTP_UPDATE_OK) {
-    Serial.printf("[ota-pull] failed: %d (%s)\n", (int)ret,
-                  httpUpdate.getLastErrorString().c_str());
+  String err;
+  if (!pullota::fetchAndWrite(client, url, err)) {
+    Serial.printf("[ota-pull] failed: %s\n", err.c_str());
     return false;
   }
   Serial.println("[ota-pull] write OK, restarting");

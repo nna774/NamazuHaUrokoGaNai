@@ -13,7 +13,6 @@
 // 無いため「更新中」の視覚表示は無い。
 
 #include <Arduino.h>
-#include <HTTPUpdate.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <esp_system.h>
@@ -23,6 +22,7 @@
 #include "Batch.h"
 #include "DeviceIdentity.h"
 #include "NamzWire.h"
+#include "PullOta.h"
 #include "PiezoSensor.h"
 #include "TimeSync.h"
 #include "TlsMemPool.h"
@@ -201,18 +201,11 @@ static bool performPullOta(const String& targetVersion) {
 
   WiFiClientSecure client;
   client.setCACert(reinterpret_cast<const char*>(amazon_root_ca1_pem_start));
-  // 本線(main.cpp)と同じ理由・同じ制約(read/writeはclient.setTimeout()では
-  // 変えられずhttpUpdate内部の既定値のまま)。docs/log/
-  // 2026-08-31-device2-ota-pull-wdt-panic.md・2026-09-06-device1-hostbyname-patch-rollout.md参照。
-  client.setHandshakeTimeout(4);
-  httpUpdate.rebootOnUpdate(false);  // 再起動は呼び出し側(checkAndPerformPullOta)で制御する
-  httpUpdate.onProgress([](int, int) {
-    esp_task_wdt_reset();  // ブロッキングAPIなのでここでWDTを養う
-  });
+  client.setHandshakeTimeout(4);  // 本線(main.cpp)と同じ理由
 
-  t_httpUpdate_return ret = httpUpdate.update(client, url);
-  if (ret != HTTP_UPDATE_OK) {
-    Serial.printf("[ota-pull] failed: %d (%s)\n", (int)ret, httpUpdate.getLastErrorString().c_str());
+  String err;
+  if (!pullota::fetchAndWrite(client, url, err)) {
+    Serial.printf("[ota-pull] failed: %s\n", err.c_str());
     return false;
   }
   Serial.println("[ota-pull] write OK, restarting");
