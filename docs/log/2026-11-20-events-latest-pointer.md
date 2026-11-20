@@ -34,3 +34,10 @@ Electabuzz で、`namazu-events` と同じ作りのイベントテーブルが20
 
 `record_cloud_detection()` の `newly_confirmed` は、`_record` が `prev` をそのまま書き換えるため、
 先に速報があるセッションでは常に False になる。呼び出し側（detect）はこの値を使っていないので実害は無い。
+
+## デプロイ（2026-11-20 15:11）
+
+PR #273 マージ後に5関数とも terraform apply（差分は `source_code_hash` のみ）。
+直後に `/events`（既定・`all=1`）が385件をポインタ混入なしで返し、device 1・2 の受信も継続していることを確認した。
+ポインタ項目は次の速報/確定報で初めて作られるので、apply 時点ではまだ無い。
+`namazu-admin` ロールには CloudWatch Logs・メトリクスの読み取り権限が無く、detect/ingest のエラー有無は直接は見ていない。
