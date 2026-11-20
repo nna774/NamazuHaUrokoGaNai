@@ -17,6 +17,8 @@ import boto3
 BUCKET_US = 30_000_000  # 30秒
 # 直近イベントの活動終端から onset がこの時間[us]以内なら同一セッションに延長する。
 MERGE_GAP_US = 60_000_000  # 60秒
+# デバイスごとの最新イベントを指すポインタ項目の event_id 接頭辞。イベント本体と同じテーブルに置く。
+LATEST_POINTER_PREFIX = "latest#"
 
 # 事後解析の判定（`tools/detection_events.csv` の verdict 列と同じ語彙を使う。
 # 語彙を分けると対応表が要るので揃える）。
@@ -40,24 +42,57 @@ def event_id(device_id: int, onset_us: int) -> str:
     return f"{device_id:04d}-{onset_us // BUCKET_US:d}"
 
 
+def latest_pointer_id(device_id: int) -> str:
+    """デバイスごとの最新イベントを指すポインタ項目のキー。"""
+    return f"{LATEST_POINTER_PREFIX}{device_id:04d}"
+
+
+def is_pointer(item: dict) -> bool:
+    return str(item.get("event_id", "")).startswith(LATEST_POINTER_PREFIX)
+
+
+def _last_us(item: dict) -> int:
+    return int(item.get("last_us", item.get("onset_us", 0)))
+
+
 def _latest_event(device_id: int) -> dict | None:
-    """このデバイスの最新イベント（last_us が最大のもの）。単一デバイス想定の簡易 scan。"""
-    items = [i for i in _table().scan(Limit=1000).get("Items", [])
-             if int(i.get("device_id", -1)) == device_id]
+    """このデバイスの最新イベント（last_us が最大のもの）。
+
+    ポインタ項目から GetItem で引く。ポインタが無いか指す先が消えているときだけ全件 scan で探し、ポインタを作り直す。
+    """
+    ptr = _table().get_item(Key={"event_id": latest_pointer_id(device_id)}).get("Item")
+    if ptr:
+        target = _table().get_item(Key={"event_id": ptr["latest_event_id"]}).get("Item")
+        if target:
+            return target
+    items = [i for i in _scan_all() if int(i.get("device_id", -1)) == device_id]
     if not items:
         return None
-    return max(items, key=lambda x: int(x.get("last_us", x.get("onset_us", 0))))
+    latest = max(items, key=_last_us)
+    _put_pointer(device_id, latest["event_id"])
+    return latest
 
 
-def _assign(device_id: int, onset_us: int) -> str:
-    """onset を既存セッションに合流させるか、新規セッションの id を返す。"""
+def _put_pointer(device_id: int, eid: str) -> None:
+    _table().put_item(Item={"event_id": latest_pointer_id(device_id), "latest_event_id": eid})
+
+
+def _advance_pointer(device_id: int, item: dict, latest: dict | None) -> None:
+    """item が latest 以降まで続いていればポインタを item に向ける。"""
+    # WiFi断後のバックフィルで過去の onset が新規セッションになることがあるので、無条件には向けない。
+    if latest is None or _last_us(item) >= _last_us(latest):
+        _put_pointer(device_id, item["event_id"])
+
+
+def _assign(device_id: int, onset_us: int) -> tuple[str, dict | None]:
+    """onset を合流させるセッションの id（既存か新規）と、判定に使った最新イベントを返す。"""
     latest = _latest_event(device_id)
     if latest:
         o = int(latest.get("onset_us", 0))
         last = int(latest.get("last_us", o))
         if o - MERGE_GAP_US <= onset_us <= last + MERGE_GAP_US:
-            return latest["event_id"]  # 同一セッションに延長
-    return event_id(device_id, onset_us)  # 新規セッション
+            return latest["event_id"], latest  # 同一セッションに延長
+    return event_id(device_id, onset_us), latest  # 新規セッション
 
 
 def effective_intensity(item: dict) -> float:
@@ -76,7 +111,7 @@ def _record(device_id, onset_us, intensity, peak_gal,
     単一デバイス・低頻度運用では並行更新はまず起きないため、条件付き更新でなく
     素直な read-modify-write にしている。
     """
-    eid = _assign(device_id, onset_us)
+    eid, latest = _assign(device_id, onset_us)
     tbl = _table()
     prev = tbl.get_item(Key={"event_id": eid}).get("Item")
 
@@ -109,6 +144,7 @@ def _record(device_id, onset_us, intensity, peak_gal,
             Decimal(str(item.get("confirmed_intensity", 0))))
 
     tbl.put_item(Item=item)
+    _advance_pointer(device_id, item, latest)
     return eid, prev
 
 
@@ -162,6 +198,7 @@ def record_manual_event(device_id, onset_us, intensity, peak_gal,
         item["verdict"] = verdict
         item["verdict_source"] = "human"
     tbl.put_item(Item=item)
+    _advance_pointer(device_id, item, _latest_event(device_id))
     return eid
 
 
@@ -242,19 +279,19 @@ def set_waveform_prefix(eid: str, prefix: str) -> None:
 
 
 def recent_events(limit: int = 50) -> list[dict]:
-    """最近のイベントを新しい順で返す（単一デバイス想定の簡易 scan）。"""
-    items = _table().scan(Limit=1000).get("Items", [])
+    """最近のイベントを新しい順で返す（全件 scan）。"""
+    items = _scan_all()
     items.sort(key=lambda x: int(x.get("onset_us", 0)), reverse=True)
     return items[:limit]
 
 
 def _scan_all() -> list[dict]:
-    """テーブル全件を scan（ページネーション込み）。"""
+    """イベント全件を scan（ページネーション込み。ポインタ項目は除く）。"""
     out: list[dict] = []
     kwargs: dict = {}
     while True:
         resp = _table().scan(**kwargs)
-        out.extend(resp.get("Items", []))
+        out.extend(i for i in resp.get("Items", []) if not is_pointer(i))
         lek = resp.get("LastEvaluatedKey")
         if not lek:
             break

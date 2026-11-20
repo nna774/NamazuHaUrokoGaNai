@@ -68,7 +68,7 @@ import boto3
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lambda"))  # common
 import awsenv  # noqa: E402
-from common.events import VERDICTS  # noqa: E402  判定の語彙は events.py を単一の出所にする
+from common.events import VERDICTS, is_pointer  # noqa: E402  判定の語彙は events.py を単一の出所にする
 
 EVENT_ID_RE = re.compile(r"\d{4}-\d{1,16}")
 
@@ -88,7 +88,7 @@ def _scan_all(table) -> list[dict]:
     kwargs: dict = {}
     while True:
         resp = table.scan(**kwargs)
-        out.extend(resp.get("Items", []))
+        out.extend(i for i in resp.get("Items", []) if not is_pointer(i))
         lek = resp.get("LastEvaluatedKey")
         if not lek:
             break
