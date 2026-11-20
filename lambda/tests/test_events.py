@@ -115,10 +115,20 @@ def test_min_intensity_none_means_no_filter(monkeypatch):
 
 
 class _FakeTable:
-    """DynamoDB Table の最小スタブ（get/put/update: SET #n=:v と REMOVE #n のみ）。"""
+    """DynamoDB Table の最小スタブ（get/put/scan と update: SET #n=:v と REMOVE #n のみ）。"""
 
-    def __init__(self):
+    def __init__(self, page_size=1000):
         self.items: dict = {}
+        self.page_size = page_size
+
+    def scan(self, ExclusiveStartKey=None, **_):
+        keys = list(self.items)
+        start = keys.index(ExclusiveStartKey["event_id"]) + 1 if ExclusiveStartKey else 0
+        page = keys[start:start + self.page_size]
+        resp = {"Items": [dict(self.items[k]) for k in page]}
+        if start + self.page_size < len(keys):
+            resp["LastEvaluatedKey"] = {"event_id": page[-1]}
+        return resp
 
     def get_item(self, Key):
         it = self.items.get(Key["event_id"])
@@ -210,3 +220,90 @@ def test_set_note_set_and_clear(monkeypatch):
     assert fake.items["0001-1"]["note"] == "あとで見る"
     events.set_note("0001-1", None)
     assert "note" not in fake.items["0001-1"]
+
+
+T0 = 1_800_000_000_000_000
+
+
+@pytest.fixture
+def paged(monkeypatch):
+    """1ページ10件で scan を区切る偽テーブル。"""
+    fake = _FakeTable(page_size=10)
+    monkeypatch.setattr(events, "_table", lambda: fake)
+    return fake
+
+
+def _seed_old_events(fake, device_id, n):
+    for i in range(n):
+        eid = f"{device_id:04d}-{i}"
+        fake.items[eid] = {"event_id": eid, "device_id": device_id,
+                           "onset_us": i, "last_us": i}
+
+
+def test_continuing_shake_merges_beyond_one_scan_page(paged):
+    _seed_old_events(paged, 2, 50)
+    eid, is_new = events.record_device_prompt(1, T0, 0.5, 1.0)
+    assert is_new
+    for i in range(1, 5):
+        eid2, is_new = events.record_device_prompt(1, T0 + i * 30_000_000, 0.5, 1.0)
+        assert (eid2, is_new) == (eid, False)
+    assert int(paged.items[eid]["last_us"]) == T0 + 4 * 30_000_000
+
+
+def test_cloud_detection_joins_device_prompt_session(paged):
+    _seed_old_events(paged, 1, 30)
+    eid, _ = events.record_device_prompt(1, T0, 0.5, 1.0)
+    eid2, _ = events.record_cloud_detection(1, T0 + 5_000_000, 0.8, 1.2)
+    assert eid2 == eid
+    assert paged.items[eid]["cloud_confirmed"] is True
+
+
+def test_pointer_bootstraps_from_existing_events(paged):
+    _seed_old_events(paged, 1, 25)
+    eid, is_new = events.record_device_prompt(1, 24 + events.MERGE_GAP_US // 2, 0.5, 1.0)
+    assert (eid, is_new) == ("0001-24", False)
+    ptr = paged.items[events.latest_pointer_id(1)]
+    assert ptr["latest_event_id"] == "0001-24"
+
+
+def test_pointer_rebuilt_when_target_missing(paged):
+    _seed_old_events(paged, 1, 3)
+    paged.items[events.latest_pointer_id(1)] = {
+        "event_id": events.latest_pointer_id(1), "latest_event_id": "0001-999"}
+    eid, is_new = events.record_device_prompt(1, 2 + 1_000_000, 0.5, 1.0)
+    assert (eid, is_new) == ("0001-2", False)
+
+
+def test_backfilled_older_session_does_not_steal_pointer(paged):
+    eid_now, _ = events.record_device_prompt(1, T0, 0.5, 1.0)
+    old_onset = T0 - 3600 * 1_000_000
+    eid_old, is_new = events.record_device_prompt(1, old_onset, 0.5, 1.0)
+    assert is_new and eid_old != eid_now
+    assert paged.items[events.latest_pointer_id(1)]["latest_event_id"] == eid_now
+    eid3, is_new = events.record_device_prompt(1, T0 + 30_000_000, 0.5, 1.0)
+    assert (eid3, is_new) == (eid_now, False)
+
+
+def test_pointers_are_per_device(paged):
+    eid1, _ = events.record_device_prompt(1, T0, 0.5, 1.0)
+    eid2, is_new = events.record_device_prompt(2, T0 + 1_000_000, 0.5, 1.0)
+    assert is_new and eid2 != eid1
+
+
+def test_manual_event_advances_pointer_only_when_newer(paged):
+    eid_now, _ = events.record_device_prompt(1, T0, 0.5, 1.0)
+    events.record_manual_event(1, T0 - 86400 * 1_000_000, 0.3, 0.5)
+    assert paged.items[events.latest_pointer_id(1)]["latest_event_id"] == eid_now
+    eid_new = events.record_manual_event(1, T0 + 86400 * 1_000_000, 0.3, 0.5)
+    assert paged.items[events.latest_pointer_id(1)]["latest_event_id"] == eid_new
+
+
+def test_scans_read_all_pages_and_skip_pointers(paged):
+    for i in range(25):
+        events.record_device_prompt(1, T0 + i * 10 * events.MERGE_GAP_US, 0.5, 1.0)
+    got = events.recent_events(limit=3)
+    assert [int(e["onset_us"]) for e in got] == [
+        T0 + i * 10 * events.MERGE_GAP_US for i in (24, 23, 22)]
+    assert not any(events.is_pointer(e) for e in events.recent_events(limit=100))
+    _, total = events.list_page(show_all=True)
+    assert total == 25
