@@ -82,6 +82,10 @@
     同じ語彙)。`verdict_source` は `human`/`auto`。**一覧の既定フィルタはこれを見ない**
     ——埋没と判定したイベントも既定で出す（「調べたが見えなかった」と「まだ調べていない」を
     区別するため）。付けるのは `flag_event.py verdict` か `promote_event.py --verdict`
+  - **同じテーブルにデバイスごとの最新イベントを指すポインタ項目**（`event_id = "latest#<device:04d>"`）が
+    ある。セッション結合（`_latest_event`）はこれを `GetItem` で引く——`scan` の1ページ(1000件)に
+    頼るとテーブルが育った時に結合が壊れる（Electabuzzで実際に起きた）。**テーブルを全件scanする
+    コードを書いたら `events.is_pointer()` で除外しろ**（→ [docs/log/2026-11-20-events-latest-pointer.md](docs/log/2026-11-20-events-latest-pointer.md)）。
   - 一覧の既定フィルタは「(確定 or **manual** or 未評価) かつ 非artificial」（`lambda/common/events.py`の
     `list_page()`）。**`manual`＝手動昇格は確定と同格に既定一覧へ出る**——`promote_event.py`で
     昇格したものは震度0でも一覧の先頭に並ぶ。表示震度は `effective_intensity`。
