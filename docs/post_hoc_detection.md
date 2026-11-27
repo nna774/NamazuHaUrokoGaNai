@@ -335,13 +335,19 @@ worktreeには`.venv`が無く`terraform output`も通らないことがある�
 - **AWSは`namazu-analysis`ロール**（環境のセットアップスクリプトが`~/.aws/config`を書き、
   `AWS_PROFILE=namazu-analysis`になっている）。`namazu-admin`ではない。権限は:
   - 読める: rawバケットの`raw/`、DynamoDB `namazu-events`・`namazu-devices`（欠測の有無も確認できる）
-  - 書ける: rawバケットの`events/`、DynamoDB `namazu-events`（`promote_event.py`・`flag_event.py`が通る）
-  - 拒否される: `events/`以外へのS3書き込み、`s3:ListAllMyBuckets`、`namazu-devices`への書き込み
+  - 書ける: rawバケットの`events/`、DynamoDB `namazu-events`（`promote_event.py`・`flag_event.py`が通る）、
+    apiのCloudFront無効化
+  - 拒否される: `events/`以外へのS3書き込み、`s3:ListAllMyBuckets`、`namazu-devices`への書き込み、CloudFrontの参照系(`ListDistributions`/`GetDistribution`)
 - **`aws`コマンドはPATHに無い。`.venv/bin/aws`で呼ぶ**（セットアップスクリプトが`.venv`に入れる）。
   Pythonは`.venv/bin/python`。boto3は上のプロファイルをそのまま使う。
 - **`terraform`は無い。** バケット名・テーブル名は環境変数`NAMZ_RAW_BUCKET`/`NAMZ_BUCKET`/`NAMZ_EVENTS_TABLE`
-  で渡されているので、`--bucket`等は省略してよい。CloudFrontの無効化が要る場面（既存event_idの書き換え）では
-  distribution IDを`terraform output`で引けないので、無効化は手元に頼む。
+  で渡されているので、`--bucket`等は省略してよい。
+- **apiの`/event`のCloudFront無効化はできる**（既存event_idを書き換えた時。distribution IDは環境変数
+  `NAMZ_API_DISTRIBUTION_ID`。`ListDistributions`等は拒否されるので`terraform output`の代わりにこれを使う）:
+  ```bash
+  .venv/bin/aws cloudfront create-invalidation --distribution-id "$NAMZ_API_DISTRIBUTION_ID" \
+    --paths '/event?id=<書き換えたevent_id>'
+  ```
 - 外向きの通信は`www.jma.go.jp`と`api.namazu.dark-kuins.net`（とパッケージレジストリ）だけ許可されている。
   tenki.jpは取れないので、震源要素は`list.json`から取る。
 - 図の日本語ラベル用の`fonts-noto-cjk`はセットアップスクリプトで入れている。豆腐になっていたら

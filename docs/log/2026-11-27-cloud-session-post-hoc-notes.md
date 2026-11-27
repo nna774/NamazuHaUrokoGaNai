@@ -31,3 +31,5 @@
 - `namazu-analysis`ロールに`namazu-devices`の読み取りを足した（ロールは別リポジトリで管理しており、変更もそちらで行った）。
   GetItem・Query・Scanが通り、UpdateItemは拒否されることをこのセッションで確認した。これで事後解析中に欠測の有無を確認できる。
 - ロールの元になるIAMユーザー`claude-cloud`は、AssumeRole以外が拒否される（S3・DynamoDB・IAMの読み取りで確認）。
+- apiのCloudFront無効化(`CreateInvalidation`)もこのロールで通る。distribution IDは`terraform output`で引けないため、
+  環境変数`NAMZ_API_DISTRIBUTION_ID`として環境に足した。取得済みで内容を変えていない1件で無効化が作成されることを確認した。
