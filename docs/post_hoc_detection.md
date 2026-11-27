@@ -191,6 +191,24 @@ z軸の低周波ノイズを避けて水平2軸だけを見ることで、遠地
 標準設定では閾値未達でも、この設定で両機が閾値を超えることがある
 （浦河沖M6.0: 標準3.81/3.83→未達、低帯域5.61/7.67→超過）。
 
+### 近距離（概ね100km以内）の小地震では2-20Hzで両機のonset一致を見る
+
+低帯域とは逆に、近くて小さい地震は短周期成分が残る。標準の1-10Hzで閾値に届かなくても、
+2-20Hzで閾値を下げてonset候補を列挙すると、両機の立ち上がりが独立に揃って見えることがある
+（[2026-11-20上越M2.4](log/2026-11-27-joetsu-m2.4-post-hoc-detection.md)：51km、両機onset 0.13秒差。
+[2026-11-25会津M3.8](log/2026-11-27-post-hoc-detection-1121-1127.md)：80km、0.11秒差）。
+
+```bash
+python tools/detectlab.py --at "<発生時刻の少し前>" --minutes 3 --lead-min 3 --device 1 \
+  --band 2 20 --thr 1.8 --out /tmp/<slug>-thr-d1.png   # device 2 も同様
+```
+
+**device1はこの設定で誤検出が多い**（3分あまりの窓に10〜20個の候補が出るのが普通）。数えるのは
+「両機のonsetが1秒以内で揃った時刻」だけで、device1単独の候補には意味が無い。揃った時刻が
+見つかったら、その時刻をP波として推定発生時刻を逆算する（下の「気象庁の発生時刻は分単位」節）。
+device2にS-P時間ぶん後ろの2つ目のonsetがあれば、P/Sの読みの裏付けになる。
+2例だけの経験則なので、合わない例が出たらここを直すこと。
+
 ### 判定の目安
 
 `docs/noise.md`「検出できた／できなかった」節に過去事例（震源距離・SNR・直線性と判定の対応）
@@ -233,6 +251,12 @@ STA/LTAの時系列と`--corr-bin`のbin別を必ず見る。
 ずれて「微妙」と出るだけで判断材料にならない。分丸め基準で一度撮ってズレに気づいたら、重ね描き・
 device単体・低帯域の**すべて**を推定時刻（`--at`/`--eew`に推定値、`--eew-estimated`付き）で撮り直して
 ログにリンクする（分丸め基準の図は比較用に残すだけ。[2026-10-29千葉県北東部M4.4](log/2026-10-29-chiba-hokutobu-m4.4-0332-post-hoc-detection.md)）。
+
+**目立つ山がP波かS波か決められない時は、2つの仮説それぞれの推定発生時刻で`--corr-bin 5`を取り、
+機間相関の山の絶対時刻を比べる。** どちらの仮説でも同じ絶対時刻に出る相関の山は、仮説によらない実在の
+到達である。その山と目立つ山との間隔を、震源距離から見込まれるS-P時間（概ね震源距離÷8 秒）と比べて読みを決める
+（[2026-11-27能登M3.8](log/2026-11-27-post-hoc-detection-1121-1127.md)：00:11:28〜35の相関の山をP、
+約20秒後の低帯域の山をSと読んだ）。
 
 また、標準出力の`onset候補`の`(t+…s)`は**各deviceのデータ開始からの経過**で、発生時刻基準ではない。
 ログに書く時は発生時刻からの経過秒に直す（窓や`--corr-bin`の`t=`は発生時刻基準なので混ぜない）。
@@ -303,6 +327,31 @@ worktreeには`.venv`が無く`terraform output`も通らないことがある�
 `terraform output -raw data_bucket`を引いて照合する）を`--bucket`（または環境変数
 `NAMZ_RAW_BUCKET`/`NAMZ_BUCKET`）に直接指定し、`../../../.venv/bin/python3`のように
 フルパスでPythonを呼ぶ。
+
+### クラウドセッション（Claude Code on the web）から実行する時
+
+手元とは前提が違う。2026-11-27に実際に全手順（解析〜昇格・relate）を通して確認した状態:
+
+- **AWSは`namazu-analysis`ロール**（環境のセットアップスクリプトが`~/.aws/config`を書き、
+  `AWS_PROFILE=namazu-analysis`になっている）。`namazu-admin`ではない。権限は:
+  - 読める: rawバケットの`raw/`、DynamoDB `namazu-events`・`namazu-devices`（欠測の有無も確認できる）
+  - 書ける: rawバケットの`events/`、DynamoDB `namazu-events`（`promote_event.py`・`flag_event.py`が通る）、
+    apiのCloudFront無効化
+  - 拒否される: `events/`以外へのS3書き込み、`s3:ListAllMyBuckets`、`namazu-devices`への書き込み、CloudFrontの参照系(`ListDistributions`/`GetDistribution`)
+- **`aws`コマンドはPATHに無い。`.venv/bin/aws`で呼ぶ**（セットアップスクリプトが`.venv`に入れる）。
+  Pythonは`.venv/bin/python`。boto3は上のプロファイルをそのまま使う。
+- **`terraform`は無い。** バケット名・テーブル名は環境変数`NAMZ_RAW_BUCKET`/`NAMZ_BUCKET`/`NAMZ_EVENTS_TABLE`
+  で渡されているので、`--bucket`等は省略してよい。
+- **apiの`/event`のCloudFront無効化はできる**（既存event_idを書き換えた時。distribution IDは環境変数
+  `NAMZ_API_DISTRIBUTION_ID`。`ListDistributions`等は拒否されるので`terraform output`の代わりにこれを使う）:
+  ```bash
+  .venv/bin/aws cloudfront create-invalidation --distribution-id "$NAMZ_API_DISTRIBUTION_ID" \
+    --paths '/event?id=<書き換えたevent_id>'
+  ```
+- 外向きの通信は`www.jma.go.jp`と`api.namazu.dark-kuins.net`（とパッケージレジストリ）だけ許可されている。
+  tenki.jpは取れないので、震源要素は`list.json`から取る。
+- 図の日本語ラベル用の`fonts-noto-cjk`はセットアップスクリプトで入れている。豆腐になっていたら
+  `apt-get install -y fonts-noto-cjk`してmatplotlibのキャッシュ(`~/.cache/matplotlib`)を消す。
 
 ## 3. ログを書く
 
