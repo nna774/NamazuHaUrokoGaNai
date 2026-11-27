@@ -26,6 +26,8 @@
 - 環境変数`AWS_SECRET_ACCESS_KEY`は、クラウド環境の設定に名前だけ登録されている。セッションのプロセスには渡っておらず、
   何にも効いていない。
 
-## 未対応
+## ロール権限の追加
 
-- `namazu-analysis`ロールに`namazu-devices`の読み取りを足す件。ロールは別リポジトリで管理しているので、そちらで扱う。
+- `namazu-analysis`ロールに`namazu-devices`の読み取りを足した（ロールは別リポジトリで管理しており、変更もそちらで行った）。
+  GetItem・Query・Scanが通り、UpdateItemは拒否されることをこのセッションで確認した。これで事後解析中に欠測の有無を確認できる。
+- ロールの元になるIAMユーザー`claude-cloud`は、AssumeRole以外が拒否される（S3・DynamoDB・IAMの読み取りで確認）。

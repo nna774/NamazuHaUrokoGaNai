@@ -173,7 +173,7 @@ aws cloudfront create-invalidation \
   本体の`.envrc`を見つけて読む——中身を複製しないので本体の設定を変えれば全worktreeに
   自動で伝播する。書いたら`direnv allow <worktreeのパス>`を忘れずに。
 - **クラウドセッション（Claude Code on the web）は別**：`namazu-analysis`ロール（events書き込みまで可、
-  `namazu-devices`不可）、`aws`は`.venv/bin/aws`、`terraform`無し。詳細は
+  `namazu-devices`は読み取りのみ）、`aws`は`.venv/bin/aws`、`terraform`無し。詳細は
   [docs/post_hoc_detection.md](docs/post_hoc_detection.md#クラウドセッションclaude-code-on-the-webから実行する時)。
 
 ## 開発の約束（グローバル設定に加えて）

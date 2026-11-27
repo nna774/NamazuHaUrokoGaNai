@@ -334,10 +334,9 @@ worktreeには`.venv`が無く`terraform output`も通らないことがある�
 
 - **AWSは`namazu-analysis`ロール**（環境のセットアップスクリプトが`~/.aws/config`を書き、
   `AWS_PROFILE=namazu-analysis`になっている）。`namazu-admin`ではない。権限は:
-  - 読める: rawバケットの`raw/`、DynamoDB `namazu-events`
+  - 読める: rawバケットの`raw/`、DynamoDB `namazu-events`・`namazu-devices`（欠測の有無も確認できる）
   - 書ける: rawバケットの`events/`、DynamoDB `namazu-events`（`promote_event.py`・`flag_event.py`が通る）
-  - 拒否される: `events/`以外へのS3書き込み、`s3:ListAllMyBuckets`、DynamoDB `namazu-devices`
-    （欠測の有無はここからは確認できない）
+  - 拒否される: `events/`以外へのS3書き込み、`s3:ListAllMyBuckets`、`namazu-devices`への書き込み
 - **`aws`コマンドはPATHに無い。`.venv/bin/aws`で呼ぶ**（セットアップスクリプトが`.venv`に入れる）。
   Pythonは`.venv/bin/python`。boto3は上のプロファイルをそのまま使う。
 - **`terraform`は無い。** バケット名・テーブル名は環境変数`NAMZ_RAW_BUCKET`/`NAMZ_BUCKET`/`NAMZ_EVENTS_TABLE`
