@@ -286,6 +286,12 @@
   マグニチュード・深さが十分大きければ、`detection_range.md`の回帰表（M7.5=984kmまで）を
   2倍以上超える距離でも検出できることを示す外挿域の実例になった（詳細・図:
   [log/2026-10-16-kamchatka-oki-m6.9-post-hoc-detection.md](log/2026-10-16-kamchatka-oki-m6.9-post-hoc-detection.md)）。
+- **2026-11-20 03:43 新潟県上越地方 M2.4 深さ20km（震源距離51km）**: リアルタイム閾値未達。
+  標準(1-10Hz)ではSTA/LTA 2.15/3.91で、窓平均SNRは約1.0。**2-20Hzで閾値を1.8に下げると、両機のonsetが
+  03:43:47.5に0.13秒差で一致**し、device2にはS-P時間(約6〜7秒)に合う2つ目の山があった。
+  P到達binの機間相関も背景の約5倍。**弱いprobable(warning)**。遠地弱震で効く低帯域とは逆に、
+  近距離の小地震では高めの帯域に信号が残る例（1例のみ。詳細・図:
+  [log/2026-11-27-joetsu-m2.4-post-hoc-detection.md](log/2026-11-27-joetsu-m2.4-post-hoc-detection.md)）。
 
 ## 実務結論
 
